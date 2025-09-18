@@ -27,7 +27,7 @@ The project is in active development. This document describes the planned capabi
 3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/src`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
-Specific subcommands/flags are still being finalized; expect commands such as `powerhour render /path/to/project`.
+Currently implemented commands cover `init`, `check`, and `status`, with rendering-oriented subcommands to follow.
 
 ## Input CSV schema
 
@@ -119,5 +119,6 @@ The CLI is being implemented in Go. Planned development workflow:
 - `go build ./...` – compiles every package to confirm the CLI scaffolding and dependencies link cleanly.
 - `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the `.powerhour/` structure plus default CSV/YAML and logging the run.
 - `go run ./cmd/powerhour check --project sample_project` – exercises configuration loading, external tool probes, and emits the expected JSON summary.
+- `go run ./cmd/powerhour status --project sample_project` – parses `powerhour.csv`, prints a formatted table, and reports validation issues (add `--json` for machine-readable output).
 
 Contributions, issue reports, and feature ideas are welcome as the Go implementation takes shape.
