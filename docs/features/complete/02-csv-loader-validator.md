@@ -13,7 +13,7 @@ Tasks
 - pkg/csvplan:
   - Load(path) ([]Row, error) returning normalized rows with Index.
   - Validate with aggregated errors.
-- Command: powerhour plan show → print table.
+- Command: powerhour status → print table or JSON summary.
 
 Acceptance
 - Errors include row numbers.
