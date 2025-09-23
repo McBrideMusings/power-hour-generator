@@ -2,7 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,12 +14,16 @@ import (
 	"powerhour/internal/tools"
 )
 
+var checkStrict bool
+
 func newCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Check external tool availability",
 		RunE:  runCheck,
 	}
+
+	cmd.Flags().BoolVar(&checkStrict, "strict", false, "fail when required tools are missing or outdated")
 
 	return cmd
 }
@@ -53,17 +59,27 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 	}
 	logger.Printf("loaded config version=%d", cfg.Version)
 
-	toolInfo := tools.Probe(nil)
-	for name, info := range toolInfo {
-		logger.Printf("tool %s: available=%v version=%s error=%s", name, info.Available, info.Version, info.Error)
+	statuses, err := tools.Detect(nil)
+	if err != nil {
+		return err
+	}
+
+	for _, st := range statuses {
+		logger.Printf("tool %s: source=%s version=%s satisfied=%v error=%s", st.Tool, st.Source, st.Version, st.Satisfied, st.Error)
+	}
+
+	if checkStrict {
+		if err := ensureStrict(statuses); err != nil {
+			return err
+		}
 	}
 
 	payload := struct {
-		Project string                    `json:"project"`
-		Tools   map[string]tools.ToolInfo `json:"tools"`
+		Project string         `json:"project"`
+		Tools   []tools.Status `json:"tools"`
 	}{
 		Project: pp.Root,
-		Tools:   toolInfo,
+		Tools:   statuses,
 	}
 
 	var data []byte
@@ -78,4 +94,22 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 
 	cmd.Println(string(data))
 	return nil
+}
+
+func ensureStrict(statuses []tools.Status) error {
+	var failures []string
+	for _, st := range statuses {
+		if st.Satisfied {
+			continue
+		}
+		msg := st.Tool
+		if st.Error != "" {
+			msg = fmt.Sprintf("%s (%s)", st.Tool, st.Error)
+		}
+		failures = append(failures, msg)
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return errors.New("tool check failed: " + strings.Join(failures, ", "))
 }
