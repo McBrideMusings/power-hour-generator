@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -14,6 +15,15 @@ type Config struct {
 	Video    VideoConfig    `yaml:"video"`
 	Audio    AudioConfig    `yaml:"audio"`
 	Overlays OverlaysConfig `yaml:"overlays"`
+	Tools    ToolPins       `yaml:"tools"`
+}
+
+// ToolPins captures optional version pinning for managed external tools.
+type ToolPins map[string]ToolPin
+
+// ToolPin represents overrides for an individual tool.
+type ToolPin struct {
+	Version string `yaml:"version"`
 }
 
 // VideoConfig contains video sizing and framerate information.
@@ -99,6 +109,7 @@ func Default() Config {
 				Persistent: boolPtr(true),
 			},
 		},
+		Tools: ToolPins{},
 	}
 }
 
@@ -127,6 +138,10 @@ func Load(path string) (Config, error) {
 // YAML omits them.
 func (c *Config) ApplyDefaults() {
 	defaults := Default()
+
+	if c.Tools == nil {
+		c.Tools = ToolPins{}
+	}
 
 	if c.Version == 0 {
 		c.Version = defaults.Version
@@ -188,6 +203,17 @@ func (c *Config) ApplyDefaults() {
 	if c.Overlays.IndexBadge.Persistent == nil {
 		c.Overlays.IndexBadge.Persistent = boolPtr(true)
 	}
+}
+
+// ToolVersion returns the pinned version for a given tool name when defined.
+func (c Config) ToolVersion(tool string) string {
+	if c.Tools == nil {
+		return ""
+	}
+	if pin, ok := c.Tools[tool]; ok {
+		return strings.TrimSpace(pin.Version)
+	}
+	return ""
 }
 
 // Marshal returns the YAML encoding of the configuration.
