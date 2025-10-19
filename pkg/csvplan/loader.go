@@ -12,7 +12,73 @@ import (
 	"time"
 )
 
-var requiredHeaders = []string{"title", "artist", "start_time", "duration", "name", "link"}
+var (
+	canonicalHeaders = []string{"title", "artist", "start_time", "duration", "name", "link"}
+	requiredHeaders  = []string{"title", "artist", "start_time", "link"}
+)
+
+var requiredHeaderSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(requiredHeaders))
+	for _, name := range requiredHeaders {
+		m[name] = struct{}{}
+	}
+	return m
+}()
+
+// Options controls optional behaviors when loading a CSV plan.
+type Options struct {
+	HeaderAliases   map[string][]string
+	DefaultDuration int
+}
+
+type headerResolver struct {
+	aliases map[string]string
+}
+
+func newHeaderResolver(opts Options) headerResolver {
+	lookup := make(map[string]string, len(canonicalHeaders))
+	for _, canonical := range canonicalHeaders {
+		name := normalizeHeader(canonical)
+		if name == "" {
+			continue
+		}
+		lookup[name] = name
+	}
+
+	for canonical, values := range opts.HeaderAliases {
+		target := normalizeHeader(canonical)
+		if target == "" {
+			continue
+		}
+		if _, ok := lookup[target]; !ok {
+			// Only allow aliases for known required headers to avoid surprising remaps.
+			continue
+		}
+		for _, alias := range values {
+			if alias == "" {
+				continue
+			}
+			name := normalizeHeader(alias)
+			if name == "" {
+				continue
+			}
+			if existing, ok := lookup[name]; ok && existing != target {
+				// Avoid overriding a different canonical field; keep the first mapping.
+				continue
+			}
+			lookup[name] = target
+		}
+	}
+
+	return headerResolver{aliases: lookup}
+}
+
+func (r headerResolver) canonical(name string) string {
+	if canonical, ok := r.aliases[name]; ok {
+		return canonical
+	}
+	return name
+}
 
 // Row represents a validated entry from the powerhour plan file.
 type Row struct {
@@ -31,6 +97,15 @@ type Row struct {
 // and still include any successfully parsed rows to allow callers to continue working
 // with the data.
 func Load(path string) ([]Row, error) {
+	return load(path, Options{})
+}
+
+// LoadWithOptions applies custom loader options when parsing the file.
+func LoadWithOptions(path string, opts Options) ([]Row, error) {
+	return load(path, opts)
+}
+
+func load(path string, opts Options) ([]Row, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -49,10 +124,16 @@ func Load(path string) ([]Row, error) {
 	reader.Comma = comma
 	reader.FieldsPerRecord = -1
 
+	if opts.DefaultDuration <= 0 {
+		opts.DefaultDuration = 60
+	}
+
 	var (
 		rows      []Row
 		errs      ValidationErrors
 		headerMap map[string]int
+		maxFields int
+		resolver  = newHeaderResolver(opts)
 		line      = 0
 	)
 
@@ -66,13 +147,22 @@ func Load(path string) ([]Row, error) {
 		}
 		line++
 
+		record = trimTrailingFields(record)
+
 		if line == 1 {
-			headerMap, err = buildHeaderMap(record)
+			headerMap, err = buildHeaderMap(record, resolver)
 			if err != nil {
 				return nil, err
 			}
+			maxFields = requiredFieldSpan(headerMap)
 			continue
 		}
+
+		if maxFields > 0 && len(record) > maxFields {
+			record = record[:maxFields]
+		}
+
+		record = trimTrailingFields(record)
 
 		if isEmptyRecord(record) {
 			continue
@@ -80,7 +170,7 @@ func Load(path string) ([]Row, error) {
 
 		rowIndex := len(rows) + 1
 		csvLine := line
-		row, rowErrs := parseRecord(record, headerMap, rowIndex, csvLine)
+		row, rowErrs := parseRecord(record, headerMap, rowIndex, csvLine, opts)
 		if len(rowErrs) > 0 {
 			errs = append(errs, rowErrs...)
 		}
@@ -128,7 +218,7 @@ func detectDelimiter(data []byte) (rune, error) {
 	return 0, errors.New("unable to detect delimiter (expected comma or tab)")
 }
 
-func buildHeaderMap(header []string) (map[string]int, error) {
+func buildHeaderMap(header []string, resolver headerResolver) (map[string]int, error) {
 	if len(header) == 0 {
 		return nil, errors.New("header row is empty")
 	}
@@ -136,6 +226,13 @@ func buildHeaderMap(header []string) (map[string]int, error) {
 	headerMap := make(map[string]int, len(header))
 	for idx, raw := range header {
 		name := normalizeHeader(raw)
+		if name == "" {
+			continue
+		}
+		name = resolver.canonical(name)
+		if name == "" {
+			continue
+		}
 		if _, exists := headerMap[name]; exists {
 			return nil, fmt.Errorf("duplicate header: %s", name)
 		}
@@ -156,7 +253,19 @@ func normalizeHeader(value string) string {
 	if strings.HasPrefix(value, "\ufeff") {
 		value = strings.TrimPrefix(value, "\ufeff")
 	}
-	return strings.ToLower(value)
+	value = strings.ToLower(value)
+	replacer := strings.NewReplacer(
+		" ", "_",
+		"-", "_",
+		".", "_",
+		"/", "_",
+	)
+	value = replacer.Replace(value)
+	value = strings.Trim(value, "_")
+	for strings.Contains(value, "__") {
+		value = strings.ReplaceAll(value, "__", "_")
+	}
+	return value
 }
 
 func isEmptyRecord(record []string) bool {
@@ -171,7 +280,7 @@ func isEmptyRecord(record []string) bool {
 	return true
 }
 
-func parseRecord(record []string, header map[string]int, index, line int) (Row, []ValidationError) {
+func parseRecord(record []string, header map[string]int, index, line int, opts Options) (Row, []ValidationError) {
 	var errs []ValidationError
 
 	get := func(field string) string {
@@ -180,7 +289,9 @@ func parseRecord(record []string, header map[string]int, index, line int) (Row, 
 			return ""
 		}
 		if pos >= len(record) {
-			errs = append(errs, ValidationError{Line: line, Field: field, Message: "missing value"})
+			if _, required := requiredHeaderSet[field]; required {
+				errs = append(errs, ValidationError{Line: line, Field: field, Message: "missing value"})
+			}
 			return ""
 		}
 		value := strings.TrimSpace(record[pos])
@@ -213,19 +324,27 @@ func parseRecord(record []string, header map[string]int, index, line int) (Row, 
 		}
 	}
 
-	durationRaw := get("duration")
-	durationSeconds := 0
-	if durationRaw == "" {
-		errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration is required"})
-	} else {
-		value, err := strconv.Atoi(durationRaw)
-		if err != nil {
-			errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be an integer"})
-		} else if value <= 0 {
-			errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be greater than 0"})
-		} else {
-			durationSeconds = value
+	durationSeconds := opts.DefaultDuration
+	if durationSeconds <= 0 {
+		durationSeconds = 60
+	}
+
+	if _, hasDuration := header["duration"]; hasDuration {
+		durationRaw := get("duration")
+		if strings.TrimSpace(durationRaw) != "" {
+			value, err := strconv.Atoi(durationRaw)
+			if err != nil {
+				errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be an integer"})
+			} else if value <= 0 {
+				errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be greater than 0"})
+			} else {
+				durationSeconds = value
+			}
 		}
+	}
+
+	if durationSeconds <= 0 {
+		errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be greater than 0"})
 	}
 
 	name := get("name")
@@ -246,6 +365,28 @@ func parseRecord(record []string, header map[string]int, index, line int) (Row, 
 	}
 
 	return row, errs
+}
+
+func trimTrailingFields(record []string) []string {
+	end := len(record)
+	for end > 0 {
+		if strings.TrimSpace(record[end-1]) == "" {
+			end--
+			continue
+		}
+		break
+	}
+	return record[:end]
+}
+
+func requiredFieldSpan(header map[string]int) int {
+	maxIdx := -1
+	for _, name := range canonicalHeaders {
+		if idx, ok := header[name]; ok && idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+	return maxIdx + 1
 }
 
 func parseStartTime(value string) (time.Duration, error) {

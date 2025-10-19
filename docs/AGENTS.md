@@ -13,7 +13,7 @@ Columns:
 - title (string) – Song/video title.
 - artist (string) – Artist.
 - start_time (string) – H:MM:SS[.ms] or M:SS[.ms].
-- duration (int) – Duration in seconds.
+- duration (int) – Duration in seconds (optional; falls back to the plan default, 60s unless overridden).
 - name (string) – Optional end credit text.
 - link (string) – URL or local path to source media.
 

@@ -69,7 +69,11 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	rows, err := csvplan.Load(pp.CSVFile)
+	planOpts := csvplan.Options{
+		HeaderAliases:   cfg.HeaderAliases(),
+		DefaultDuration: cfg.PlanDefaultDuration(),
+	}
+	rows, err := csvplan.LoadWithOptions(pp.CSVFile, planOpts)
 	if err != nil {
 		return err
 	}

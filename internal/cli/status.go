@@ -47,7 +47,11 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	rows, loadErr := csvplan.Load(pp.CSVFile)
+	opts := csvplan.Options{
+		HeaderAliases:   cfg.HeaderAliases(),
+		DefaultDuration: cfg.PlanDefaultDuration(),
+	}
+	rows, loadErr := csvplan.LoadWithOptions(pp.CSVFile, opts)
 	var validationErrs csvplan.ValidationErrors
 	if loadErr != nil {
 		if ve, ok := loadErr.(csvplan.ValidationErrors); ok {

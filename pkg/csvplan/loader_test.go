@@ -121,3 +121,156 @@ func TestLoadAggregatesErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadTrimsTrailingColumns(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plan.tsv")
+	data := "Title\tArtist\tStart Time\tDuration\tName\tLink\t\t\n" +
+		"Famous\tKanye West\t0:05\t60\tFriend\thttps://example.com/watch?v=1\tThis is a note\thttps://alt.example.com\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rows, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	row := rows[0]
+	if row.DurationSeconds != 60 {
+		t.Fatalf("unexpected duration: got %d", row.DurationSeconds)
+	}
+	if row.Link != "https://example.com/watch?v=1" {
+		t.Fatalf("unexpected link: %q", row.Link)
+	}
+}
+
+func TestLoadWithHeaderAliases(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "aliases.csv")
+	data := "Song Title,Performer,Start,Length,Credited As,URL\n" +
+		"Runaway,Kanye West,0:10,60,Guest,https://example.com/watch?v=2\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	opts := Options{
+		HeaderAliases: map[string][]string{
+			"title":      {"Song Title"},
+			"artist":     {"Performer"},
+			"start_time": {"Start"},
+			"duration":   {"Length"},
+			"name":       {"Credited As"},
+			"link":       {"URL"},
+		},
+	}
+
+	rows, err := LoadWithOptions(path, opts)
+	if err != nil {
+		t.Fatalf("LoadWithOptions returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	row := rows[0]
+	if row.Title != "Runaway" {
+		t.Fatalf("unexpected title: %q", row.Title)
+	}
+	if row.Artist != "Kanye West" {
+		t.Fatalf("unexpected artist: %q", row.Artist)
+	}
+	if row.DurationSeconds != 60 {
+		t.Fatalf("unexpected duration: got %d", row.DurationSeconds)
+	}
+	if row.Link != "https://example.com/watch?v=2" {
+		t.Fatalf("unexpected link: %q", row.Link)
+	}
+}
+
+func TestLoadDefaultsDurationWhenHeaderMissing(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "missing_duration.csv")
+	data := "title,artist,start_time,name,link\n" +
+		"Everlong,Foo Fighters,0:15,Pat,https://example.com/watch?v=3\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	opts := Options{DefaultDuration: 75}
+	rows, err := LoadWithOptions(path, opts)
+	if err != nil {
+		t.Fatalf("LoadWithOptions returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].DurationSeconds != 75 {
+		t.Fatalf("expected default duration 75, got %d", rows[0].DurationSeconds)
+	}
+}
+
+func TestLoadUsesDefaultDurationWhenBlank(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "blank_duration.csv")
+	data := "title,artist,start_time,duration,name,link\n" +
+		"Misery Business,Paramore,0:20,,Friend,https://example.com/watch?v=4\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	opts := Options{DefaultDuration: 90}
+	rows, err := LoadWithOptions(path, opts)
+	if err != nil {
+		t.Fatalf("LoadWithOptions returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].DurationSeconds != 90 {
+		t.Fatalf("expected fallback duration 90, got %d", rows[0].DurationSeconds)
+	}
+}
+
+func TestLoadDefaultsToSixtySecondsWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "default_sixty.csv")
+	data := "title,artist,start_time,name,link\n" +
+		"Harder Better Faster Stronger,Daft Punk,0:30,Pat,https://example.com/watch?v=5\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rows, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].DurationSeconds != 60 {
+		t.Fatalf("expected default duration 60, got %d", rows[0].DurationSeconds)
+	}
+}
+
+func TestLoadAllowsMissingNameHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no_name.csv")
+	data := "title,artist,start_time,link\n" +
+		"Destroyed By Hippie Powers,Car Seat Headrest,0:45,https://example.com/watch?v=6\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rows, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Name != "" {
+		t.Fatalf("expected empty name, got %q", rows[0].Name)
+	}
+}
