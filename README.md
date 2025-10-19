@@ -105,6 +105,11 @@ overlays:
 files:
   plan: powerhour.csv
   cookies: cookies.txt
+plan:
+  default_duration_s: 60
+  headers:
+    duration: ["length"]
+    start_time: ["start"]
 
 tools:
   yt-dlp:
@@ -112,6 +117,8 @@ tools:
 ```
 
 Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
+
+Provide alternate column names under `plan.headers` when your CSV uses friendly titles (e.g., map `duration` to accept `length`). Each canonical field can list multiple acceptable header strings; when omitted, the loader falls back to the standard schema. The `plan.default_duration_s` value supplies a project-wide fallback (default 60 seconds) that applies when the `duration` column is absent or empty, while per-row values still override it when present.
 
 Set explicit tool requirements under the optional `tools` block. Provide a concrete version string or use the keyword `latest` to enforce the most recent release when running checks or installs.
 

@@ -15,6 +15,7 @@ type Config struct {
 	Video    VideoConfig    `yaml:"video"`
 	Audio    AudioConfig    `yaml:"audio"`
 	Overlays OverlaysConfig `yaml:"overlays"`
+	Plan     PlanConfig     `yaml:"plan"`
 	Files    FileOverrides  `yaml:"files"`
 	Tools    ToolPins       `yaml:"tools"`
 }
@@ -74,6 +75,12 @@ type FileOverrides struct {
 	Cookies string `yaml:"cookies"`
 }
 
+// PlanConfig captures plan-specific overrides such as alternate headers.
+type PlanConfig struct {
+	Headers            map[string][]string `yaml:"headers"`
+	DefaultDurationSec int                 `yaml:"default_duration_s"`
+}
+
 // PersistentValue returns the effective persistent flag applying defaults.
 func (o IndexBadgeOverlay) PersistentValue() bool {
 	if o.Persistent == nil {
@@ -118,6 +125,9 @@ func Default() Config {
 			},
 		},
 		Files: FileOverrides{},
+		Plan: PlanConfig{
+			DefaultDurationSec: 60,
+		},
 		Tools: ToolPins{},
 	}
 }
@@ -212,6 +222,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Overlays.IndexBadge.Persistent == nil {
 		c.Overlays.IndexBadge.Persistent = boolPtr(true)
 	}
+	if c.Plan.DefaultDurationSec <= 0 {
+		c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
+	}
 }
 
 // ToolVersion returns the pinned version for a given tool name when defined.
@@ -234,6 +247,46 @@ func (c Config) ToolMinimum(tool string) string {
 		return strings.TrimSpace(pin.MinimumVersion)
 	}
 	return ""
+}
+
+// PlanDefaultDuration returns the default clip duration in seconds, falling back to 60.
+func (c Config) PlanDefaultDuration() int {
+	if c.Plan.DefaultDurationSec <= 0 {
+		return 60
+	}
+	return c.Plan.DefaultDurationSec
+}
+
+// HeaderAliases returns normalized header alias definitions for the plan loader.
+func (c Config) HeaderAliases() map[string][]string {
+	if len(c.Plan.Headers) == 0 {
+		return nil
+	}
+
+	aliases := make(map[string][]string, len(c.Plan.Headers))
+	for key, values := range c.Plan.Headers {
+		canonical := normalizePlanHeaderKey(key)
+		if canonical == "" {
+			continue
+		}
+		var cleaned []string
+		for _, alias := range values {
+			alias = strings.TrimSpace(alias)
+			if alias == "" {
+				continue
+			}
+			cleaned = append(cleaned, alias)
+		}
+		if len(cleaned) == 0 {
+			continue
+		}
+		aliases[canonical] = cleaned
+	}
+
+	if len(aliases) == 0 {
+		return nil
+	}
+	return aliases
 }
 
 // PlanFile returns the trimmed plan file override when provided.
@@ -274,4 +327,24 @@ func (c Config) Marshal() ([]byte, error) {
 
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+func normalizePlanHeaderKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.ToLower(value)
+	replacer := strings.NewReplacer(
+		" ", "_",
+		"-", "_",
+		".", "_",
+		"/", "_",
+	)
+	value = replacer.Replace(value)
+	value = strings.Trim(value, "_")
+	for strings.Contains(value, "__") {
+		value = strings.ReplaceAll(value, "__", "_")
+	}
+	return value
 }
