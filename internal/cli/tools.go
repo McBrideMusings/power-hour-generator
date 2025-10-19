@@ -11,6 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"powerhour/internal/config"
+	"powerhour/internal/paths"
 	"powerhour/internal/tools"
 )
 
@@ -41,7 +43,16 @@ func newToolsListCmd() *cobra.Command {
 }
 
 func runToolsList(cmd *cobra.Command, _ []string) error {
-	statuses, err := tools.Detect(cmd.Context())
+	pp, err := paths.Resolve(projectDir)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(pp.ConfigFile)
+	if err != nil {
+		return err
+	}
+	ctx := tools.WithMinimums(cmd.Context(), cfg.ToolMinimums())
+	statuses, err := tools.Detect(ctx)
 	if err != nil {
 		return err
 	}
@@ -89,7 +100,16 @@ func runToolsInstall(cmd *cobra.Command, args []string) error {
 		toolsToInstall = []string{target}
 	}
 
-	ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+	pp, err := paths.Resolve(projectDir)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(pp.ConfigFile)
+	if err != nil {
+		return err
+	}
+	baseCtx := tools.WithMinimums(cmd.Context(), cfg.ToolMinimums())
+	ctx, cancel := context.WithTimeout(baseCtx, 10*time.Minute)
 	defer cancel()
 
 	var (

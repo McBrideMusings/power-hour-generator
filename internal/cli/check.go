@@ -59,7 +59,8 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 	}
 	logger.Printf("loaded config version=%d", cfg.Version)
 
-	statuses, err := tools.Detect(nil)
+	detectCtx := tools.WithMinimums(cmd.Context(), cfg.ToolMinimums())
+	statuses, err := tools.Detect(detectCtx)
 	if err != nil {
 		return err
 	}

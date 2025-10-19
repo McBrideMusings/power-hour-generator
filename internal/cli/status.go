@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/pkg/csvplan"
 )
@@ -27,6 +28,12 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	cfg, err := config.Load(pp.ConfigFile)
+	if err != nil {
+		return err
+	}
+	pp = paths.ApplyConfig(pp, cfg)
 
 	exists, err := paths.FileExists(pp.CSVFile)
 	if err != nil {

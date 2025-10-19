@@ -56,7 +56,11 @@ func Detect(ctx context.Context) ([]Status, error) {
 }
 
 func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (Status, ManifestEntry, bool) {
-	status := Status{Tool: def.Name, Minimum: def.MinimumVersion, Paths: map[string]string{}}
+	minVersion, minNotes := resolveMinimumVersion(ctx, def)
+	status := Status{Tool: def.Name, Minimum: minVersion, Paths: map[string]string{}}
+	if len(minNotes) > 0 {
+		status.Notes = append(status.Notes, minNotes...)
+	}
 	dirty := false
 
 	// Validate manifest entry if present.
@@ -70,9 +74,9 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 				status.Source = entry.Source
 				status.Checksum = entry.Checksum
 				status.InstalledAt = entry.InstalledAt
-				status.Satisfied = meetsMinimum(version, def.MinimumVersion)
+				status.Satisfied = meetsMinimum(version, status.Minimum)
 				if !status.Satisfied {
-					status.Error = fmt.Sprintf("version %s below minimum %s", version, def.MinimumVersion)
+					status.Error = fmt.Sprintf("version %s below minimum %s", version, status.Minimum)
 				}
 				return status, entry, false
 			}
@@ -89,9 +93,9 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 			status.Path = cachePaths[def.Binaries[0].ID]
 			status.Paths = cachePaths
 			status.Source = SourceCache
-			status.Satisfied = meetsMinimum(version, def.MinimumVersion)
+			status.Satisfied = meetsMinimum(version, status.Minimum)
 			if !status.Satisfied {
-				status.Error = fmt.Sprintf("version %s below minimum %s", version, def.MinimumVersion)
+				status.Error = fmt.Sprintf("version %s below minimum %s", version, status.Minimum)
 			}
 
 			checksum, csErr := computeChecksum(cachePaths[def.Binaries[0].ID])
@@ -139,9 +143,9 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 	status.Path = systemPaths[def.Binaries[0].ID]
 	status.Paths = systemPaths
 	status.Source = SourceSystem
-	status.Satisfied = meetsMinimum(version, def.MinimumVersion)
+	status.Satisfied = meetsMinimum(version, status.Minimum)
 	if !status.Satisfied {
-		status.Error = fmt.Sprintf("version %s below minimum %s", version, def.MinimumVersion)
+		status.Error = fmt.Sprintf("version %s below minimum %s", version, status.Minimum)
 	}
 
 	newEntry := ManifestEntry{
