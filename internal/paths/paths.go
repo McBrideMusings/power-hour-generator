@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"powerhour/internal/config"
 )
 
 // ProjectPaths captures canonical locations for a powerhour project.
@@ -11,6 +13,7 @@ type ProjectPaths struct {
 	Root        string
 	ConfigFile  string
 	CSVFile     string
+	CookiesFile string
 	MetaDir     string
 	SrcDir      string
 	SegmentsDir string
@@ -44,12 +47,30 @@ func newProjectPaths(root string) ProjectPaths {
 		Root:        root,
 		ConfigFile:  filepath.Join(root, "powerhour.yaml"),
 		CSVFile:     filepath.Join(root, "powerhour.csv"),
+		CookiesFile: filepath.Join(root, "cookies.txt"),
 		MetaDir:     metaDir,
 		SrcDir:      filepath.Join(metaDir, "src"),
 		SegmentsDir: filepath.Join(metaDir, "segments"),
 		LogsDir:     filepath.Join(metaDir, "logs"),
 		IndexFile:   filepath.Join(metaDir, "index.json"),
 	}
+}
+
+func ApplyConfig(pp ProjectPaths, cfg config.Config) ProjectPaths {
+	if plan := cfg.PlanFile(); plan != "" {
+		pp.CSVFile = resolveProjectPath(pp.Root, plan)
+	}
+	if cookies := cfg.CookiesFile(); cookies != "" {
+		pp.CookiesFile = resolveProjectPath(pp.Root, cookies)
+	}
+	return pp
+}
+
+func resolveProjectPath(root, value string) string {
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	return filepath.Join(root, value)
 }
 
 // EnsureRoot makes sure the project root exists on disk.

@@ -27,7 +27,18 @@ The project is in active development. This document describes the planned capabi
 3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/src`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
-Currently implemented commands cover `init`, `check`, and `status`, with rendering-oriented subcommands to follow.
+Currently implemented commands cover project scaffolding, validation, cache population, and tool management, with rendering-oriented subcommands to follow.
+
+### CLI commands
+
+- `powerhour init --project <dir>` – create the project directory, starter CSV, and default YAML.
+- `powerhour check --project <dir> [--strict]` – verify configuration and external tool availability (fails on missing tools when `--strict` is set).
+- `powerhour status --project <dir> [--json]` – print the parsed song plan and any validation issues.
+- `powerhour fetch --project <dir> [--force] [--reprobe] [--json]` – download or copy sources into the cache and refresh probe metadata.
+- `powerhour tools list [--json]` – report resolved tool versions and locations.
+- `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
+
+The global `--json` flag applies to every command for machine-readable output when supported.
 
 ## Input CSV schema
 
@@ -91,7 +102,20 @@ overlays:
   index_badge:
     template: "{index}"
     persistent: true
+files:
+  plan: powerhour.csv
+  cookies: cookies.txt
+
+tools:
+  yt-dlp:
+    minimum_version: latest
 ```
+
+Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
+
+Set explicit tool requirements under the optional `tools` block. Provide a concrete version string or use the keyword `latest` to enforce the most recent release when running checks or installs.
+
+To refresh cached binaries after tightening a minimum, run `powerhour tools install all --project <project_dir> --force`. Drop `--force` if you only need to install binaries that are currently below the configured threshold.
 
 All fields are optional; missing values fall back to built-in defaults. Templates use brace-delimited tokens that resolve against the clip metadata.
 
@@ -118,7 +142,9 @@ The CLI is being implemented in Go. Planned development workflow:
 - `gofmt -w $(find cmd internal -name '*.go')` – ensures all Go sources stay canonically formatted before builds.
 - `go build ./...` – compiles every package to confirm the CLI scaffolding and dependencies link cleanly.
 - `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the `.powerhour/` structure plus default CSV/YAML and logging the run.
-- `go run ./cmd/powerhour check --project sample_project` – exercises configuration loading, external tool probes, and emits the expected JSON summary.
-- `go run ./cmd/powerhour status --project sample_project` – parses `powerhour.csv`, prints a formatted table, and reports validation issues (add `--json` for machine-readable output).
+- `go run ./cmd/powerhour check --project sample_project --strict` – exercises configuration loading, external tool probes, and fails when required tooling is missing or outdated.
+- `go run ./cmd/powerhour fetch --project sample_project --force --reprobe` – populates the source cache and refreshes probe data for every row.
+- `go run ./cmd/powerhour status --project sample_project --json` – parses `powerhour.csv`, prints the formatted table, and emits machine-readable output for automated checks.
+- `go run ./cmd/powerhour tools list --json` – enumerates resolved tool paths and versions.
 
 Contributions, issue reports, and feature ideas are welcome as the Go implementation takes shape.

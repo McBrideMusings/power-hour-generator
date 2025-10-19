@@ -15,6 +15,7 @@ type Config struct {
 	Video    VideoConfig    `yaml:"video"`
 	Audio    AudioConfig    `yaml:"audio"`
 	Overlays OverlaysConfig `yaml:"overlays"`
+	Files    FileOverrides  `yaml:"files"`
 	Tools    ToolPins       `yaml:"tools"`
 }
 
@@ -23,7 +24,8 @@ type ToolPins map[string]ToolPin
 
 // ToolPin represents overrides for an individual tool.
 type ToolPin struct {
-	Version string `yaml:"version"`
+	Version        string `yaml:"version"`
+	MinimumVersion string `yaml:"minimum_version"`
 }
 
 // VideoConfig contains video sizing and framerate information.
@@ -64,6 +66,12 @@ type TimedTextOverlay struct {
 type IndexBadgeOverlay struct {
 	Template   string `yaml:"template"`
 	Persistent *bool  `yaml:"persistent,omitempty"`
+}
+
+// FileOverrides captures optional alternate project file locations.
+type FileOverrides struct {
+	Plan    string `yaml:"plan"`
+	Cookies string `yaml:"cookies"`
 }
 
 // PersistentValue returns the effective persistent flag applying defaults.
@@ -109,6 +117,7 @@ func Default() Config {
 				Persistent: boolPtr(true),
 			},
 		},
+		Files: FileOverrides{},
 		Tools: ToolPins{},
 	}
 }
@@ -214,6 +223,44 @@ func (c Config) ToolVersion(tool string) string {
 		return strings.TrimSpace(pin.Version)
 	}
 	return ""
+}
+
+// ToolMinimum returns the minimum version override for a given tool name when defined.
+func (c Config) ToolMinimum(tool string) string {
+	if c.Tools == nil {
+		return ""
+	}
+	if pin, ok := c.Tools[tool]; ok {
+		return strings.TrimSpace(pin.MinimumVersion)
+	}
+	return ""
+}
+
+// PlanFile returns the trimmed plan file override when provided.
+func (c Config) PlanFile() string {
+	return strings.TrimSpace(c.Files.Plan)
+}
+
+// CookiesFile returns the trimmed cookies file override when provided.
+func (c Config) CookiesFile() string {
+	return strings.TrimSpace(c.Files.Cookies)
+}
+
+// ToolMinimums returns a copy of all configured minimum version overrides.
+func (c Config) ToolMinimums() map[string]string {
+	if len(c.Tools) == 0 {
+		return nil
+	}
+	mins := make(map[string]string, len(c.Tools))
+	for name, pin := range c.Tools {
+		if v := strings.TrimSpace(pin.MinimumVersion); v != "" {
+			mins[name] = v
+		}
+	}
+	if len(mins) == 0 {
+		return nil
+	}
+	return mins
 }
 
 // Marshal returns the YAML encoding of the configuration.
