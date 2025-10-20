@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -17,9 +19,10 @@ import (
 )
 
 var (
-	fetchForce   bool
-	fetchReprobe bool
-	fetchIndexes []int
+	fetchForce    bool
+	fetchReprobe  bool
+	fetchDryRun   bool
+	fetchIndexArg []string
 )
 
 var newCacheService = cache.NewService
@@ -33,7 +36,8 @@ func newFetchCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&fetchForce, "force", false, "Re-download all sources even if cached")
 	cmd.Flags().BoolVar(&fetchReprobe, "reprobe", false, "Re-run ffprobe on cached entries")
-	cmd.Flags().IntSliceVar(&fetchIndexes, "index", nil, "Limit fetch to specific 1-based row index (repeat flag for multiple)")
+	cmd.Flags().BoolVar(&fetchDryRun, "dry-run", false, "Preview fetch actions without downloading or copying")
+	cmd.Flags().StringSliceVar(&fetchIndexArg, "index", nil, "Limit fetch to specific 1-based row index or range like 5-10 (repeat flag for multiple)")
 
 	return cmd
 }
@@ -81,8 +85,16 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if len(fetchIndexes) > 0 {
-		rows, err = filterRowsByIndex(rows, fetchIndexes)
+	indexes := []int(nil)
+	if len(fetchIndexArg) > 0 {
+		indexes, err = parseIndexArgs(fetchIndexArg)
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(indexes) > 0 {
+		rows, err = filterRowsByIndex(rows, indexes)
 		if err != nil {
 			return err
 		}
@@ -100,7 +112,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	}
 	svc.SetLogOutput(cmd.ErrOrStderr())
 
-	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe}
+	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe, DryRun: fetchDryRun}
 
 	outcomes := make([]fetchRowResult, 0, len(rows))
 	counts := fetchCounts{}
@@ -109,7 +121,17 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	for _, row := range rows {
 		result, err := svc.Resolve(ctx, idx, row, opts)
 		if err != nil {
-			return err
+			counts.Failed++
+			logger.Printf("fetch row %03d %q failed: %v", row.Index, row.Title, err)
+			fmt.Fprintf(cmd.ErrOrStderr(), "fetch row %03d %q failed: %v\n", row.Index, row.Title, err)
+			outcomes = append(outcomes, fetchRowResult{
+				Index:  row.Index,
+				Title:  row.Title,
+				Status: "error",
+				Source: row.Link,
+				Error:  err.Error(),
+			})
+			continue
 		}
 
 		switch result.Status {
@@ -117,6 +139,8 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 			counts.Downloaded++
 		case cache.ResolveStatusCopied:
 			counts.Copied++
+		case cache.ResolveStatusWouldDownload, cache.ResolveStatusWouldCopy:
+			counts.Pending++
 		default:
 			counts.Cached++
 		}
@@ -149,7 +173,53 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	}
 
 	writeFetchTable(cmd, pp.Root, outcomes, counts)
+	if counts.Failed > 0 {
+		writeFetchFailures(cmd, outcomes)
+	}
 	return nil
+}
+
+func parseIndexArgs(args []string) ([]int, error) {
+	indexes := make([]int, 0)
+	for _, raw := range args {
+		token := strings.TrimSpace(raw)
+		if token == "" {
+			continue
+		}
+		if strings.Contains(token, "-") {
+			parts := strings.SplitN(token, "-", 2)
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("invalid index range %q", token)
+			}
+			start, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid index %q: %w", parts[0], err)
+			}
+			end, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err != nil {
+				return nil, fmt.Errorf("invalid index %q: %w", parts[1], err)
+			}
+			if start <= 0 || end <= 0 {
+				return nil, fmt.Errorf("index values must be greater than zero: %d-%d", start, end)
+			}
+			if end < start {
+				return nil, fmt.Errorf("index range start greater than end: %d-%d", start, end)
+			}
+			for i := start; i <= end; i++ {
+				indexes = append(indexes, i)
+			}
+			continue
+		}
+		val, err := strconv.Atoi(token)
+		if err != nil {
+			return nil, fmt.Errorf("invalid index %q: %w", token, err)
+		}
+		if val <= 0 {
+			return nil, fmt.Errorf("index must be greater than zero: %d", val)
+		}
+		indexes = append(indexes, val)
+	}
+	return indexes, nil
 }
 
 func filterRowsByIndex(rows []csvplan.Row, indexes []int) ([]csvplan.Row, error) {
@@ -207,20 +277,21 @@ func writeFetchTable(cmd *cobra.Command, project string, rows []fetchRowResult, 
 	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "INDEX\tSTATUS\tBYTES\tPROBED\tPATH")
+	fmt.Fprintln(w, "INDEX\tSTATUS\tBYTES\tPROBED\tPATH\tERROR")
 	for _, row := range rows {
-		fmt.Fprintf(w, "%03d\t%s\t%d\t%v\t%s\n",
+		fmt.Fprintf(w, "%03d\t%s\t%d\t%v\t%s\t%s\n",
 			row.Index,
 			row.Status,
 			row.SizeBytes,
 			row.Probed,
 			row.CachedPath,
+			row.Error,
 		)
 	}
 	w.Flush()
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Downloaded: %d, Copied: %d, Cached: %d, Probed: %d\n",
-		counts.Downloaded, counts.Copied, counts.Cached, counts.Probed,
+	fmt.Fprintf(cmd.OutOrStdout(), "Downloaded: %d, Copied: %d, Cached: %d, Pending: %d, Probed: %d, Failed: %d\n",
+		counts.Downloaded, counts.Copied, counts.Cached, counts.Pending, counts.Probed, counts.Failed,
 	)
 }
 
@@ -232,11 +303,25 @@ type fetchRowResult struct {
 	Source     string `json:"source"`
 	SizeBytes  int64  `json:"size_bytes"`
 	Probed     bool   `json:"probed"`
+	Error      string `json:"error,omitempty"`
 }
 
 type fetchCounts struct {
 	Downloaded int `json:"downloaded"`
 	Copied     int `json:"copied"`
 	Cached     int `json:"cached"`
+	Pending    int `json:"pending"`
 	Probed     int `json:"probed"`
+	Failed     int `json:"failed"`
+}
+
+func writeFetchFailures(cmd *cobra.Command, rows []fetchRowResult) {
+	fmt.Fprintln(cmd.OutOrStdout())
+	fmt.Fprintln(cmd.OutOrStdout(), "Failures:")
+	for _, row := range rows {
+		if row.Status != "error" {
+			continue
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "  %03d %s: %s\n", row.Index, row.Title, row.Error)
+	}
 }

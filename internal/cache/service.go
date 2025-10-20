@@ -50,14 +50,17 @@ type Service struct {
 type ResolveOptions struct {
 	Force   bool
 	Reprobe bool
+	DryRun  bool
 }
 
 type ResolveStatus string
 
 const (
-	ResolveStatusCached     ResolveStatus = "cached"
-	ResolveStatusDownloaded ResolveStatus = "downloaded"
-	ResolveStatusCopied     ResolveStatus = "copied"
+	ResolveStatusCached        ResolveStatus = "cached"
+	ResolveStatusDownloaded    ResolveStatus = "downloaded"
+	ResolveStatusCopied        ResolveStatus = "copied"
+	ResolveStatusWouldDownload ResolveStatus = "would-download"
+	ResolveStatusWouldCopy     ResolveStatus = "would-copy"
 )
 
 type ResolveResult struct {
@@ -187,6 +190,21 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 			result.Status = ResolveStatusCached
 			entry = existing
 		}
+	}
+
+	if opts.DryRun {
+		if !cached {
+			if src.Type == SourceTypeURL {
+				result.Status = ResolveStatusWouldDownload
+			} else {
+				result.Status = ResolveStatusWouldCopy
+			}
+		}
+		result.Entry = entry
+		if result.Status == "" {
+			result.Status = ResolveStatusCached
+		}
+		return result, nil
 	}
 
 	if !cached {
