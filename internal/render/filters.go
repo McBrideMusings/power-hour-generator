@@ -126,61 +126,42 @@ func BuildFFmpegCmd(row csvplan.Row, sourcePath, outputPath, videoFilters, audio
 func buildOverlayFilters(row csvplan.Row, cfg config.Config, clipDuration float64) []string {
 	var filters []string
 
-	beginText := renderOverlayTemplate(cfg.Overlays.BeginText.Template, row)
-	if beginText != "" && cfg.Overlays.BeginText.DurationSec > 0 {
-		start := 0.0
-		end := math.Min(cfg.Overlays.BeginText.DurationSec, clipDuration)
-		if end > start {
-			filters = append(filters, buildDrawText(drawTextOptions{
-				Text:         beginText,
-				Start:        start,
-				End:          end,
-				FadeIn:       cfg.Overlays.BeginText.FadeInSec,
-				FadeOut:      cfg.Overlays.BeginText.FadeOutSec,
-				FontSize:     cfg.Overlays.FontSizeMain,
-				FontFile:     cfg.Overlays.FontFile,
-				FontColor:    cfg.Overlays.Color,
-				OutlineColor: cfg.Overlays.OutlineColor,
-				XExpr:        "40",
-				YExpr:        "h-text_h-40",
-			}))
+	for _, segment := range cfg.Overlays.Segments {
+		if segment.Disabled {
+			continue
 		}
-	}
 
-	endText := renderOverlayTemplate(cfg.Overlays.EndText.Template, row)
-	if endText != "" && cfg.Overlays.EndText.DurationSec > 0 {
-		offset := cfg.Overlays.EndText.OffsetFromEndSec
-		end := math.Max(clipDuration-offset, 0)
-		start := math.Max(end-cfg.Overlays.EndText.DurationSec, 0)
-		if end > start {
-			filters = append(filters, buildDrawText(drawTextOptions{
-				Text:         endText,
-				Start:        start,
-				End:          end,
-				FadeIn:       cfg.Overlays.EndText.FadeInSec,
-				FadeOut:      cfg.Overlays.EndText.FadeOutSec,
-				FontSize:     cfg.Overlays.FontSizeMain,
-				FontFile:     cfg.Overlays.FontFile,
-				FontColor:    cfg.Overlays.Color,
-				OutlineColor: cfg.Overlays.OutlineColor,
-				XExpr:        "40",
-				YExpr:        "h-text_h-40",
-			}))
+		text := renderOverlayTemplate(segment.Template, row)
+		text = applyTextTransform(text, segment.Transform)
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
 		}
-	}
 
-	if badge := renderOverlayTemplate(cfg.Overlays.IndexBadge.Template, row); badge != "" {
+		timing, ok := resolveTiming(segment.Timing, clipDuration)
+		if !ok {
+			continue
+		}
+
+		style := resolveTextStyle(cfg.Overlays.DefaultStyle, segment.Style)
+		position := resolvePosition(segment.Position)
+
 		filters = append(filters, buildDrawText(drawTextOptions{
-			Text:         badge,
-			Start:        0,
-			End:          clipDuration,
-			FontSize:     cfg.Overlays.FontSizeIndex,
-			FontFile:     cfg.Overlays.FontFile,
-			FontColor:    cfg.Overlays.Color,
-			OutlineColor: cfg.Overlays.OutlineColor,
-			XExpr:        "w-text_w-40",
-			YExpr:        "h-text_h-40",
-			Persistent:   cfg.Overlays.IndexBadge.PersistentValue(),
+			Text:          text,
+			Start:         timing.Start,
+			End:           timing.End,
+			FadeIn:        timing.FadeIn,
+			FadeOut:       timing.FadeOut,
+			FontSize:      style.FontSize,
+			FontFile:      style.FontFile,
+			FontColor:     style.FontColor,
+			OutlineColor:  style.OutlineColor,
+			OutlineWidth:  style.OutlineWidth,
+			LineSpacing:   style.LineSpacing,
+			LetterSpacing: style.LetterSpacing,
+			XExpr:         position.X,
+			YExpr:         position.Y,
+			Persistent:    timing.Persistent,
 		}))
 	}
 
@@ -188,18 +169,21 @@ func buildOverlayFilters(row csvplan.Row, cfg config.Config, clipDuration float6
 }
 
 type drawTextOptions struct {
-	Text         string
-	Start        float64
-	End          float64
-	FadeIn       float64
-	FadeOut      float64
-	FontSize     int
-	FontFile     string
-	FontColor    string
-	OutlineColor string
-	XExpr        string
-	YExpr        string
-	Persistent   bool
+	Text          string
+	Start         float64
+	End           float64
+	FadeIn        float64
+	FadeOut       float64
+	FontSize      int
+	FontFile      string
+	FontColor     string
+	OutlineColor  string
+	OutlineWidth  int
+	LineSpacing   int
+	LetterSpacing int
+	XExpr         string
+	YExpr         string
+	Persistent    bool
 }
 
 func buildDrawText(opts drawTextOptions) string {
@@ -208,15 +192,27 @@ func buildDrawText(opts drawTextOptions) string {
 		return ""
 	}
 
+	outlineWidth := opts.OutlineWidth
+	if outlineWidth < 0 {
+		outlineWidth = 0
+	}
+
 	values := []string{
 		fmt.Sprintf("text='%s'", escapeDrawText(opts.Text)),
 		fmt.Sprintf("fontsize=%d", max(opts.FontSize, 12)),
 		fmt.Sprintf("fontcolor=%s", fallback(opts.FontColor, "white")),
 		fmt.Sprintf("bordercolor=%s", fallback(opts.OutlineColor, "black")),
-		"borderw=2",
+		fmt.Sprintf("borderw=%d", outlineWidth),
 		fmt.Sprintf("x=%s", fallback(opts.XExpr, "40")),
 		fmt.Sprintf("y=%s", fallback(opts.YExpr, "h-text_h-40")),
-		"line_spacing=4",
+	}
+
+	if opts.LineSpacing != 0 {
+		values = append(values, fmt.Sprintf("line_spacing=%d", opts.LineSpacing))
+	}
+
+	if opts.LetterSpacing != 0 {
+		values = append(values, fmt.Sprintf("letter_spacing=%d", opts.LetterSpacing))
 	}
 
 	if strings.TrimSpace(opts.FontFile) != "" {
@@ -231,6 +227,244 @@ func buildDrawText(opts drawTextOptions) string {
 	}
 
 	return "drawtext=" + strings.Join(values, ":")
+}
+
+type resolvedTextStyle struct {
+	FontFile      string
+	FontSize      int
+	FontColor     string
+	OutlineColor  string
+	OutlineWidth  int
+	LineSpacing   int
+	LetterSpacing int
+}
+
+type resolvedPosition struct {
+	X string
+	Y string
+}
+
+type resolvedTiming struct {
+	Start      float64
+	End        float64
+	FadeIn     float64
+	FadeOut    float64
+	Persistent bool
+}
+
+func resolveTextStyle(defaults config.TextStyle, override config.TextStyle) resolvedTextStyle {
+	const (
+		baseFontSize     = 42
+		baseOutlineWidth = 2
+		baseLineSpacing  = 4
+	)
+
+	resolved := resolvedTextStyle{
+		FontFile:      strings.TrimSpace(defaults.FontFile),
+		FontColor:     fallback(defaults.FontColor, "white"),
+		OutlineColor:  fallback(defaults.OutlineColor, "black"),
+		OutlineWidth:  baseOutlineWidth,
+		LineSpacing:   baseLineSpacing,
+		LetterSpacing: 0,
+		FontSize:      baseFontSize,
+	}
+
+	if defaults.FontSize != nil && *defaults.FontSize > 0 {
+		resolved.FontSize = *defaults.FontSize
+	}
+	if defaults.OutlineWidth != nil {
+		resolved.OutlineWidth = *defaults.OutlineWidth
+	}
+	if defaults.LineSpacing != nil {
+		resolved.LineSpacing = *defaults.LineSpacing
+	}
+	if defaults.LetterSpacing != nil {
+		resolved.LetterSpacing = *defaults.LetterSpacing
+	}
+
+	if strings.TrimSpace(override.FontFile) != "" {
+		resolved.FontFile = strings.TrimSpace(override.FontFile)
+	}
+	if override.FontSize != nil && *override.FontSize > 0 {
+		resolved.FontSize = *override.FontSize
+	}
+	if strings.TrimSpace(override.FontColor) != "" {
+		resolved.FontColor = override.FontColor
+	}
+	if strings.TrimSpace(override.OutlineColor) != "" {
+		resolved.OutlineColor = override.OutlineColor
+	}
+	if override.OutlineWidth != nil {
+		resolved.OutlineWidth = *override.OutlineWidth
+	}
+	if override.LineSpacing != nil {
+		resolved.LineSpacing = *override.LineSpacing
+	}
+	if override.LetterSpacing != nil {
+		resolved.LetterSpacing = *override.LetterSpacing
+	}
+
+	if strings.TrimSpace(resolved.FontColor) == "" {
+		resolved.FontColor = "white"
+	}
+	if strings.TrimSpace(resolved.OutlineColor) == "" {
+		resolved.OutlineColor = "black"
+	}
+
+	return resolved
+}
+
+func resolvePosition(pos config.PositionSpec) resolvedPosition {
+	x := strings.TrimSpace(pos.XExpr)
+	y := strings.TrimSpace(pos.YExpr)
+
+	origin := strings.ToLower(strings.TrimSpace(pos.Origin))
+	if origin == "" {
+		origin = "bottom-left"
+	}
+
+	if x == "" || y == "" {
+		switch origin {
+		case "bottom-left":
+			if x == "" {
+				x = formatFloat(pos.OffsetX)
+			}
+			if y == "" {
+				y = subtractOffset("h-text_h", pos.OffsetY)
+			}
+		case "bottom-right":
+			if x == "" {
+				x = subtractOffset("w-text_w", pos.OffsetX)
+			}
+			if y == "" {
+				y = subtractOffset("h-text_h", pos.OffsetY)
+			}
+		case "top-left":
+			if x == "" {
+				x = formatFloat(pos.OffsetX)
+			}
+			if y == "" {
+				y = formatFloat(pos.OffsetY)
+			}
+		case "top-right":
+			if x == "" {
+				x = subtractOffset("w-text_w", pos.OffsetX)
+			}
+			if y == "" {
+				y = formatFloat(pos.OffsetY)
+			}
+		case "center":
+			if x == "" {
+				x = addOffset("(w-text_w)/2", pos.OffsetX)
+			}
+			if y == "" {
+				y = addOffset("(h-text_h)/2", pos.OffsetY)
+			}
+		}
+	}
+
+	if strings.TrimSpace(x) == "" {
+		x = "40"
+	}
+	if strings.TrimSpace(y) == "" {
+		y = "h-text_h-40"
+	}
+
+	return resolvedPosition{X: x, Y: y}
+}
+
+func resolveTiming(spec config.TimingSpec, clipDuration float64) (resolvedTiming, bool) {
+	start := resolveStartPoint(spec.Start, clipDuration)
+	end, persistent := resolveEndPoint(spec.End, clipDuration)
+
+	if persistent {
+		if start >= clipDuration {
+			return resolvedTiming{}, false
+		}
+		end = clipDuration
+	}
+
+	start = clamp(start, 0, clipDuration)
+	end = clamp(end, 0, clipDuration)
+
+	if end <= start {
+		return resolvedTiming{}, false
+	}
+
+	fadeIn := clamp(spec.FadeIn, 0, clipDuration)
+	fadeOut := clamp(spec.FadeOut, 0, clipDuration)
+
+	result := resolvedTiming{
+		Start:   start,
+		End:     end,
+		FadeIn:  fadeIn,
+		FadeOut: fadeOut,
+	}
+
+	if persistent && start <= 0 && end >= clipDuration && fadeIn == 0 && fadeOut == 0 {
+		result.Persistent = true
+	}
+
+	return result, true
+}
+
+func resolveStartPoint(point config.TimePointSpec, clipDuration float64) float64 {
+	offset := point.OffsetSec
+	switch strings.ToLower(strings.TrimSpace(point.Type)) {
+	case "from_end":
+		return clipDuration - offset
+	case "absolute":
+		return offset
+	default:
+		return offset
+	}
+}
+
+func resolveEndPoint(point config.TimePointSpec, clipDuration float64) (float64, bool) {
+	offset := point.OffsetSec
+	switch strings.ToLower(strings.TrimSpace(point.Type)) {
+	case "from_end":
+		return clipDuration - offset, false
+	case "absolute":
+		return offset, false
+	case "persistent":
+		return clipDuration, true
+	default:
+		return offset, false
+	}
+}
+
+func applyTextTransform(value, transform string) string {
+	switch strings.ToLower(strings.TrimSpace(transform)) {
+	case "uppercase":
+		return strings.ToUpper(value)
+	case "lowercase":
+		return strings.ToLower(value)
+	default:
+		return value
+	}
+}
+
+func addOffset(base string, offset float64) string {
+	if math.Abs(offset) < 1e-6 {
+		return base
+	}
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("%s%s%s", base, sign, formatFloat(offset))
+}
+
+func subtractOffset(base string, offset float64) string {
+	if math.Abs(offset) < 1e-6 {
+		return base
+	}
+	if offset < 0 {
+		return addOffset(base, -offset)
+	}
+	return fmt.Sprintf("%s-%s", base, formatFloat(offset))
 }
 
 func renderOverlayTemplate(tmpl string, row csvplan.Row) string {

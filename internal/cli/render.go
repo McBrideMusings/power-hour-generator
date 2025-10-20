@@ -19,6 +19,7 @@ import (
 var (
 	renderConcurrency int
 	renderForce       bool
+	renderIndexArg    []string
 )
 
 func newRenderCmd() *cobra.Command {
@@ -35,6 +36,7 @@ func newRenderCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&renderConcurrency, "concurrency", defaultConcurrency, "Concurrent ffmpeg processes")
 	cmd.Flags().BoolVar(&renderForce, "force", false, "Re-render even if segment output already exists")
+	cmd.Flags().StringSliceVar(&renderIndexArg, "index", nil, "Limit render to specific 1-based row index or range like 5-10 (repeat flag for multiple)")
 
 	return cmd
 }
@@ -70,6 +72,11 @@ func runRender(cmd *cobra.Command, _ []string) error {
 		DefaultDuration: cfg.PlanDefaultDuration(),
 	}
 	rows, err := csvplan.LoadWithOptions(pp.CSVFile, planOpts)
+	if err != nil {
+		return err
+	}
+
+	rows, err = filterRowsByIndexArgs(rows, renderIndexArg)
 	if err != nil {
 		return err
 	}

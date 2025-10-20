@@ -52,31 +52,55 @@ type AudioConfig struct {
 	Loudnorm    LoudnormConfig `yaml:"loudnorm"`
 }
 
-// OverlaysConfig groups overlay settings and templates.
+// OverlaysConfig groups overlay styling defaults and individual segments.
 type OverlaysConfig struct {
-	FontFile      string            `yaml:"font_file"`
-	FontSizeMain  int               `yaml:"font_size_main"`
-	FontSizeIndex int               `yaml:"font_size_index"`
-	Color         string            `yaml:"color"`
-	OutlineColor  string            `yaml:"outline_color"`
-	BeginText     TimedTextOverlay  `yaml:"begin_text"`
-	EndText       TimedTextOverlay  `yaml:"end_text"`
-	IndexBadge    IndexBadgeOverlay `yaml:"index_badge"`
+	DefaultStyle TextStyle        `yaml:"default_style"`
+	Segments     []OverlaySegment `yaml:"segments"`
 }
 
-// TimedTextOverlay represents a timed text overlay configuration.
-type TimedTextOverlay struct {
-	Template         string  `yaml:"template"`
-	DurationSec      float64 `yaml:"duration_s"`
-	FadeInSec        float64 `yaml:"fade_in_s"`
-	FadeOutSec       float64 `yaml:"fade_out_s"`
-	OffsetFromEndSec float64 `yaml:"offset_from_end_s"`
+// TextStyle captures font and layout styling options for drawtext overlays.
+type TextStyle struct {
+	FontFile      string `yaml:"font_file"`
+	FontSize      *int   `yaml:"font_size,omitempty"`
+	FontColor     string `yaml:"font_color"`
+	OutlineColor  string `yaml:"outline_color"`
+	OutlineWidth  *int   `yaml:"outline_width,omitempty"`
+	LineSpacing   *int   `yaml:"line_spacing,omitempty"`
+	LetterSpacing *int   `yaml:"letter_spacing,omitempty"`
 }
 
-// IndexBadgeOverlay controls the persistent index badge overlay.
-type IndexBadgeOverlay struct {
-	Template   string `yaml:"template"`
-	Persistent *bool  `yaml:"persistent,omitempty"`
+// OverlaySegment describes a single text overlay instance.
+type OverlaySegment struct {
+	Name      string       `yaml:"name"`
+	Template  string       `yaml:"template"`
+	Transform string       `yaml:"transform"`
+	Disabled  bool         `yaml:"disabled"`
+	Style     TextStyle    `yaml:"style"`
+	Position  PositionSpec `yaml:"position"`
+	Timing    TimingSpec   `yaml:"timing"`
+}
+
+// PositionSpec describes how to place a text overlay on screen.
+type PositionSpec struct {
+	Origin  string  `yaml:"origin"`
+	OffsetX float64 `yaml:"offset_x"`
+	OffsetY float64 `yaml:"offset_y"`
+	XExpr   string  `yaml:"x"`
+	YExpr   string  `yaml:"y"`
+}
+
+// TimingSpec controls when an overlay is visible.
+type TimingSpec struct {
+	Start   TimePointSpec `yaml:"start"`
+	End     TimePointSpec `yaml:"end"`
+	FadeIn  float64       `yaml:"fade_in_s"`
+	FadeOut float64       `yaml:"fade_out_s"`
+}
+
+// TimePointSpec defines a timing anchor relative to the clip.
+type TimePointSpec struct {
+	Type      string  `yaml:"type"`
+	OffsetSec float64 `yaml:"offset_s"`
 }
 
 // OutputConfig captures naming templates for generated assets.
@@ -154,14 +178,6 @@ type PlanConfig struct {
 	DefaultDurationSec int                 `yaml:"default_duration_s"`
 }
 
-// PersistentValue returns the effective persistent flag applying defaults.
-func (o IndexBadgeOverlay) PersistentValue() bool {
-	if o.Persistent == nil {
-		return true
-	}
-	return *o.Persistent
-}
-
 // Default returns the baseline configuration.
 func Default() Config {
 	return Config{
@@ -183,25 +199,104 @@ func Default() Config {
 			},
 		},
 		Overlays: OverlaysConfig{
-			FontFile:      "",
-			FontSizeMain:  42,
-			FontSizeIndex: 36,
-			Color:         "white",
-			OutlineColor:  "black",
-			BeginText: TimedTextOverlay{
-				Template:    "{title} — {artist}",
-				DurationSec: 4.0,
-				FadeInSec:   0.5,
-				FadeOutSec:  0.5,
+			DefaultStyle: TextStyle{
+				FontFile:     "",
+				FontSize:     intPtr(42),
+				FontColor:    "white",
+				OutlineColor: "black",
+				OutlineWidth: intPtr(2),
+				LineSpacing:  intPtr(4),
 			},
-			EndText: TimedTextOverlay{
-				Template:         "{name}",
-				OffsetFromEndSec: 4.0,
-				DurationSec:      4.0,
-			},
-			IndexBadge: IndexBadgeOverlay{
-				Template:   "{index}",
-				Persistent: boolPtr(true),
+			Segments: []OverlaySegment{
+				{
+					Name:     "intro-title",
+					Template: "{title}",
+					Style: TextStyle{
+						FontSize: intPtr(64),
+					},
+					Position: PositionSpec{
+						Origin:  "bottom-left",
+						OffsetX: 40,
+						OffsetY: 220,
+					},
+					Timing: TimingSpec{
+						Start: TimePointSpec{
+							Type:      "from_start",
+							OffsetSec: 0,
+						},
+						End: TimePointSpec{
+							Type:      "from_start",
+							OffsetSec: 4,
+						},
+						FadeIn:  0.5,
+						FadeOut: 0.5,
+					},
+				},
+				{
+					Name:      "intro-artist",
+					Template:  "{artist}",
+					Transform: "uppercase",
+					Style: TextStyle{
+						FontSize: intPtr(32),
+					},
+					Position: PositionSpec{
+						Origin:  "bottom-left",
+						OffsetX: 40,
+						OffsetY: 160,
+					},
+					Timing: TimingSpec{
+						Start: TimePointSpec{
+							Type:      "from_start",
+							OffsetSec: 0,
+						},
+						End: TimePointSpec{
+							Type:      "from_start",
+							OffsetSec: 4,
+						},
+						FadeIn:  0.5,
+						FadeOut: 0.5,
+					},
+				},
+				{
+					Name:     "outro-name",
+					Template: "{name}",
+					Position: PositionSpec{
+						Origin:  "bottom-left",
+						OffsetX: 40,
+						OffsetY: 40,
+					},
+					Timing: TimingSpec{
+						Start: TimePointSpec{
+							Type:      "from_end",
+							OffsetSec: 4,
+						},
+						End: TimePointSpec{
+							Type:      "from_end",
+							OffsetSec: 0,
+						},
+					},
+				},
+				{
+					Name:     "index-badge",
+					Template: "{index}",
+					Style: TextStyle{
+						FontSize: intPtr(140),
+					},
+					Position: PositionSpec{
+						Origin:  "bottom-right",
+						OffsetX: 40,
+						OffsetY: 40,
+					},
+					Timing: TimingSpec{
+						Start: TimePointSpec{
+							Type:      "from_start",
+							OffsetSec: 0,
+						},
+						End: TimePointSpec{
+							Type: "persistent",
+						},
+					},
+				},
 			},
 		},
 		Files: FileOverrides{},
@@ -273,47 +368,9 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Outputs.SegmentTemplate) == "" {
 		c.Outputs.SegmentTemplate = defaults.Outputs.SegmentTemplate
 	}
-	if c.Overlays.FontSizeMain == 0 {
-		c.Overlays.FontSizeMain = defaults.Overlays.FontSizeMain
-	}
-	if c.Overlays.FontSizeIndex == 0 {
-		c.Overlays.FontSizeIndex = defaults.Overlays.FontSizeIndex
-	}
-	if c.Overlays.Color == "" {
-		c.Overlays.Color = defaults.Overlays.Color
-	}
-	if c.Overlays.OutlineColor == "" {
-		c.Overlays.OutlineColor = defaults.Overlays.OutlineColor
-	}
-	if c.Overlays.FontFile == "" {
-		c.Overlays.FontFile = defaults.Overlays.FontFile
-	}
-	if c.Overlays.BeginText.Template == "" {
-		c.Overlays.BeginText.Template = defaults.Overlays.BeginText.Template
-	}
-	if c.Overlays.BeginText.DurationSec == 0 {
-		c.Overlays.BeginText.DurationSec = defaults.Overlays.BeginText.DurationSec
-	}
-	if c.Overlays.BeginText.FadeInSec == 0 {
-		c.Overlays.BeginText.FadeInSec = defaults.Overlays.BeginText.FadeInSec
-	}
-	if c.Overlays.BeginText.FadeOutSec == 0 {
-		c.Overlays.BeginText.FadeOutSec = defaults.Overlays.BeginText.FadeOutSec
-	}
-	if c.Overlays.EndText.Template == "" {
-		c.Overlays.EndText.Template = defaults.Overlays.EndText.Template
-	}
-	if c.Overlays.EndText.DurationSec == 0 {
-		c.Overlays.EndText.DurationSec = defaults.Overlays.EndText.DurationSec
-	}
-	if c.Overlays.EndText.OffsetFromEndSec == 0 {
-		c.Overlays.EndText.OffsetFromEndSec = defaults.Overlays.EndText.OffsetFromEndSec
-	}
-	if c.Overlays.IndexBadge.Template == "" {
-		c.Overlays.IndexBadge.Template = defaults.Overlays.IndexBadge.Template
-	}
-	if c.Overlays.IndexBadge.Persistent == nil {
-		c.Overlays.IndexBadge.Persistent = boolPtr(true)
+	c.Overlays.DefaultStyle = mergeTextStyle(defaults.Overlays.DefaultStyle, c.Overlays.DefaultStyle)
+	if len(c.Overlays.Segments) == 0 {
+		c.Overlays.Segments = cloneSegments(defaults.Overlays.Segments)
 	}
 	if c.Plan.DefaultDurationSec <= 0 {
 		c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
@@ -442,11 +499,72 @@ func (c Config) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
+func mergeTextStyle(base, override TextStyle) TextStyle {
+	result := cloneTextStyle(base)
+
+	if strings.TrimSpace(override.FontFile) != "" {
+		result.FontFile = override.FontFile
+	}
+	if override.FontSize != nil {
+		result.FontSize = intPtr(*override.FontSize)
+	}
+	if strings.TrimSpace(override.FontColor) != "" {
+		result.FontColor = override.FontColor
+	}
+	if strings.TrimSpace(override.OutlineColor) != "" {
+		result.OutlineColor = override.OutlineColor
+	}
+	if override.OutlineWidth != nil {
+		result.OutlineWidth = intPtr(*override.OutlineWidth)
+	}
+	if override.LineSpacing != nil {
+		result.LineSpacing = intPtr(*override.LineSpacing)
+	}
+	if override.LetterSpacing != nil {
+		result.LetterSpacing = intPtr(*override.LetterSpacing)
+	}
+
+	return result
+}
+
+func cloneTextStyle(style TextStyle) TextStyle {
+	clone := style
+	if style.FontSize != nil {
+		clone.FontSize = intPtr(*style.FontSize)
+	}
+	if style.OutlineWidth != nil {
+		clone.OutlineWidth = intPtr(*style.OutlineWidth)
+	}
+	if style.LineSpacing != nil {
+		clone.LineSpacing = intPtr(*style.LineSpacing)
+	}
+	if style.LetterSpacing != nil {
+		clone.LetterSpacing = intPtr(*style.LetterSpacing)
+	}
+	return clone
+}
+
+func cloneSegments(segments []OverlaySegment) []OverlaySegment {
+	if len(segments) == 0 {
+		return nil
+	}
+	clones := make([]OverlaySegment, len(segments))
+	for i, segment := range segments {
+		clones[i] = segment
+		clones[i].Style = cloneTextStyle(segment.Style)
+	}
+	return clones
+}
+
 func boolPtr(v bool) *bool {
 	return &v
 }
 
 func floatPtr(v float64) *float64 {
+	return &v
+}
+
+func intPtr(v int) *int {
 	return &v
 }
 

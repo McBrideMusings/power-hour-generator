@@ -85,19 +85,9 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	indexes := []int(nil)
-	if len(fetchIndexArg) > 0 {
-		indexes, err = parseIndexArgs(fetchIndexArg)
-		if err != nil {
-			return err
-		}
-	}
-
-	if len(indexes) > 0 {
-		rows, err = filterRowsByIndex(rows, indexes)
-		if err != nil {
-			return err
-		}
+	rows, err = filterRowsByIndexArgs(rows, fetchIndexArg)
+	if err != nil {
+		return err
 	}
 
 	logger, closer, err := logx.New(pp)
