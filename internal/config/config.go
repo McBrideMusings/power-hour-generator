@@ -15,6 +15,7 @@ type Config struct {
 	Video     VideoConfig     `yaml:"video"`
 	Audio     AudioConfig     `yaml:"audio"`
 	Overlays  OverlaysConfig  `yaml:"overlays"`
+	Outputs   OutputConfig    `yaml:"outputs"`
 	Plan      PlanConfig      `yaml:"plan"`
 	Files     FileOverrides   `yaml:"files"`
 	Tools     ToolPins        `yaml:"tools"`
@@ -45,8 +46,10 @@ type VideoConfig struct {
 
 // AudioConfig describes audio encoding parameters.
 type AudioConfig struct {
-	ACodec      string `yaml:"acodec"`
-	BitrateKbps int    `yaml:"bitrate_kbps"`
+	ACodec      string         `yaml:"acodec"`
+	BitrateKbps int            `yaml:"bitrate_kbps"`
+	SampleRate  int            `yaml:"sample_rate"`
+	Loudnorm    LoudnormConfig `yaml:"loudnorm"`
 }
 
 // OverlaysConfig groups overlay settings and templates.
@@ -74,6 +77,69 @@ type TimedTextOverlay struct {
 type IndexBadgeOverlay struct {
 	Template   string `yaml:"template"`
 	Persistent *bool  `yaml:"persistent,omitempty"`
+}
+
+// OutputConfig captures naming templates for generated assets.
+type OutputConfig struct {
+	SegmentTemplate string `yaml:"segment_template"`
+}
+
+// LoudnormConfig controls optional EBU R128 loudness normalization.
+type LoudnormConfig struct {
+	Enabled        *bool    `yaml:"enabled,omitempty"`
+	IntegratedLUFS *float64 `yaml:"integrated_lufs,omitempty"`
+	TruePeak       *float64 `yaml:"true_peak_db,omitempty"`
+	LRA            *float64 `yaml:"lra_db,omitempty"`
+}
+
+// EnabledValue returns the effective enabled flag applying defaults.
+func (l LoudnormConfig) EnabledValue() bool {
+	if l.Enabled == nil {
+		return false
+	}
+	return *l.Enabled
+}
+
+// IntegratedLUFSValue returns the configured Integrated LUFS target.
+func (l LoudnormConfig) IntegratedLUFSValue() float64 {
+	if l.IntegratedLUFS == nil {
+		return 0
+	}
+	return *l.IntegratedLUFS
+}
+
+// TruePeakValue returns the configured true peak ceiling in dB.
+func (l LoudnormConfig) TruePeakValue() float64 {
+	if l.TruePeak == nil {
+		return 0
+	}
+	return *l.TruePeak
+}
+
+// LRAValue returns the allowed loudness range.
+func (l LoudnormConfig) LRAValue() float64 {
+	if l.LRA == nil {
+		return 0
+	}
+	return *l.LRA
+}
+
+func (l *LoudnormConfig) applyDefaults(defaults LoudnormConfig) {
+	if l == nil {
+		return
+	}
+	if l.Enabled == nil && defaults.Enabled != nil {
+		l.Enabled = boolPtr(defaults.EnabledValue())
+	}
+	if l.IntegratedLUFS == nil && defaults.IntegratedLUFS != nil {
+		l.IntegratedLUFS = floatPtr(*defaults.IntegratedLUFS)
+	}
+	if l.TruePeak == nil && defaults.TruePeak != nil {
+		l.TruePeak = floatPtr(*defaults.TruePeak)
+	}
+	if l.LRA == nil && defaults.LRA != nil {
+		l.LRA = floatPtr(*defaults.LRA)
+	}
 }
 
 // FileOverrides captures optional alternate project file locations.
@@ -108,6 +174,13 @@ func Default() Config {
 		Audio: AudioConfig{
 			ACodec:      "aac",
 			BitrateKbps: 192,
+			SampleRate:  48000,
+			Loudnorm: LoudnormConfig{
+				Enabled:        boolPtr(true),
+				IntegratedLUFS: floatPtr(-14.0),
+				TruePeak:       floatPtr(-1.5),
+				LRA:            floatPtr(11.0),
+			},
 		},
 		Overlays: OverlaysConfig{
 			FontFile:      "",
@@ -132,6 +205,9 @@ func Default() Config {
 			},
 		},
 		Files: FileOverrides{},
+		Outputs: OutputConfig{
+			SegmentTemplate: "$INDEX_PAD3_$SAFE_TITLE",
+		},
 		Plan: PlanConfig{
 			DefaultDurationSec: 60,
 		},
@@ -189,6 +265,13 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Audio.BitrateKbps == 0 {
 		c.Audio.BitrateKbps = defaults.Audio.BitrateKbps
+	}
+	if c.Audio.SampleRate == 0 {
+		c.Audio.SampleRate = defaults.Audio.SampleRate
+	}
+	c.Audio.Loudnorm.applyDefaults(defaults.Audio.Loudnorm)
+	if strings.TrimSpace(c.Outputs.SegmentTemplate) == "" {
+		c.Outputs.SegmentTemplate = defaults.Outputs.SegmentTemplate
 	}
 	if c.Overlays.FontSizeMain == 0 {
 		c.Overlays.FontSizeMain = defaults.Overlays.FontSizeMain
@@ -278,6 +361,11 @@ func (c Config) DownloadFilenameTemplate() string {
 	return strings.TrimSpace(c.Downloads.FilenameTemplate)
 }
 
+// SegmentFilenameTemplate returns the configured template for rendered segments.
+func (c Config) SegmentFilenameTemplate() string {
+	return strings.TrimSpace(c.Outputs.SegmentTemplate)
+}
+
 // PlanDefaultDuration returns the default clip duration in seconds, falling back to 60.
 func (c Config) PlanDefaultDuration() int {
 	if c.Plan.DefaultDurationSec <= 0 {
@@ -355,6 +443,10 @@ func (c Config) Marshal() ([]byte, error) {
 }
 
 func boolPtr(v bool) *bool {
+	return &v
+}
+
+func floatPtr(v float64) *float64 {
 	return &v
 }
 
