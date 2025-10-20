@@ -34,7 +34,8 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour init --project <dir>` – create the project directory, starter CSV, and default YAML.
 - `powerhour check --project <dir> [--strict]` – verify configuration and external tool availability (fails on missing tools when `--strict` is set).
 - `powerhour status --project <dir> [--json]` – print the parsed song plan and any validation issues.
-- `powerhour fetch --project <dir> [--force] [--reprobe] [--json]` – download or copy sources into the cache and refresh probe metadata.
+- `powerhour fetch --project <dir> [--force] [--reprobe] [--index <n>] [--json]` – download or copy sources into the cache and refresh probe metadata. Optional flags: `--force` re-downloads even when cached, `--reprobe` runs ffprobe on cached files, `--index <n>` limits work to specific 1-based plan rows (repeatable), and `--json` emits machine-readable output.
+- `powerhour validate filenames --project <dir> [--index <n>] [--json]` – audit cached source filenames against the active template, renaming cached files that no longer match. Repeat `--index` to target specific rows.
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
 
@@ -105,6 +106,8 @@ overlays:
 files:
   plan: powerhour.csv
   cookies: cookies.txt
+downloads:
+  filename_template: "$INDEX_$ID"
 plan:
   default_duration_s: 60
   headers:
@@ -114,13 +117,25 @@ plan:
 tools:
   yt-dlp:
     minimum_version: latest
+    proxy: socks5://127.0.0.1:9050
 ```
 
 Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
 
 Provide alternate column names under `plan.headers` when your CSV uses friendly titles (e.g., map `duration` to accept `length`). Each canonical field can list multiple acceptable header strings; when omitted, the loader falls back to the standard schema. The `plan.default_duration_s` value supplies a project-wide fallback (default 60 seconds) that applies when the `duration` column is absent or empty, while per-row values still override it when present.
 
-Set explicit tool requirements under the optional `tools` block. Provide a concrete version string or use the keyword `latest` to enforce the most recent release when running checks or installs.
+Set explicit tool requirements under the optional `tools` block. Provide a concrete version string or use the keyword `latest` to enforce the most recent release when running checks or installs. Supply a `proxy` value (for example, `socks5://127.0.0.1:9050`) when `yt-dlp` should run through a specific network proxy.
+
+Control source cache filenames via the optional `downloads.filename_template` setting. When omitted, clips save as `<id>.<ext>`. Templates accept `$` placeholders; use `$$` to emit a literal dollar sign. Available substitutions include:
+
+- `$ID` – Remote resources: yt-dlp media identifier; Local files: sanitized source basename (fallback to hash when unavailable).
+- `$INDEX` / `$INDEX_PAD3` – Zero-padded (width 3) plan index.
+- `$INDEX_RAW` / `$ROW_ID` – Unpadded plan index.
+- `$HASH` / `$HASH10` / `$KEY` / `$KEY10` – SHA-256 hash of the source identifier (full or first 10 characters).
+- `$TITLE`, `$ARTIST`, `$NAME`, `$START`, `$DURATION` – Sanitized values from the plan row.
+- `$SOURCE_HOST`, `$SOURCE_ID` – Source URL hostname and identifier (sanitized).
+
+Combine tokens to suit your workflow; for example, `$INDEX_$ID` recreates the previous default while `$TITLE_$ID` produces human-readable names. Run `powerhour validate filenames --project <dir>` anytime to audit and automatically rename existing cache files to the current template.
 
 To refresh cached binaries after tightening a minimum, run `powerhour tools install all --project <project_dir> --force`. Drop `--force` if you only need to install binaries that are currently below the configured threshold.
 

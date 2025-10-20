@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"testing"
+
+	"powerhour/pkg/csvplan"
 )
 
 func TestWriteFetchJSON(t *testing.T) {
@@ -59,5 +61,32 @@ func TestWriteFetchTable(t *testing.T) {
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("005")) {
 		t.Fatalf("expected row index, got %s", got)
+	}
+}
+
+func TestFilterRowsByIndex(t *testing.T) {
+	rows := []csvplan.Row{
+		{Index: 1, Title: "One"},
+		{Index: 2, Title: "Two"},
+		{Index: 3, Title: "Three"},
+	}
+
+	filtered, err := filterRowsByIndex(rows, []int{2})
+	if err != nil {
+		t.Fatalf("filterRowsByIndex: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Index != 2 {
+		t.Fatalf("unexpected filtered rows: %+v", filtered)
+	}
+}
+
+func TestFilterRowsByIndexMissing(t *testing.T) {
+	rows := []csvplan.Row{
+		{Index: 1, Title: "One"},
+	}
+
+	_, err := filterRowsByIndex(rows, []int{2})
+	if err == nil {
+		t.Fatal("expected error for missing index")
 	}
 }

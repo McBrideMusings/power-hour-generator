@@ -2,12 +2,16 @@ package cache
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"powerhour/pkg/csvplan"
 )
@@ -34,6 +38,10 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	}
 	defer logFile.Close()
 
+	logWriter := s.logWriter(logFile)
+
+	writeProxyBanner(ctx, logWriter, s.ytDLPProxy)
+
 	pathFile, err := os.CreateTemp(s.Paths.LogsDir, "yt-dlp-path-*.txt")
 	if err != nil {
 		return fetchResult{}, fmt.Errorf("create yt-dlp path temp: %w", err)
@@ -55,11 +63,14 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	if s.CookiesPath != "" {
 		args = append(args, "--cookies", s.CookiesPath)
 	}
+	if s.ytDLPProxy != "" {
+		args = append(args, "--proxy", s.ytDLPProxy)
+	}
 
 	args = append(args, src.Raw)
 
 	s.logf("yt-dlp row=%d source=%s", row.Index, src.Raw)
-	_, runErr := s.Runner.Run(ctx, s.ytDLP, args, RunOptions{Stdout: logFile, Stderr: logFile})
+	_, runErr := s.Runner.Run(ctx, s.ytDLP, args, RunOptions{Stdout: logWriter, Stderr: logWriter})
 	if runErr != nil {
 		return fetchResult{}, fmt.Errorf("yt-dlp: %w (see %s)", runErr, logPath)
 	}
@@ -103,6 +114,125 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 		Notes:     []string{"downloaded via yt-dlp"},
 	}
 	return res, nil
+}
+
+type proxyLocation struct {
+	IP      string `json:"ip"`
+	Country string `json:"country"`
+	Region  string `json:"region"`
+	City    string `json:"city"`
+}
+
+var lookupProxyLocation = fetchProxyLocation
+
+func writeProxyBanner(ctx context.Context, w io.Writer, proxy string) {
+	if w == nil || strings.TrimSpace(proxy) == "" {
+		return
+	}
+
+	fmt.Fprintf(w, "[powerhour] yt-dlp proxy: %s\n", proxy)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	loc, err := lookupProxyLocation(ctx, proxy)
+	if err != nil {
+		fmt.Fprintf(w, "[powerhour] proxy lookup failed: %v\n", err)
+		return
+	}
+
+	descParts := make([]string, 0, 3)
+	if loc.City != "" {
+		descParts = append(descParts, loc.City)
+	}
+	if loc.Region != "" {
+		descParts = append(descParts, loc.Region)
+	}
+	if loc.Country != "" {
+		descParts = append(descParts, loc.Country)
+	}
+	desc := strings.Join(descParts, ", ")
+
+	switch {
+	case loc.IP != "" && desc != "":
+		fmt.Fprintf(w, "[powerhour] proxy exit IP %s (%s)\n", loc.IP, desc)
+	case loc.IP != "":
+		fmt.Fprintf(w, "[powerhour] proxy exit IP %s\n", loc.IP)
+	case desc != "":
+		fmt.Fprintf(w, "[powerhour] proxy location %s\n", desc)
+	default:
+		fmt.Fprintf(w, "[powerhour] proxy location unknown\n")
+	}
+}
+
+func fetchProxyLocation(ctx context.Context, proxy string) (proxyLocation, error) {
+	proxyURL, err := url.Parse(proxy)
+	if err != nil {
+		return proxyLocation{}, fmt.Errorf("parse proxy url: %w", err)
+	}
+
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ipwho.is", nil)
+	if err != nil {
+		return proxyLocation{}, fmt.Errorf("create proxy lookup request: %w", err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return proxyLocation{}, fmt.Errorf("proxy lookup request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return proxyLocation{}, fmt.Errorf("proxy lookup unexpected status: %s", resp.Status)
+	}
+
+	var payload struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		IP      string `json:"ip"`
+		Country string `json:"country"`
+		Region  string `json:"region"`
+		City    string `json:"city"`
+	}
+
+	decoder := json.NewDecoder(resp.Body)
+	if err := decoder.Decode(&payload); err != nil {
+		return proxyLocation{}, fmt.Errorf("decode proxy lookup response: %w", err)
+	}
+
+	if !payload.Success && payload.Message != "" {
+		return proxyLocation{}, fmt.Errorf("proxy lookup error: %s", payload.Message)
+	}
+
+	loc := proxyLocation{
+		IP:      payload.IP,
+		Country: payload.Country,
+		Region:  payload.Region,
+		City:    payload.City,
+	}
+	return loc, nil
+}
+
+func (s *Service) logWriter(base io.Writer) io.Writer {
+	if base == nil {
+		base = io.Discard
+	}
+	if s == nil || s.logOutput == nil {
+		return base
+	}
+	if base == s.logOutput {
+		return base
+	}
+	return io.MultiWriter(base, s.logOutput)
 }
 
 func (s *Service) fetchLocal(_ context.Context, row csvplan.Row, baseName string, src sourceInfo) (fetchResult, error) {
