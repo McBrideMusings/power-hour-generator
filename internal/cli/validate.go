@@ -28,6 +28,7 @@ func newValidateCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(newValidateFilenamesCmd())
+	cmd.AddCommand(newValidateSegmentsCmd())
 	return cmd
 }
 

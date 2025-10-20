@@ -27,7 +27,7 @@ The project is in active development. This document describes the planned capabi
 3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/src`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
-Currently implemented commands cover project scaffolding, validation, cache population, and tool management, with rendering-oriented subcommands to follow.
+Currently implemented commands cover project scaffolding, validation, cache population, tool management, and segment rendering.
 
 ### CLI commands
 
@@ -36,8 +36,10 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour status --project <dir> [--json]` – print the parsed song plan and any validation issues.
 - `powerhour fetch --project <dir> [--force] [--reprobe] [--index <n>] [--json]` – download or copy sources into the cache and refresh probe metadata. Optional flags: `--force` re-downloads even when cached, `--reprobe` runs ffprobe on cached files, `--index <n>` limits work to specific 1-based plan rows (repeatable), and `--json` emits machine-readable output.
 - `powerhour validate filenames --project <dir> [--index <n>] [--json]` – audit cached source filenames against the active template, renaming cached files that no longer match. Repeat `--index` to target specific rows.
+- `powerhour validate segments --project <dir> [--index <n>] [--json]` – reconcile rendered segment filenames/logs with the configured template, renaming legacy outputs when possible.
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
+- `powerhour render --project <dir> [--concurrency N] [--force] [--json]` – render every cached row into `.powerhour/segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, and `--json` emits structured output.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 
@@ -85,6 +87,14 @@ video:
 audio:
   acodec: aac
   bitrate_kbps: 192
+  sample_rate: 48000
+  loudnorm:
+    enabled: true
+    integrated_lufs: -14
+    true_peak_db: -1.5
+    lra_db: 11
+outputs:
+  segment_template: "$INDEX_PAD3_$SAFE_TITLE"
 overlays:
   font_file: ""
   font_size_main: 42
@@ -123,6 +133,19 @@ tools:
 Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
 
 Provide alternate column names under `plan.headers` when your CSV uses friendly titles (e.g., map `duration` to accept `length`). Each canonical field can list multiple acceptable header strings; when omitted, the loader falls back to the standard schema. The `plan.default_duration_s` value supplies a project-wide fallback (default 60 seconds) that applies when the `duration` column is absent or empty, while per-row values still override it when present.
+
+The audio block now exposes `sample_rate` plus an optional `loudnorm` section for EBU R128-style loudness normalization. Adjust the targets to match your delivery specs or disable normalization by setting `enabled: false`.
+
+Use the `outputs.segment_template` string to control rendered segment filenames. The default (`$INDEX_PAD3_$SAFE_TITLE`) mirrors the existing behaviour (`001_teenagers.mp4`). Tokens are replaced with sanitized values so the final name is filesystem-safe; use `$$` to emit a literal dollar sign. Available segment tokens include:
+
+- `$INDEX_PAD2`, `$INDEX_PAD3`, `$INDEX_PAD4` – zero-padded plan index (width 2/3/4).
+- `$INDEX`, `$INDEX_RAW`, `$ROW_ID` – plan index without padding.
+- `$TITLE`, `$ARTIST`, `$NAME`, `$START`, `$DURATION` – sanitized values from the CSV/TSV.
+- `$SAFE_TITLE`, `$SAFE_ARTIST`, `$SAFE_NAME` – lowercased slug variants (hyphen separated).
+- `$ID`, `$SAFE_ID` – cache identifier derived from the resolved source.
+- `$SOURCE_BASENAME`, `$SAFE_SOURCE_BASENAME` – base name of the cached source file.
+
+Example: `segment_template: "$ID_$INDEX_$TITLE_$NAME"` produces names such as `0J3vgcE5i2o_028_Chic_C_est_La_Vie_Madison.mp4`. When a token resolves to an empty string it’s simply omitted; repeated separators are collapsed automatically.
 
 Set explicit tool requirements under the optional `tools` block. Provide a concrete version string or use the keyword `latest` to enforce the most recent release when running checks or installs. Supply a `proxy` value (for example, `socks5://127.0.0.1:9050`) when `yt-dlp` should run through a specific network proxy.
 
