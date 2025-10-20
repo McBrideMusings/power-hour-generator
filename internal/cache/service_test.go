@@ -43,7 +43,10 @@ func (f *fakeRunner) Run(_ context.Context, command string, args []string, opts 
 		if template == "" || pathFile == "" {
 			return RunResult{}, fmt.Errorf("fake runner: missing expected args")
 		}
-		target := strings.Replace(template, ".%(ext)s", ".mp4", 1)
+		target := strings.ReplaceAll(template, "%(id)s", "videoid")
+		target = strings.ReplaceAll(target, "%(title)s", "Video_Title")
+		target = strings.ReplaceAll(target, "%(artist)s", "Artist")
+		target = strings.Replace(target, ".%(ext)s", ".mp4", 1)
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return RunResult{}, err
 		}
@@ -100,11 +103,12 @@ func TestServiceResolveDownload(t *testing.T) {
 
 	runner := &fakeRunner{}
 	svc := &Service{
-		Paths:   pp,
-		Logger:  log.New(io.Discard, "", 0),
-		Runner:  runner,
-		ytDLP:   "yt-dlp",
-		ffprobe: "ffprobe",
+		Paths:            pp,
+		Logger:           log.New(io.Discard, "", 0),
+		Runner:           runner,
+		ytDLP:            "yt-dlp",
+		ffprobe:          "ffprobe",
+		filenameTemplate: "$ID",
 	}
 
 	row := csvplan.Row{Index: 1, Title: "Example", Link: "https://example.com/video"}
@@ -121,7 +125,7 @@ func TestServiceResolveDownload(t *testing.T) {
 	if _, err := os.Stat(res.Entry.CachedPath); err != nil {
 		t.Fatalf("cached file missing: %v", err)
 	}
-	if !strings.HasPrefix(filepath.Base(res.Entry.CachedPath), "001_") {
+	if filepath.Base(res.Entry.CachedPath) != "videoid.mp4" {
 		t.Fatalf("unexpected cache filename: %s", res.Entry.CachedPath)
 	}
 	if !res.Probed {
@@ -140,6 +144,53 @@ func TestServiceResolveDownload(t *testing.T) {
 	}
 	if entry.CachedPath != res.Entry.CachedPath {
 		t.Fatalf("index cached path mismatch")
+	}
+}
+
+func TestServiceResolveDownloadCustomTemplate(t *testing.T) {
+	pp := testPaths(t)
+	idx, err := Load(pp)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	runner := &fakeRunner{}
+	svc := &Service{
+		Paths:            pp,
+		Logger:           log.New(io.Discard, "", 0),
+		Runner:           runner,
+		ytDLP:            "yt-dlp",
+		ffprobe:          "ffprobe",
+		filenameTemplate: "$INDEX_$ID",
+	}
+
+	row := csvplan.Row{Index: 5, Title: "Example", Link: "https://example.com/video"}
+	src, err := svc.resolveSource(row)
+	if err != nil {
+		t.Fatalf("resolve source: %v", err)
+	}
+	key := hashIdentifier(src.Identifier)
+	short := truncateHash(key, 10)
+	remoteVals, _ := filenameTemplateValues(row, src, key, short)
+	if remoteVals["INDEX"] != "005" {
+		t.Fatalf("unexpected index value: %q", remoteVals["INDEX"])
+	}
+	if result := applyFilenameTemplate("$INDEX_$ID", remoteVals); result != "005_%(id)s" {
+		t.Fatalf("unexpected template expansion: %s", result)
+	}
+	parts := svc.buildFilenameParts(row, src, key)
+	if parts.Remote != "005_%(id)s" {
+		t.Fatalf("unexpected remote template: %s", parts.Remote)
+	}
+	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.Status != ResolveStatusDownloaded {
+		t.Fatalf("expected downloaded status, got %s", res.Status)
+	}
+	if filepath.Base(res.Entry.CachedPath) != "005_videoid.mp4" {
+		t.Fatalf("unexpected cached filename: %s", res.Entry.CachedPath)
 	}
 }
 
@@ -270,6 +321,44 @@ func TestServiceResolveDownloadWithCookies(t *testing.T) {
 func containsCookiesArg(args []string, path string) bool {
 	for i := 0; i < len(args)-1; i++ {
 		if args[i] == "--cookies" && args[i+1] == path {
+			return true
+		}
+	}
+	return false
+}
+
+func TestServiceResolveDownloadWithProxy(t *testing.T) {
+	pp := testPaths(t)
+	idx, err := Load(pp)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	proxy := "socks5://127.0.0.1:9050"
+
+	runner := &fakeRunner{}
+	svc := &Service{
+		Paths:      pp,
+		Logger:     log.New(io.Discard, "", 0),
+		Runner:     runner,
+		ytDLP:      "yt-dlp",
+		ffprobe:    "ffprobe",
+		ytDLPProxy: proxy,
+	}
+
+	row := csvplan.Row{Index: 1, Title: "Example", Link: "https://example.com/video"}
+	if _, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if !containsProxyArg(runner.lastDownloadArgs, proxy) {
+		t.Fatalf("expected yt-dlp args to include proxy, got %v", runner.lastDownloadArgs)
+	}
+}
+
+func containsProxyArg(args []string, proxy string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--proxy" && args[i+1] == proxy {
 			return true
 		}
 	}

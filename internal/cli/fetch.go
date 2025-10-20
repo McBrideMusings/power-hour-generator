@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 var (
 	fetchForce   bool
 	fetchReprobe bool
+	fetchIndexes []int
 )
 
 var newCacheService = cache.NewService
@@ -31,6 +33,7 @@ func newFetchCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&fetchForce, "force", false, "Re-download all sources even if cached")
 	cmd.Flags().BoolVar(&fetchReprobe, "reprobe", false, "Re-run ffprobe on cached entries")
+	cmd.Flags().IntSliceVar(&fetchIndexes, "index", nil, "Limit fetch to specific 1-based row index (repeat flag for multiple)")
 
 	return cmd
 }
@@ -78,6 +81,13 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	if len(fetchIndexes) > 0 {
+		rows, err = filterRowsByIndex(rows, fetchIndexes)
+		if err != nil {
+			return err
+		}
+	}
+
 	logger, closer, err := logx.New(pp)
 	if err != nil {
 		return err
@@ -88,6 +98,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	svc.SetLogOutput(cmd.ErrOrStderr())
 
 	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe}
 
@@ -139,6 +150,37 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 
 	writeFetchTable(cmd, pp.Root, outcomes, counts)
 	return nil
+}
+
+func filterRowsByIndex(rows []csvplan.Row, indexes []int) ([]csvplan.Row, error) {
+	filter := make(map[int]struct{}, len(indexes))
+	for _, idx := range indexes {
+		if idx <= 0 {
+			return nil, fmt.Errorf("index must be greater than zero: %d", idx)
+		}
+		filter[idx] = struct{}{}
+	}
+	if len(filter) == 0 {
+		return nil, fmt.Errorf("no indexes provided")
+	}
+
+	filtered := make([]csvplan.Row, 0, len(filter))
+	for _, row := range rows {
+		if _, ok := filter[row.Index]; ok {
+			filtered = append(filtered, row)
+			delete(filter, row.Index)
+		}
+	}
+
+	if len(filter) > 0 {
+		missing := make([]int, 0, len(filter))
+		for idx := range filter {
+			missing = append(missing, idx)
+		}
+		sort.Ints(missing)
+		return nil, fmt.Errorf("indexes not found in plan: %v", missing)
+	}
+	return filtered, nil
 }
 
 func writeFetchJSON(cmd *cobra.Command, project string, rows []fetchRowResult, counts fetchCounts) error {

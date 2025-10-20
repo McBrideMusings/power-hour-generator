@@ -11,13 +11,14 @@ import (
 
 // Config captures the rendering and overlay configuration for a project.
 type Config struct {
-	Version  int            `yaml:"version"`
-	Video    VideoConfig    `yaml:"video"`
-	Audio    AudioConfig    `yaml:"audio"`
-	Overlays OverlaysConfig `yaml:"overlays"`
-	Plan     PlanConfig     `yaml:"plan"`
-	Files    FileOverrides  `yaml:"files"`
-	Tools    ToolPins       `yaml:"tools"`
+	Version   int             `yaml:"version"`
+	Video     VideoConfig     `yaml:"video"`
+	Audio     AudioConfig     `yaml:"audio"`
+	Overlays  OverlaysConfig  `yaml:"overlays"`
+	Plan      PlanConfig      `yaml:"plan"`
+	Files     FileOverrides   `yaml:"files"`
+	Tools     ToolPins        `yaml:"tools"`
+	Downloads DownloadsConfig `yaml:"downloads"`
 }
 
 // ToolPins captures optional version pinning for managed external tools.
@@ -27,6 +28,12 @@ type ToolPins map[string]ToolPin
 type ToolPin struct {
 	Version        string `yaml:"version"`
 	MinimumVersion string `yaml:"minimum_version"`
+	Proxy          string `yaml:"proxy"`
+}
+
+// DownloadsConfig controls caching/downloading behaviour.
+type DownloadsConfig struct {
+	FilenameTemplate string `yaml:"filename_template"`
 }
 
 // VideoConfig contains video sizing and framerate information.
@@ -129,6 +136,9 @@ func Default() Config {
 			DefaultDurationSec: 60,
 		},
 		Tools: ToolPins{},
+		Downloads: DownloadsConfig{
+			FilenameTemplate: "$ID",
+		},
 	}
 }
 
@@ -225,6 +235,9 @@ func (c *Config) ApplyDefaults() {
 	if c.Plan.DefaultDurationSec <= 0 {
 		c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
 	}
+	if strings.TrimSpace(c.Downloads.FilenameTemplate) == "" {
+		c.Downloads.FilenameTemplate = defaults.Downloads.FilenameTemplate
+	}
 }
 
 // ToolVersion returns the pinned version for a given tool name when defined.
@@ -247,6 +260,22 @@ func (c Config) ToolMinimum(tool string) string {
 		return strings.TrimSpace(pin.MinimumVersion)
 	}
 	return ""
+}
+
+// ToolProxy returns the proxy override for a given tool name when defined.
+func (c Config) ToolProxy(tool string) string {
+	if c.Tools == nil {
+		return ""
+	}
+	if pin, ok := c.Tools[tool]; ok {
+		return strings.TrimSpace(pin.Proxy)
+	}
+	return ""
+}
+
+// DownloadFilenameTemplate returns the configured filename template for downloads.
+func (c Config) DownloadFilenameTemplate() string {
+	return strings.TrimSpace(c.Downloads.FilenameTemplate)
 }
 
 // PlanDefaultDuration returns the default clip duration in seconds, falling back to 60.
