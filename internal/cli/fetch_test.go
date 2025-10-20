@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"reflect"
+	"strings"
 	"testing"
 
 	"powerhour/pkg/csvplan"
@@ -34,6 +36,9 @@ func TestWriteFetchJSON(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("copied")) {
 		t.Fatalf("expected status in json output: %s", got)
 	}
+	if !bytes.Contains(buf.Bytes(), []byte("\"pending\"")) {
+		t.Fatalf("expected pending field in json output: %s", got)
+	}
 }
 
 func TestWriteFetchTable(t *testing.T) {
@@ -59,8 +64,32 @@ func TestWriteFetchTable(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("Downloaded: 1")) {
 		t.Fatalf("expected summary counts, got %s", got)
 	}
+	if !bytes.Contains(buf.Bytes(), []byte("Pending: 0")) {
+		t.Fatalf("expected pending count, got %s", got)
+	}
 	if !bytes.Contains(buf.Bytes(), []byte("005")) {
 		t.Fatalf("expected row index, got %s", got)
+	}
+}
+
+func TestWriteFetchFailures(t *testing.T) {
+	cmd := newFetchCmd()
+	buf := &bytes.Buffer{}
+	cmd.SetOut(buf)
+
+	rows := []fetchRowResult{
+		{Index: 7, Title: "Missing File", Status: "error", Error: "stat local source"},
+		{Index: 8, Title: "OK", Status: "cached"},
+	}
+
+	writeFetchFailures(cmd, rows)
+
+	got := buf.String()
+	if !strings.Contains(got, "Failures:") {
+		t.Fatalf("expected failures header, got %s", got)
+	}
+	if !strings.Contains(got, "007 Missing File: stat local source") {
+		t.Fatalf("expected failure details, got %s", got)
 	}
 }
 
@@ -88,5 +117,28 @@ func TestFilterRowsByIndexMissing(t *testing.T) {
 	_, err := filterRowsByIndex(rows, []int{2})
 	if err == nil {
 		t.Fatal("expected error for missing index")
+	}
+}
+
+func TestParseIndexArgs(t *testing.T) {
+	indexes, err := parseIndexArgs([]string{"2", "5-7", " 9 "})
+	if err != nil {
+		t.Fatalf("parseIndexArgs: %v", err)
+	}
+	expected := []int{2, 5, 6, 7, 9}
+	if !reflect.DeepEqual(expected, indexes) {
+		t.Fatalf("unexpected indexes: %v", indexes)
+	}
+}
+
+func TestParseIndexArgsInvalid(t *testing.T) {
+	if _, err := parseIndexArgs([]string{"foo"}); err == nil {
+		t.Fatal("expected error for invalid token")
+	}
+	if _, err := parseIndexArgs([]string{"5-3"}); err == nil {
+		t.Fatal("expected error for reversed range")
+	}
+	if _, err := parseIndexArgs([]string{"0"}); err == nil {
+		t.Fatal("expected error for zero index")
 	}
 }

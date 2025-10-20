@@ -147,6 +147,70 @@ func TestServiceResolveDownload(t *testing.T) {
 	}
 }
 
+func TestServiceResolveDryRun(t *testing.T) {
+	pp := testPaths(t)
+	idx, err := Load(pp)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	runner := &fakeRunner{}
+	svc := &Service{
+		Paths:            pp,
+		Logger:           log.New(io.Discard, "", 0),
+		Runner:           runner,
+		ytDLP:            "yt-dlp",
+		ffprobe:          "ffprobe",
+		filenameTemplate: "$ID",
+	}
+
+	row := csvplan.Row{Index: 1, Title: "Example", Link: "https://example.com/video"}
+	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("resolve dry run: %v", err)
+	}
+	if res.Status != ResolveStatusWouldDownload {
+		t.Fatalf("expected would-download status, got %s", res.Status)
+	}
+	if res.Updated {
+		t.Fatal("expected dry run to leave entry unchanged")
+	}
+	if res.Probed {
+		t.Fatal("expected dry run to skip probe")
+	}
+	if runner.downloadCalls != 0 {
+		t.Fatalf("expected no downloads in dry run, got %d", runner.downloadCalls)
+	}
+	if runner.probeCalls != 0 {
+		t.Fatalf("expected no probes in dry run, got %d", runner.probeCalls)
+	}
+	if _, ok := idx.Get(1); ok {
+		t.Fatal("expected dry run to avoid writing to index")
+	}
+
+	localPath := filepath.Join(pp.Root, "clip.mp4")
+	if err := os.WriteFile(localPath, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write local file: %v", err)
+	}
+	localRow := csvplan.Row{Index: 2, Title: "Local", Link: localPath}
+	resLocal, err := svc.Resolve(context.Background(), idx, localRow, ResolveOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("resolve dry run local: %v", err)
+	}
+	if resLocal.Status != ResolveStatusWouldCopy {
+		t.Fatalf("expected would-copy status, got %s", resLocal.Status)
+	}
+	if resLocal.Updated {
+		t.Fatal("expected dry run local to leave entry unchanged")
+	}
+	if resLocal.Probed {
+		t.Fatal("expected dry run local to skip probe")
+	}
+	if _, ok := idx.Get(2); ok {
+		t.Fatal("expected dry run local to avoid writing to index")
+	}
+}
+
 func TestServiceResolveDownloadCustomTemplate(t *testing.T) {
 	pp := testPaths(t)
 	idx, err := Load(pp)
