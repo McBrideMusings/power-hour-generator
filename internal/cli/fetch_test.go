@@ -18,8 +18,10 @@ func TestWriteFetchJSON(t *testing.T) {
 		Index:      1,
 		Title:      "Song",
 		Status:     "copied",
-		CachedPath: "/tmp/.powerhour/src/001_hash.mp4",
-		Source:     "/tmp/source.mp4",
+		CachedPath: "/tmp/.powerhour/cache/001_hash.mp4",
+		Link:       "https://example.com/video",
+		Identifier: "youtube:videoid",
+		MediaID:    "videoid",
 		SizeBytes:  1234,
 		Probed:     true,
 	}}
@@ -36,8 +38,8 @@ func TestWriteFetchJSON(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("copied")) {
 		t.Fatalf("expected status in json output: %s", got)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("\"pending\"")) {
-		t.Fatalf("expected pending field in json output: %s", got)
+	if !bytes.Contains(buf.Bytes(), []byte("\"missing\"")) {
+		t.Fatalf("expected missing field in json output: %s", got)
 	}
 }
 
@@ -49,7 +51,10 @@ func TestWriteFetchTable(t *testing.T) {
 	rows := []fetchRowResult{{
 		Index:      5,
 		Status:     "downloaded",
-		CachedPath: "/p/src/005_hash.mp4",
+		CachedPath: "/p/cache/005_hash.mp4",
+		Link:       "https://example.com/video",
+		Identifier: "youtube:videoid",
+		MediaID:    "videoid",
 		SizeBytes:  2048,
 		Probed:     true,
 	}}
@@ -64,8 +69,8 @@ func TestWriteFetchTable(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("Downloaded: 1")) {
 		t.Fatalf("expected summary counts, got %s", got)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("Pending: 0")) {
-		t.Fatalf("expected pending count, got %s", got)
+	if !bytes.Contains(buf.Bytes(), []byte("Missing: 0")) {
+		t.Fatalf("expected missing count, got %s", got)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("005")) {
 		t.Fatalf("expected row index, got %s", got)
@@ -78,7 +83,7 @@ func TestWriteFetchFailures(t *testing.T) {
 	cmd.SetOut(buf)
 
 	rows := []fetchRowResult{
-		{Index: 7, Title: "Missing File", Status: "error", Error: "stat local source"},
+		{Index: 7, Title: "Missing File", Status: "error", Link: "https://example.com/video", Error: "stat local source"},
 		{Index: 8, Title: "OK", Status: "cached"},
 	}
 
@@ -88,7 +93,7 @@ func TestWriteFetchFailures(t *testing.T) {
 	if !strings.Contains(got, "Failures:") {
 		t.Fatalf("expected failures header, got %s", got)
 	}
-	if !strings.Contains(got, "007 Missing File: stat local source") {
+	if !strings.Contains(got, "007 Missing File (https://example.com/video): stat local source") {
 		t.Fatalf("expected failure details, got %s", got)
 	}
 }

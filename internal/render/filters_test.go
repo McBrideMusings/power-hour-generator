@@ -30,9 +30,9 @@ func TestBuildFilterGraphIncludesOverlays(t *testing.T) {
 		"fps=30",
 		"fade=t=in",
 		"fade=t=out",
-		"drawtext=text='Don\\'t Stop\\, Believin\\''",
+		"drawtext=text='Don''t Stop\\, Believin''",
 		"drawtext=text='JOURNEY'",
-		"drawtext=text='O\\'Brien'",
+		"drawtext=text='O''Brien'",
 		"enable='between(t\\,0\\,4)'",
 		"alpha='if(lt(t\\,0)",
 		"drawtext=text='1'",
@@ -57,6 +57,15 @@ func TestBuildAudioFilters(t *testing.T) {
 		if !strings.Contains(filters, token) {
 			t.Fatalf("expected audio filters to contain %q, got %q", token, filters)
 		}
+	}
+}
+
+func TestEscapeDrawText(t *testing.T) {
+	input := "Line 1\nIt's: great, ok\\"
+	want := "Line 1\\nIt''s\\: great\\, ok\\\\"
+
+	if got := escapeDrawText(input); got != want {
+		t.Fatalf("escapeDrawText(%q) = %q; want %q", input, got, want)
 	}
 }
 

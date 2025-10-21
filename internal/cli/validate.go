@@ -133,7 +133,14 @@ func collectFilenameChecks(pp paths.ProjectPaths, svc *cache.Service, idx *cache
 	for _, row := range rows {
 		res := filenameCheckResult{Index: row.Index}
 
-		entry, ok := idx.Get(row.Index)
+		entry, ok, err := resolveEntryForRow(pp, idx, row)
+		if err != nil {
+			res.Status = "error"
+			res.Notes = append(res.Notes, err.Error())
+			summary.Errors++
+			results = append(results, res)
+			continue
+		}
 		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
 			res.Status = "not_cached"
 			summary.NotCached++
@@ -173,11 +180,11 @@ func collectFilenameChecks(pp paths.ProjectPaths, svc *cache.Service, idx *cache
 			continue
 		}
 
-		if rel, err := filepath.Rel(pp.SrcDir, entry.CachedPath); err == nil && strings.HasPrefix(rel, "..") {
-			res.Notes = append(res.Notes, "cached file stored outside src dir")
+		if rel, err := filepath.Rel(pp.CacheDir, entry.CachedPath); err == nil && strings.HasPrefix(rel, "..") {
+			res.Notes = append(res.Notes, "cached file stored outside cache dir")
 		}
 
-		expectedPath := filepath.Join(pp.SrcDir, expectedBase+ext)
+		expectedPath := filepath.Join(pp.CacheDir, expectedBase+ext)
 		if samePath(entry.CachedPath, expectedPath) {
 			res.Status = "match"
 			summary.Matches++
@@ -202,7 +209,7 @@ func collectFilenameChecks(pp paths.ProjectPaths, svc *cache.Service, idx *cache
 		}
 
 		entry.CachedPath = expectedPath
-		idx.Set(entry)
+		idx.SetEntry(entry)
 		dirty = true
 
 		res.Status = "renamed"

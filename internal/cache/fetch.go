@@ -24,8 +24,8 @@ type fetchResult struct {
 }
 
 func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string, src sourceInfo) (fetchResult, error) {
-	if err := os.MkdirAll(s.Paths.SrcDir, 0o755); err != nil {
-		return fetchResult{}, fmt.Errorf("ensure src dir: %w", err)
+	if err := os.MkdirAll(s.Paths.CacheDir, 0o755); err != nil {
+		return fetchResult{}, fmt.Errorf("ensure cache dir: %w", err)
 	}
 	if err := os.MkdirAll(s.Paths.LogsDir, 0o755); err != nil {
 		return fetchResult{}, fmt.Errorf("ensure logs dir: %w", err)
@@ -50,7 +50,7 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	pathFile.Close()
 	defer os.Remove(pathFilePath)
 
-	template := filepath.Join(s.Paths.SrcDir, baseName+".%(ext)s")
+	template := filepath.Join(s.Paths.CacheDir, baseName+".%(ext)s")
 
 	args := []string{
 		"--no-playlist",
@@ -86,7 +86,7 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	}
 
 	if !filepath.IsAbs(targetPath) {
-		targetPath = filepath.Join(s.Paths.SrcDir, targetPath)
+		targetPath = filepath.Join(s.Paths.CacheDir, targetPath)
 	}
 
 	abs, err := filepath.Abs(targetPath)
@@ -95,12 +95,12 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	}
 	targetPath = abs
 
-	rel, err := filepath.Rel(s.Paths.SrcDir, targetPath)
+	rel, err := filepath.Rel(s.Paths.CacheDir, targetPath)
 	if err != nil {
 		return fetchResult{}, fmt.Errorf("resolve downloaded relative path: %w", err)
 	}
 	if strings.HasPrefix(rel, "..") {
-		return fetchResult{}, fmt.Errorf("downloaded path %q outside src dir", targetPath)
+		return fetchResult{}, fmt.Errorf("downloaded path %q outside cache dir", targetPath)
 	}
 
 	info, err := os.Stat(targetPath)
@@ -236,12 +236,12 @@ func (s *Service) logWriter(base io.Writer) io.Writer {
 }
 
 func (s *Service) fetchLocal(_ context.Context, row csvplan.Row, baseName string, src sourceInfo) (fetchResult, error) {
-	if err := os.MkdirAll(s.Paths.SrcDir, 0o755); err != nil {
-		return fetchResult{}, fmt.Errorf("ensure src dir: %w", err)
+	if err := os.MkdirAll(s.Paths.CacheDir, 0o755); err != nil {
+		return fetchResult{}, fmt.Errorf("ensure cache dir: %w", err)
 	}
 
 	ext := filepath.Ext(src.LocalPath)
-	targetPath := filepath.Join(s.Paths.SrcDir, baseName+ext)
+	targetPath := filepath.Join(s.Paths.CacheDir, baseName+ext)
 
 	s.logf("cache copy row=%d source=%s target=%s", row.Index, src.LocalPath, targetPath)
 

@@ -115,7 +115,14 @@ func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, idx *cache.I
 			Index: row.Index,
 		}
 
-		entry, ok := idx.Get(row.Index)
+		entry, ok, err := resolveEntryForRow(pp, idx, row)
+		if err != nil {
+			res.Status = "error"
+			res.Notes = append(res.Notes, err.Error())
+			summary.Errors++
+			results = append(results, res)
+			continue
+		}
 		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
 			res.Status = "not_cached"
 			res.Notes = append(res.Notes, "cache entry not available; skip segment rename")

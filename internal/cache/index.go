@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
+	"strings"
 	"time"
 
 	"powerhour/internal/paths"
 )
 
-const indexVersion = 1
+const indexVersion = 2
 
 // SourceType enumerates the origin of a cached asset.
 type SourceType string
@@ -23,17 +23,20 @@ const (
 	SourceTypeLocal   SourceType = "local"
 )
 
-// Index captures per-row cache state persisted to .powerhour/index.json.
+// Index captures persistent cache state for fetched media artifacts.
 type Index struct {
 	Version int                        `json:"version"`
 	Entries map[string]Entry           `json:"entries"`
+	Links   map[string]string          `json:"links,omitempty"`
 	Meta    map[string]json.RawMessage `json:"meta,omitempty"`
 }
 
 // Entry keeps metadata about a cached media artifact.
 type Entry struct {
-	RowIndex    int            `json:"row_index"`
 	Key         string         `json:"key"`
+	Identifier  string         `json:"identifier"`
+	ID          string         `json:"id,omitempty"`
+	Extractor   string         `json:"extractor,omitempty"`
 	Source      string         `json:"source"`
 	SourceType  SourceType     `json:"source_type"`
 	CachedPath  string         `json:"cached_path"`
@@ -43,6 +46,7 @@ type Entry struct {
 	ETag        string         `json:"etag,omitempty"`
 	Probe       *ProbeMetadata `json:"probe,omitempty"`
 	Notes       []string       `json:"notes,omitempty"`
+	Links       []string       `json:"links,omitempty"`
 }
 
 // ProbeMetadata includes the ffprobe results for the cached file.
@@ -104,32 +108,77 @@ func Save(pp paths.ProjectPaths, idx *Index) error {
 	return nil
 }
 
-// Get returns an entry for the provided row index when present.
-func (idx *Index) Get(rowIndex int) (Entry, bool) {
+// GetByIdentifier returns an entry for the provided canonical identifier when present.
+func (idx *Index) GetByIdentifier(identifier string) (Entry, bool) {
 	if idx == nil || idx.Entries == nil {
 		return Entry{}, false
 	}
-	entry, ok := idx.Entries[rowKey(rowIndex)]
+	key := strings.TrimSpace(identifier)
+	if key == "" {
+		return Entry{}, false
+	}
+	entry, ok := idx.Entries[key]
 	return entry, ok
 }
 
-// Set stores an entry for the provided row index.
-func (idx *Index) Set(entry Entry) {
+// SetEntry stores an entry keyed by its canonical identifier.
+func (idx *Index) SetEntry(entry Entry) {
 	if idx == nil {
+		return
+	}
+	key := strings.TrimSpace(entry.Identifier)
+	if key == "" {
 		return
 	}
 	if idx.Entries == nil {
 		idx.Entries = map[string]Entry{}
 	}
-	idx.Entries[rowKey(entry.RowIndex)] = entry
+	idx.Entries[key] = entry
 }
 
-// Delete removes an entry for the provided row index.
-func (idx *Index) Delete(rowIndex int) {
+// DeleteEntry removes an entry for the provided canonical identifier.
+func (idx *Index) DeleteEntry(identifier string) {
 	if idx == nil || idx.Entries == nil {
 		return
 	}
-	delete(idx.Entries, rowKey(rowIndex))
+	key := strings.TrimSpace(identifier)
+	if key == "" {
+		return
+	}
+	delete(idx.Entries, key)
+}
+
+// LookupLink returns the canonical identifier associated with a link, if recorded.
+func (idx *Index) LookupLink(link string) (string, bool) {
+	if idx == nil || idx.Links == nil {
+		return "", false
+	}
+	key, ok := idx.Links[normalizeLink(link)]
+	return key, ok
+}
+
+// SetLink records the canonical identifier for a given link string.
+func (idx *Index) SetLink(link, identifier string) {
+	if idx == nil {
+		return
+	}
+	linkKey := normalizeLink(link)
+	idKey := strings.TrimSpace(identifier)
+	if linkKey == "" || idKey == "" {
+		return
+	}
+	if idx.Links == nil {
+		idx.Links = map[string]string{}
+	}
+	idx.Links[linkKey] = idKey
+}
+
+// DeleteLink removes any recorded mapping for the supplied link.
+func (idx *Index) DeleteLink(link string) {
+	if idx == nil || idx.Links == nil {
+		return
+	}
+	delete(idx.Links, normalizeLink(link))
 }
 
 func (idx *Index) normalize() {
@@ -139,15 +188,19 @@ func (idx *Index) normalize() {
 	if idx.Entries == nil {
 		idx.Entries = map[string]Entry{}
 	}
-}
-
-func rowKey(rowIndex int) string {
-	return strconv.Itoa(rowIndex)
+	if idx.Links == nil {
+		idx.Links = map[string]string{}
+	}
 }
 
 func newIndex() *Index {
 	return &Index{
 		Version: indexVersion,
 		Entries: map[string]Entry{},
+		Links:   map[string]string{},
 	}
+}
+
+func normalizeLink(link string) string {
+	return strings.TrimSpace(link)
 }

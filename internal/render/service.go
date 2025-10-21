@@ -32,6 +32,7 @@ type Service struct {
 type Options struct {
 	Concurrency int
 	Force       bool
+	Reporter    ProgressReporter
 }
 
 // Segment encapsulates the information required to render a clip.
@@ -47,7 +48,14 @@ type Result struct {
 	Title      string
 	OutputPath string
 	LogPath    string
+	Skipped    bool
 	Err        error
+}
+
+// ProgressReporter receives notifications as segments move through the render pipeline.
+type ProgressReporter interface {
+	Start(segment Segment)
+	Complete(result Result)
 }
 
 // NewService prepares a renderer bound to a project.
@@ -115,12 +123,19 @@ func (s *Service) Render(ctx context.Context, segments []Segment, opts Options) 
 
 	for i, seg := range segments {
 		i, seg := i, seg
+		if opts.Reporter != nil {
+			opts.Reporter.Start(seg)
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i] = s.renderOne(ctx, seg, opts.Force)
+			res := s.renderOne(ctx, seg, opts.Force)
+			results[i] = res
+			if opts.Reporter != nil {
+				opts.Reporter.Complete(res)
+			}
 		}()
 	}
 
@@ -149,6 +164,7 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 			result.Err = fmt.Errorf("stat segment output: %w", err)
 			return result
 		} else if exists {
+			result.Skipped = true
 			s.printf("segment %03d already exists, skipping: %s\n", row.Index, outputPath)
 			return result
 		}
