@@ -10,7 +10,7 @@ The project is in active development. This document describes the planned capabi
 
 - Single self-contained binary, `powerhour`, targeting macOS, Windows, and Linux.
 - CLI orchestrates downloads via `yt-dlp`, probes/transcodes with `ffmpeg`/`ffprobe`, and hides those toolchains behind a unified interface.
-- Project-oriented workflow: each project is an on-disk directory with standardized file names and a `.powerhour` cache.
+- Project-oriented workflow: each project is an on-disk directory with standardized file names alongside `cache/`, `logs/`, `segments/`, and a hidden `.powerhour/index.json`.
 - Automatic download caching to avoid re-fetching source media across multiple renders.
 - Overlay system built from reusable segments that can each define text, transforms, timing, and positioning (defaults cover title + artist on entry, optional outro name, and a persistent index badge).
 - Configurable video/audio encoding parameters and overlay styling via optional YAML.
@@ -21,7 +21,7 @@ The project is in active development. This document describes the planned capabi
 
 1. Create a project directory and add a `powerhour.csv` (or TSV) describing the clips in playback order.
 2. (Optional) Add a `powerhour.yaml` to override fonts, colors, overlay timing, or encoding defaults.
-3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/cache`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
+3. Run the CLI pointing at the project directory; the tool will download sources into `cache/`, render segments into `segments/`, write logs under `logs/`, and maintain metadata in `.powerhour/index.json`.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
 Currently implemented commands cover project scaffolding, validation, cache population, tool management, and segment rendering.
@@ -36,7 +36,7 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour validate segments --project <dir> [--index <n>] [--json]` – reconcile rendered segment filenames/logs with the configured template, renaming legacy outputs when possible.
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
-- `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `.powerhour/segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
+- `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 
@@ -68,10 +68,10 @@ CHAMBEA	BAD BUNNY	1:50	65	pierce	https://youtu.be/gpIBmED4oss
 project-root/
   powerhour.csv
   powerhour.yaml   # optional configuration
+  cache/           # cached source downloads
+  segments/        # rendered clip outputs
+  logs/            # per-clip render logs
   .powerhour/
-    cache/         # cached source downloads
-    segments/      # rendered clip outputs
-    logs/          # per-clip render logs
     index.json     # metadata about processed clips
 ```
 
@@ -257,7 +257,7 @@ The CLI is being implemented in Go. Planned development workflow:
 
 - `gofmt -w $(find cmd internal -name '*.go')` – ensures all Go sources stay canonically formatted before builds.
 - `go build ./...` – compiles every package to confirm the CLI scaffolding and dependencies link cleanly.
-- `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the `.powerhour/` structure plus default CSV/YAML and logging the run.
+- `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the cache/logs/segments directories, `.powerhour/index.json`, the default CSV/YAML, and logging the run.
 - `go run ./cmd/powerhour check --project sample_project --strict` – exercises configuration loading, external tool probes, and fails when required tooling is missing or outdated.
 - `go run ./cmd/powerhour fetch --project sample_project --force --reprobe` – populates the source cache and refreshes probe data for every row.
 - `go run ./cmd/powerhour status --project sample_project --json` – parses `powerhour.csv`, prints the formatted table, and emits machine-readable output for automated checks.

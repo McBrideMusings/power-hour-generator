@@ -4,8 +4,8 @@ Objective
 - Render each cached source video into a per-clip output file with trim, fades, and text overlays.
 
 Rules
-- Input: project-local cache (.powerhour/cache/) + CSV rows.
-- Output: .powerhour/segments/{index:03}_{safe-title}.mp4
+- Input: project-local cache (`cache/`) + CSV rows.
+- Output: segments/{index:03}_{safe-title}.mp4
 - Steps per row:
   - ffmpeg trim: -ss {start_time} -t {duration}
   - Video filter chain:
@@ -23,7 +23,7 @@ Tasks
   - BuildFilterGraph(row, config) -> string
   - BuildFFmpegCmd(row, cachedPath, outPath, config) -> []string
   - Run per-row jobs with concurrency limit
-  - Log stderr for each run into .powerhour/logs/{index}_{title}.log
+  - Log stderr for each run into logs/{index}_{title}.log
 - Command: powerhour render [--concurrency N]
 
 Acceptance

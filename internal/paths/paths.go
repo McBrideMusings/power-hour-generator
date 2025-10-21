@@ -49,9 +49,9 @@ func newProjectPaths(root string) ProjectPaths {
 		CSVFile:     filepath.Join(root, "powerhour.csv"),
 		CookiesFile: filepath.Join(root, "cookies.txt"),
 		MetaDir:     metaDir,
-		CacheDir:    filepath.Join(metaDir, "cache"),
-		SegmentsDir: filepath.Join(metaDir, "segments"),
-		LogsDir:     filepath.Join(metaDir, "logs"),
+		CacheDir:    filepath.Join(root, "cache"),
+		SegmentsDir: filepath.Join(root, "segments"),
+		LogsDir:     filepath.Join(root, "logs"),
 		IndexFile:   filepath.Join(metaDir, "index.json"),
 	}
 }
@@ -81,7 +81,8 @@ func (p ProjectPaths) EnsureRoot() error {
 	return nil
 }
 
-// EnsureMetaDirs creates the standard .powerhour cache hierarchy.
+// EnsureMetaDirs creates the standard cache/logs/segments hierarchy alongside
+// the hidden .powerhour metadata directory.
 func (p ProjectPaths) EnsureMetaDirs() error {
 	dirs := []string{p.MetaDir, p.CacheDir, p.SegmentsDir, p.LogsDir}
 	for _, dir := range dirs {

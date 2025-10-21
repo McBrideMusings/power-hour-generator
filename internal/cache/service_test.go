@@ -99,9 +99,9 @@ func testPaths(t *testing.T) paths.ProjectPaths {
 		CSVFile:     filepath.Join(root, "powerhour.csv"),
 		CookiesFile: filepath.Join(root, "cookies.txt"),
 		MetaDir:     meta,
-		CacheDir:    filepath.Join(meta, "cache"),
-		SegmentsDir: filepath.Join(meta, "segments"),
-		LogsDir:     filepath.Join(meta, "logs"),
+		CacheDir:    filepath.Join(root, "cache"),
+		SegmentsDir: filepath.Join(root, "segments"),
+		LogsDir:     filepath.Join(root, "logs"),
 		IndexFile:   filepath.Join(meta, "index.json"),
 	}
 }
