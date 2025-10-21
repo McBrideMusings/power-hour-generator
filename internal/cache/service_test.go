@@ -24,6 +24,18 @@ func (f *fakeRunner) Run(_ context.Context, command string, args []string, opts 
 	base := filepath.Base(command)
 	switch base {
 	case "yt-dlp":
+		isIDProbe := false
+		for _, arg := range args {
+			if arg == "--dump-json" {
+				isIDProbe = true
+				break
+			}
+		}
+		if isIDProbe {
+			output := `{"id":"videoid","extractor_key":"youtube"}`
+			return RunResult{Stdout: []byte(output)}, nil
+		}
+
 		var template string
 		var pathFile string
 		for i := 0; i < len(args); i++ {
@@ -87,7 +99,7 @@ func testPaths(t *testing.T) paths.ProjectPaths {
 		CSVFile:     filepath.Join(root, "powerhour.csv"),
 		CookiesFile: filepath.Join(root, "cookies.txt"),
 		MetaDir:     meta,
-		SrcDir:      filepath.Join(meta, "src"),
+		CacheDir:    filepath.Join(meta, "cache"),
 		SegmentsDir: filepath.Join(meta, "segments"),
 		LogsDir:     filepath.Join(meta, "logs"),
 		IndexFile:   filepath.Join(meta, "index.json"),
@@ -138,7 +150,7 @@ func TestServiceResolveDownload(t *testing.T) {
 		t.Fatalf("expected 1 probe call, got %d", runner.probeCalls)
 	}
 
-	entry, ok := idx.Get(1)
+	entry, ok := idx.GetByIdentifier(res.Entry.Identifier)
 	if !ok {
 		t.Fatalf("index missing entry")
 	}
@@ -147,7 +159,7 @@ func TestServiceResolveDownload(t *testing.T) {
 	}
 }
 
-func TestServiceResolveDryRun(t *testing.T) {
+func TestServiceResolveNoDownload(t *testing.T) {
 	pp := testPaths(t)
 	idx, err := Load(pp)
 	if err != nil {
@@ -165,15 +177,15 @@ func TestServiceResolveDryRun(t *testing.T) {
 	}
 
 	row := csvplan.Row{Index: 1, Title: "Example", Link: "https://example.com/video"}
-	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{DryRun: true})
+	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{NoDownload: true})
 	if err != nil {
 		t.Fatalf("resolve dry run: %v", err)
 	}
-	if res.Status != ResolveStatusWouldDownload {
-		t.Fatalf("expected would-download status, got %s", res.Status)
+	if res.Status != ResolveStatusMissing {
+		t.Fatalf("expected missing status, got %s", res.Status)
 	}
-	if res.Updated {
-		t.Fatal("expected dry run to leave entry unchanged")
+	if !res.Updated {
+		t.Fatal("expected no-download to record metadata change")
 	}
 	if res.Probed {
 		t.Fatal("expected dry run to skip probe")
@@ -184,8 +196,11 @@ func TestServiceResolveDryRun(t *testing.T) {
 	if runner.probeCalls != 0 {
 		t.Fatalf("expected no probes in dry run, got %d", runner.probeCalls)
 	}
-	if _, ok := idx.Get(1); ok {
-		t.Fatal("expected dry run to avoid writing to index")
+	if _, exists := idx.LookupLink(row.Link); !exists {
+		t.Fatal("expected no-download to record link mapping")
+	}
+	if _, ok := idx.GetByIdentifier(res.Entry.Identifier); ok {
+		t.Fatal("expected no-download to avoid writing to index")
 	}
 
 	localPath := filepath.Join(pp.Root, "clip.mp4")
@@ -193,12 +208,12 @@ func TestServiceResolveDryRun(t *testing.T) {
 		t.Fatalf("write local file: %v", err)
 	}
 	localRow := csvplan.Row{Index: 2, Title: "Local", Link: localPath}
-	resLocal, err := svc.Resolve(context.Background(), idx, localRow, ResolveOptions{DryRun: true})
+	resLocal, err := svc.Resolve(context.Background(), idx, localRow, ResolveOptions{NoDownload: true})
 	if err != nil {
 		t.Fatalf("resolve dry run local: %v", err)
 	}
-	if resLocal.Status != ResolveStatusWouldCopy {
-		t.Fatalf("expected would-copy status, got %s", resLocal.Status)
+	if resLocal.Status != ResolveStatusMissing {
+		t.Fatalf("expected missing status, got %s", resLocal.Status)
 	}
 	if resLocal.Updated {
 		t.Fatal("expected dry run local to leave entry unchanged")
@@ -206,8 +221,8 @@ func TestServiceResolveDryRun(t *testing.T) {
 	if resLocal.Probed {
 		t.Fatal("expected dry run local to skip probe")
 	}
-	if _, ok := idx.Get(2); ok {
-		t.Fatal("expected dry run local to avoid writing to index")
+	if _, ok := idx.GetByIdentifier(resLocal.Entry.Identifier); ok {
+		t.Fatal("expected no-download local to avoid writing to index")
 	}
 }
 
@@ -229,7 +244,7 @@ func TestServiceResolveDownloadCustomTemplate(t *testing.T) {
 	}
 
 	row := csvplan.Row{Index: 5, Title: "Example", Link: "https://example.com/video"}
-	src, err := svc.resolveSource(row)
+	src, err := svc.resolveSource(context.Background(), idx, row, false)
 	if err != nil {
 		t.Fatalf("resolve source: %v", err)
 	}
@@ -243,7 +258,7 @@ func TestServiceResolveDownloadCustomTemplate(t *testing.T) {
 		t.Fatalf("unexpected template expansion: %s", result)
 	}
 	parts := svc.buildFilenameParts(row, src, key)
-	if parts.Remote != "005_%(id)s" {
+	if parts.Remote != "005_videoid" {
 		t.Fatalf("unexpected remote template: %s", parts.Remote)
 	}
 	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{})

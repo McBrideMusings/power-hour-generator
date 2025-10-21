@@ -1,9 +1,11 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -48,26 +50,28 @@ type Service struct {
 }
 
 type ResolveOptions struct {
-	Force   bool
-	Reprobe bool
-	DryRun  bool
+	Force      bool
+	Reprobe    bool
+	NoDownload bool
 }
 
 type ResolveStatus string
 
 const (
-	ResolveStatusCached        ResolveStatus = "cached"
-	ResolveStatusDownloaded    ResolveStatus = "downloaded"
-	ResolveStatusCopied        ResolveStatus = "copied"
-	ResolveStatusWouldDownload ResolveStatus = "would-download"
-	ResolveStatusWouldCopy     ResolveStatus = "would-copy"
+	ResolveStatusCached     ResolveStatus = "cached"
+	ResolveStatusDownloaded ResolveStatus = "downloaded"
+	ResolveStatusCopied     ResolveStatus = "copied"
+	ResolveStatusMatched    ResolveStatus = "matched"
+	ResolveStatusMissing    ResolveStatus = "missing"
 )
 
 type ResolveResult struct {
-	Entry   Entry
-	Status  ResolveStatus
-	Probed  bool
-	Updated bool
+	Entry      Entry
+	Status     ResolveStatus
+	Probed     bool
+	Updated    bool
+	ID         string
+	Identifier string
 }
 
 type sourceInfo struct {
@@ -75,6 +79,8 @@ type sourceInfo struct {
 	Type       SourceType
 	Identifier string
 	LocalPath  string
+	ID         string
+	Extractor  string
 }
 
 type filenameParts struct {
@@ -169,41 +175,85 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		ctx = context.Background()
 	}
 
-	src, key, names, err := s.resolveRow(row)
+	src, err := s.resolveSource(ctx, idx, row, opts.Force)
 	if err != nil {
 		return ResolveResult{}, err
 	}
+	key := hashIdentifier(src.Identifier)
+	names := s.buildFilenameParts(row, src, key)
 
-	existing, ok := idx.Get(row.Index)
+	var (
+		linkKeyBefore string
+		linkKnown     bool
+	)
+	if src.Type == SourceTypeURL {
+		linkKeyBefore, linkKnown = idx.LookupLink(row.Link)
+	}
+
+	existing, ok := idx.GetByIdentifier(src.Identifier)
 	now := nowFunc().UTC()
 	result := ResolveResult{}
 	entry := existing
-	entry.RowIndex = row.Index
 	entry.Key = key
-	entry.Source = src.Identifier
+	entry.Identifier = src.Identifier
 	entry.SourceType = src.Type
+	entry.Source = sourceDisplayValue(src)
+	if src.Type == SourceTypeURL {
+		if src.ID != "" {
+			entry.ID = src.ID
+		}
+		if src.Extractor != "" {
+			entry.Extractor = src.Extractor
+		}
+		entry.Links = appendUnique(entry.Links, src.Raw)
+	} else {
+		entry.ID = ""
+		entry.Extractor = ""
+		entry.Links = nil
+	}
+	result.Identifier = entry.Identifier
+	result.ID = entry.ID
+
+	metaChanged := hasMetadataChanged(existing, entry)
 
 	cached := false
-	if ok && !opts.Force && existing.Key == key && existing.SourceType == src.Type {
-		if existing.CachedPath != "" && fileExists(existing.CachedPath) {
-			cached = true
-			result.Status = ResolveStatusCached
-			entry = existing
+	if ok && !opts.Force && existing.CachedPath != "" && fileExists(existing.CachedPath) {
+		cached = true
+		result.Status = ResolveStatusCached
+		entry.CachedPath = existing.CachedPath
+		entry.SizeBytes = existing.SizeBytes
+		entry.RetrievedAt = existing.RetrievedAt
+		entry.Notes = existing.Notes
+		entry.LastProbeAt = existing.LastProbeAt
+		entry.Probe = existing.Probe
+	}
+
+	if !cached && !opts.Force {
+		if expectedBase, err := s.ExpectedFilenameBase(row, entry); err == nil {
+			if matchPath, matchInfo := s.locateCachedFile(expectedBase); matchPath != "" {
+				entry.CachedPath = matchPath
+				entry.SizeBytes = matchInfo.Size()
+				entry.RetrievedAt = now
+				entry.Notes = appendUnique(entry.Notes, "matched existing cache file")
+				result.Status = ResolveStatusMatched
+				result.Updated = true
+				cached = true
+			}
 		}
 	}
 
-	if opts.DryRun {
-		if !cached {
-			if src.Type == SourceTypeURL {
-				result.Status = ResolveStatusWouldDownload
-			} else {
-				result.Status = ResolveStatusWouldCopy
+	if !cached && opts.NoDownload {
+		result.Status = ResolveStatusMissing
+		if src.Type == SourceTypeURL {
+			idx.SetLink(row.Link, src.Identifier)
+			if !linkKnown || linkKeyBefore != src.Identifier {
+				result.Updated = true
 			}
 		}
-		result.Entry = entry
-		if result.Status == "" {
-			result.Status = ResolveStatusCached
+		if entry.Identifier != "" {
+			idx.DeleteEntry(entry.Identifier)
 		}
+		result.Entry = entry
 		return result, nil
 	}
 
@@ -245,8 +295,22 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		result.Updated = true
 	}
 
-	idx.Set(entry)
+	linkChanged := src.Type == SourceTypeURL && (!linkKnown || linkKeyBefore != src.Identifier)
+	if metaChanged || linkChanged {
+		result.Updated = true
+	}
+
+	if strings.TrimSpace(entry.CachedPath) != "" {
+		idx.SetEntry(entry)
+	} else {
+		idx.DeleteEntry(entry.Identifier)
+	}
+	if src.Type == SourceTypeURL {
+		idx.SetLink(row.Link, src.Identifier)
+	}
 	result.Entry = entry
+	result.ID = entry.ID
+	result.Identifier = entry.Identifier
 	if result.Status == "" {
 		result.Status = ResolveStatusCached
 	}
@@ -264,6 +328,11 @@ func (s *Service) buildFilenameParts(row csvplan.Row, src sourceInfo, key string
 
 	remoteValues, localValues := filenameTemplateValues(row, src, key, shortHash)
 
+	if id := sanitizeSegment(src.ID); id != "" {
+		remoteValues["ID"] = id
+		remoteValues["REMOTE_ID"] = id
+	}
+
 	remote := cleanupFilename(applyFilenameTemplate(template, remoteValues))
 	if remote == "" {
 		remote = fallback
@@ -280,25 +349,6 @@ func (s *Service) buildFilenameParts(row csvplan.Row, src sourceInfo, key string
 	}
 }
 
-func (s *Service) resolveRow(row csvplan.Row) (sourceInfo, string, filenameParts, error) {
-	src, err := s.resolveSource(row)
-	if err != nil {
-		return sourceInfo{}, "", filenameParts{}, err
-	}
-	key := hashIdentifier(src.Identifier)
-	names := s.buildFilenameParts(row, src, key)
-	return src, key, names, nil
-}
-
-// ExpectedFilenameParts returns the template-derived base names for a plan row.
-func (s *Service) ExpectedFilenameParts(row csvplan.Row) (filenameParts, sourceInfo, error) {
-	src, _, names, err := s.resolveRow(row)
-	if err != nil {
-		return filenameParts{}, sourceInfo{}, err
-	}
-	return names, src, nil
-}
-
 // ExpectedFilenameBase returns the sanitized base name that should be used for the cached file.
 func (s *Service) ExpectedFilenameBase(row csvplan.Row, entry Entry) (string, error) {
 	if s == nil {
@@ -309,10 +359,15 @@ func (s *Service) ExpectedFilenameBase(row csvplan.Row, entry Entry) (string, er
 		template = "$ID"
 	}
 
-	src, key, _, err := s.resolveRow(row)
-	if err != nil {
-		return "", err
+	identifier := strings.TrimSpace(entry.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(row.Link)
+		if identifier == "" {
+			identifier = fmt.Sprintf("row:%03d", row.Index)
+		}
 	}
+	key := hashIdentifier(identifier)
+	src := sourceInfoFromEntry(row, entry, identifier)
 
 	shortHash := truncateHash(key, 10)
 	remoteVals, localVals := filenameTemplateValues(row, src, key, shortHash)
@@ -335,14 +390,20 @@ func (s *Service) ExpectedFilenameBase(row csvplan.Row, entry Entry) (string, er
 	return base, nil
 }
 
-func (s *Service) resolveSource(row csvplan.Row) (sourceInfo, error) {
+func (s *Service) resolveSource(ctx context.Context, idx *Index, row csvplan.Row, force bool) (sourceInfo, error) {
 	raw := strings.TrimSpace(row.Link)
 	if raw == "" {
 		return sourceInfo{}, fmt.Errorf("row %d missing link", row.Index)
 	}
 
 	if looksLikeURL(raw) {
-		return sourceInfo{Raw: raw, Type: SourceTypeURL, Identifier: raw}, nil
+		info, err := s.resolveRemoteSource(ctx, idx, raw, force)
+		if err != nil {
+			return sourceInfo{}, err
+		}
+		info.Raw = raw
+		info.Type = SourceTypeURL
+		return info, nil
 	}
 
 	path := raw
@@ -362,6 +423,238 @@ func (s *Service) resolveSource(row csvplan.Row) (sourceInfo, error) {
 		Identifier: abs,
 		LocalPath:  abs,
 	}, nil
+}
+
+func (s *Service) resolveRemoteSource(ctx context.Context, idx *Index, link string, force bool) (sourceInfo, error) {
+	if idx != nil && !force {
+		if existing, ok := idx.LookupLink(link); ok && strings.TrimSpace(existing) != "" {
+			extractor, id := splitCanonicalIdentifier(existing)
+			return sourceInfo{
+				Identifier: existing,
+				ID:         id,
+				Extractor:  extractor,
+			}, nil
+		}
+	}
+
+	info, err := s.queryRemoteID(ctx, link)
+	if err != nil {
+		return sourceInfo{}, err
+	}
+
+	identifier := canonicalRemoteIdentifier(link, info.Extractor, info.ID)
+	return sourceInfo{
+		Identifier: identifier,
+		ID:         strings.TrimSpace(info.ID),
+		Extractor:  strings.TrimSpace(info.Extractor),
+	}, nil
+}
+
+type remoteIDInfo struct {
+	ID        string
+	Extractor string
+}
+
+func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo, error) {
+	if s == nil {
+		return remoteIDInfo{}, errors.New("cache service is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	args := []string{
+		"--no-playlist",
+		"--no-progress",
+		"--skip-download",
+		"--dump-json",
+		"--no-warnings",
+		"--no-color",
+	}
+	if s.CookiesPath != "" {
+		args = append(args, "--cookies", s.CookiesPath)
+	}
+	if s.ytDLPProxy != "" {
+		args = append(args, "--proxy", s.ytDLPProxy)
+	}
+
+	args = append(args, link)
+
+	res, err := s.Runner.Run(ctx, s.ytDLP, args, RunOptions{Dir: s.Paths.Root})
+	if err != nil {
+		return remoteIDInfo{}, fmt.Errorf("yt-dlp id probe: %w", err)
+	}
+
+	raw := bytes.TrimSpace(res.Stdout)
+	if len(raw) == 0 {
+		return remoteIDInfo{}, errors.New("yt-dlp id probe returned empty output")
+	}
+
+	var payload struct {
+		ID           string `json:"id"`
+		Extractor    string `json:"extractor_key"`
+		ExtractorAlt string `json:"extractor"`
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&payload); err != nil {
+		firstLine := raw
+		if idx := bytes.IndexByte(raw, '\n'); idx >= 0 {
+			firstLine = raw[:idx]
+		}
+		if err := json.Unmarshal(firstLine, &payload); err != nil {
+			return remoteIDInfo{}, fmt.Errorf("parse yt-dlp id response: %w", err)
+		}
+	}
+
+	extractor := strings.TrimSpace(payload.Extractor)
+	if extractor == "" {
+		extractor = strings.TrimSpace(payload.ExtractorAlt)
+	}
+	extractor = strings.ToLower(extractor)
+	if extractor == "" {
+		extractor = "unknown"
+	}
+
+	return remoteIDInfo{
+		ID:        strings.TrimSpace(payload.ID),
+		Extractor: extractor,
+	}, nil
+}
+
+func canonicalRemoteIdentifier(link, extractor, id string) string {
+	id = strings.TrimSpace(id)
+	extractor = strings.TrimSpace(extractor)
+	if extractor == "" {
+		extractor = "unknown"
+	}
+	if id != "" {
+		return fmt.Sprintf("%s:%s", extractor, id)
+	}
+	return fmt.Sprintf("urlhash:%s", hashIdentifier(link))
+}
+
+func splitCanonicalIdentifier(identifier string) (string, string) {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(identifier, ":", 2)
+	if len(parts) == 2 {
+		return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	}
+	return "", identifier
+}
+
+func sourceInfoFromEntry(row csvplan.Row, entry Entry, identifier string) sourceInfo {
+	raw := strings.TrimSpace(row.Link)
+	if raw == "" {
+		raw = strings.TrimSpace(entry.Source)
+	}
+	info := sourceInfo{
+		Raw:        raw,
+		Type:       entry.SourceType,
+		Identifier: identifier,
+		ID:         strings.TrimSpace(entry.ID),
+		Extractor:  strings.TrimSpace(entry.Extractor),
+	}
+	if entry.SourceType == SourceTypeLocal {
+		path := strings.TrimSpace(entry.Source)
+		if path == "" {
+			path = identifier
+		}
+		info.LocalPath = path
+	}
+	return info
+}
+
+func sourceDisplayValue(src sourceInfo) string {
+	if src.Type == SourceTypeLocal {
+		if src.LocalPath != "" {
+			return src.LocalPath
+		}
+	}
+	return src.Raw
+}
+
+func appendUnique(values []string, candidate string) []string {
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return values
+	}
+	for _, existing := range values {
+		if strings.EqualFold(strings.TrimSpace(existing), candidate) {
+			return values
+		}
+	}
+	return append(values, candidate)
+}
+
+func hasMetadataChanged(existing, updated Entry) bool {
+	if strings.TrimSpace(existing.Identifier) != strings.TrimSpace(updated.Identifier) {
+		return true
+	}
+	if existing.SourceType != updated.SourceType {
+		return true
+	}
+	if strings.TrimSpace(existing.Source) != strings.TrimSpace(updated.Source) {
+		return true
+	}
+	if strings.TrimSpace(existing.ID) != strings.TrimSpace(updated.ID) {
+		return true
+	}
+	if strings.TrimSpace(existing.Extractor) != strings.TrimSpace(updated.Extractor) {
+		return true
+	}
+	if len(existing.Links) != len(updated.Links) {
+		return true
+	}
+	for i := range existing.Links {
+		if strings.TrimSpace(existing.Links[i]) != strings.TrimSpace(updated.Links[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) locateCachedFile(base string) (string, os.FileInfo) {
+	base = strings.TrimSpace(base)
+	if base == "" || s == nil {
+		return "", nil
+	}
+	for _, dir := range s.candidateCacheDirs() {
+		exact := filepath.Join(dir, base)
+		if info, err := os.Stat(exact); err == nil && info.Mode().IsRegular() {
+			return exact, info
+		}
+
+		pattern := filepath.Join(dir, base+".*")
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, match := range matches {
+			info, err := os.Stat(match)
+			if err != nil {
+				continue
+			}
+			if info.Mode().IsRegular() {
+				return match, info
+			}
+		}
+	}
+	return "", nil
+}
+
+func (s *Service) candidateCacheDirs() []string {
+	if s == nil {
+		return nil
+	}
+	dir := strings.TrimSpace(s.Paths.CacheDir)
+	if dir == "" {
+		return nil
+	}
+	return []string{dir}
 }
 
 func looksLikeURL(value string) bool {
@@ -397,6 +690,10 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 	}
 
 	sourceID := sanitizeSegment(src.Identifier)
+	canonicalID := sourceID
+	if canonicalID == "" {
+		canonicalID = sanitizeSegment(key)
+	}
 
 	common := map[string]string{
 		"INDEX":         indexPadded,
@@ -420,9 +717,20 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 		"PLAN_START":    start,
 		"PLAN_DURATION": duration,
 	}
+	common["CANONICAL_ID"] = canonicalID
+
+	if remoteID := sanitizeSegment(src.ID); remoteID != "" {
+		common["REMOTE_ID"] = remoteID
+	}
+	if extractor := sanitizeSegment(src.Extractor); extractor != "" {
+		common["SOURCE_EXTRACTOR"] = extractor
+	}
 
 	remote := cloneTemplateValues(common)
 	remote["ID"] = "%(id)s"
+	if remoteID := sanitizeSegment(src.ID); remoteID != "" {
+		remote["REMOTE_ID"] = remoteID
+	}
 
 	local := cloneTemplateValues(common)
 	localID := localIdentifier(src, shortHash)
@@ -459,11 +767,27 @@ func resolveRemoteID(src sourceInfo, entry Entry, shortHash string) string {
 		return ""
 	}
 
-	if id := extractYouTubeID(src.Identifier); id != "" {
+	if id := strings.TrimSpace(src.ID); id != "" {
+		return id
+	}
+	if id := strings.TrimSpace(entry.ID); id != "" {
+		return id
+	}
+
+	if _, id := splitCanonicalIdentifier(src.Identifier); strings.TrimSpace(id) != "" {
+		return strings.TrimSpace(id)
+	}
+
+	if id := extractYouTubeID(src.Raw); id != "" {
 		return id
 	}
 	if id := extractYouTubeID(entry.Source); id != "" {
 		return id
+	}
+	for _, link := range entry.Links {
+		if id := extractYouTubeID(link); id != "" {
+			return id
+		}
 	}
 
 	if entry.CachedPath != "" {
@@ -572,7 +896,7 @@ func cleanupFilename(value string) string {
 	for strings.Contains(value, "__") {
 		value = strings.ReplaceAll(value, "__", "_")
 	}
-	value = strings.Trim(value, " _-.")
+	value = strings.Trim(value, " .-")
 	return value
 }
 
@@ -606,7 +930,7 @@ func sanitizeSegment(value string) string {
 	}
 
 	result := builder.String()
-	result = strings.Trim(result, "_.-")
+	result = strings.Trim(result, ".-")
 	if len(result) > 150 {
 		result = result[:150]
 	}

@@ -2,3 +2,4 @@ ffmpeg_commands.txt
 import.tsv
 ref/*
 sample_project/*
+*.DS_Store

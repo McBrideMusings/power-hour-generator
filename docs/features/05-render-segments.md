@@ -4,7 +4,7 @@ Objective
 - Render each cached source video into a per-clip output file with trim, fades, and text overlays.
 
 Rules
-- Input: project-local cache (.powerhour/src/) + CSV rows.
+- Input: project-local cache (.powerhour/cache/) + CSV rows.
 - Output: .powerhour/segments/{index:03}_{safe-title}.mp4
 - Steps per row:
   - ffmpeg trim: -ss {start_time} -t {duration}

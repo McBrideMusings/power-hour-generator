@@ -12,10 +12,7 @@ The project is in active development. This document describes the planned capabi
 - CLI orchestrates downloads via `yt-dlp`, probes/transcodes with `ffmpeg`/`ffprobe`, and hides those toolchains behind a unified interface.
 - Project-oriented workflow: each project is an on-disk directory with standardized file names and a `.powerhour` cache.
 - Automatic download caching to avoid re-fetching source media across multiple renders.
-- Overlay system that applies:
-  - Title and artist text bottom-left on entry, with fade in/out.
-  - Optional end credit text near clip end.
-  - Persistent index badge bottom-right for the entire clip.
+- Overlay system built from reusable segments that can each define text, transforms, timing, and positioning (defaults cover title + artist on entry, optional outro name, and a persistent index badge).
 - Configurable video/audio encoding parameters and overlay styling via optional YAML.
 - Normalized output: H.264 video at CRF 20 (`veryfast`) with AAC audio (192 kbps, 48 kHz) by default.
 - One MP4 per source row; concatenation workflows will be addressed in a later release.
@@ -24,7 +21,7 @@ The project is in active development. This document describes the planned capabi
 
 1. Create a project directory and add a `powerhour.csv` (or TSV) describing the clips in playback order.
 2. (Optional) Add a `powerhour.yaml` to override fonts, colors, overlay timing, or encoding defaults.
-3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/src`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
+3. Run the CLI pointing at the project directory; the tool will download sources into `.powerhour/cache`, render segments into `.powerhour/segments`, and write logs and metadata alongside the outputs.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
 Currently implemented commands cover project scaffolding, validation, cache population, tool management, and segment rendering.
@@ -34,14 +31,18 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour init --project <dir>` – create the project directory, starter CSV, and default YAML.
 - `powerhour check --project <dir> [--strict]` – verify configuration and external tool availability (fails on missing tools when `--strict` is set).
 - `powerhour status --project <dir> [--json]` – print the parsed song plan and any validation issues.
-- `powerhour fetch --project <dir> [--force] [--reprobe] [--index <n>] [--json]` – download or copy sources into the cache and refresh probe metadata. Optional flags: `--force` re-downloads even when cached, `--reprobe` runs ffprobe on cached files, `--index <n>` limits work to specific 1-based plan rows (repeatable), and `--json` emits machine-readable output.
+- `powerhour fetch --project <dir> [--force] [--reprobe] [--no-download] [--no-progress] [--index <n|n-m>] [--json]` – match existing cache files and download or copy missing sources, refreshing probe metadata. Optional flags: `--force` re-downloads even when cached, `--reprobe` runs ffprobe on cached files, `--no-download` skips new downloads and only reindexes existing files, `--no-progress` disables the interactive progress table, `--index` limits work to specific 1-based plan rows (single values or ranges, repeatable), and `--json` emits machine-readable output.
 - `powerhour validate filenames --project <dir> [--index <n>] [--json]` – audit cached source filenames against the active template, renaming cached files that no longer match. Repeat `--index` to target specific rows.
 - `powerhour validate segments --project <dir> [--index <n>] [--json]` – reconcile rendered segment filenames/logs with the configured template, renaming legacy outputs when possible.
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
-- `powerhour render --project <dir> [--concurrency N] [--force] [--json]` – render every cached row into `.powerhour/segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, and `--json` emits structured output.
+- `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `.powerhour/segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
+
+### Known issues
+
+- The interactive render progress table currently prints an initial “starting” snapshot followed by the live table. The second snapshot contains the accurate state, but the redundant first table will be removed in an upcoming fix; use `--no-progress` as a temporary workaround if you prefer the legacy per-line output.
 
 ## Input CSV schema
 
@@ -68,7 +69,7 @@ project-root/
   powerhour.csv
   powerhour.yaml   # optional configuration
   .powerhour/
-    src/           # cached source downloads
+    cache/         # cached source downloads
     segments/      # rendered clip outputs
     logs/          # per-clip render logs
     index.json     # metadata about processed clips
@@ -96,23 +97,76 @@ audio:
 outputs:
   segment_template: "$INDEX_PAD3_$SAFE_TITLE"
 overlays:
-  font_file: ""
-  font_size_main: 42
-  font_size_index: 36
-  color: "white"
-  outline_color: "black"
-  begin_text:
-    template: "{title} — {artist}"
-    duration_s: 4.0
-    fade_in_s: 0.5
-    fade_out_s: 0.5
-  end_text:
-    template: "{name}"
-    offset_from_end_s: 4.0
-    duration_s: 4.0
-  index_badge:
-    template: "{index}"
-    persistent: true
+  default_style:
+    font_file: ""
+    font_size: 42
+    font_color: white
+    outline_color: black
+    outline_width: 2
+    line_spacing: 4
+  segments:
+    - name: intro-title
+      template: '{title}'
+      style:
+        font_size: 64
+      position:
+        origin: bottom-left
+        offset_x: 40
+        offset_y: 220
+      timing:
+        start:
+          type: from_start
+          offset_s: 0
+        end:
+          type: from_start
+          offset_s: 4
+        fade_in_s: 0.5
+        fade_out_s: 0.5
+    - name: intro-artist
+      template: '{artist}'
+      transform: uppercase
+      style:
+        font_size: 32
+      position:
+        origin: bottom-left
+        offset_x: 40
+        offset_y: 160
+      timing:
+        start:
+          type: from_start
+          offset_s: 0
+        end:
+          type: from_start
+          offset_s: 4
+        fade_in_s: 0.5
+        fade_out_s: 0.5
+    - name: outro-name
+      template: '{name}'
+      position:
+        origin: bottom-left
+        offset_x: 40
+        offset_y: 40
+      timing:
+        start:
+          type: from_end
+          offset_s: 4
+        end:
+          type: from_end
+          offset_s: 0
+    - name: index-badge
+      template: '{index}'
+      style:
+        font_size: 140
+      position:
+        origin: bottom-right
+        offset_x: 40
+        offset_y: 40
+      timing:
+        start:
+          type: from_start
+          offset_s: 0
+        end:
+          type: persistent
 files:
   plan: powerhour.csv
   cookies: cookies.txt
@@ -130,7 +184,11 @@ tools:
     proxy: socks5://127.0.0.1:9050
 ```
 
+Each segment inherits properties from `overlays.default_style` and can override font, colors, spacing, or even choose a different font file. `transform` supports `uppercase` or `lowercase`, letting you tweak casing without touching the source CSV. Timing anchors accept `from_start`, `from_end`, `absolute`, or `persistent`, and fades apply per segment. Position helpers (`origin`, `offset_x`, `offset_y`) compute sensible `drawtext` expressions, but you can always provide explicit `x`/`y` expressions for advanced layouts.
+
 Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
+
+`overlays.default_style.font_file` expects a path to a TrueType or OpenType file. Leave it empty to fall back to FFmpeg's default font, or point at a font in `/System/Library/Fonts`, `/Library/Fonts`, or `~/Library/Fonts` on macOS (similar platform-specific font folders work on other OSes).
 
 Provide alternate column names under `plan.headers` when your CSV uses friendly titles (e.g., map `duration` to accept `length`). Each canonical field can list multiple acceptable header strings; when omitted, the loader falls back to the standard schema. The `plan.default_duration_s` value supplies a project-wide fallback (default 60 seconds) that applies when the `duration` column is absent or empty, while per-row values still override it when present.
 
@@ -173,12 +231,25 @@ All fields are optional; missing values fall back to built-in defaults. Template
 
 Users do not need to install these separately, but locally-installed versions will be reused when possible.
 
+## Testing
+
+Run the full suite with:
+
+```bash
+go test ./...
+```
+
+In sandboxed environments where the default Go build cache is not writable, point `GOCACHE` at a temporary directory for the duration of the run:
+
+```bash
+GOCACHE=$(mktemp -d) go test ./...
+```
+
 ## Development
 
 The CLI is being implemented in Go. Planned development workflow:
 
 - Requires Go (1.21+ recommended) and a standard toolchain on macOS, Windows, or Linux.
-- Run unit tests with `go test ./...`.
 - Cross-compilation and release packaging will produce static binaries per platform.
 - Continuous integration and additional tooling are still being defined.
 

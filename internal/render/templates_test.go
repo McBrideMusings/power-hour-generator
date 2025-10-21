@@ -18,7 +18,7 @@ func TestSegmentBaseNameWithTemplate(t *testing.T) {
 			DurationSeconds: 60,
 			Start:           39 * time.Second,
 		},
-		CachedPath: "/tmp/.powerhour/src/4rgzBdOpDt8.webm",
+		CachedPath: "/tmp/.powerhour/cache/4rgzBdOpDt8.webm",
 		Entry: cache.Entry{
 			Key:    "0J3vgcE5i2o",
 			Source: "https://www.youtube.com/watch?v=4rgzBdOpDt8",

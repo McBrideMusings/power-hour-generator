@@ -576,8 +576,9 @@ func escapeDrawText(value string) string {
 	const newlinePlaceholder = "\u0000"
 	value = strings.ReplaceAll(value, "\n", newlinePlaceholder)
 
-	value = escapeFilterValue(value)
+	value = escapeFilterValueNoQuotes(value)
 	value = strings.ReplaceAll(value, newlinePlaceholder, `\n`)
+	value = strings.ReplaceAll(value, "'", "''")
 	return value
 }
 
@@ -590,9 +591,14 @@ func escapeFFmpegPath(value string) string {
 }
 
 func escapeFilterValue(value string) string {
+	value = escapeFilterValueNoQuotes(value)
+	value = strings.ReplaceAll(value, "'", `\'`)
+	return value
+}
+
+func escapeFilterValueNoQuotes(value string) string {
 	value = strings.ReplaceAll(value, `\`, `\\`)
 	value = strings.ReplaceAll(value, ":", `\:`)
 	value = strings.ReplaceAll(value, ",", `\,`)
-	value = strings.ReplaceAll(value, "'", `\'`)
 	return value
 }

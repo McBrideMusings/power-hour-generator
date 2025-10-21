@@ -15,7 +15,7 @@ type ProjectPaths struct {
 	CSVFile     string
 	CookiesFile string
 	MetaDir     string
-	SrcDir      string
+	CacheDir    string
 	SegmentsDir string
 	LogsDir     string
 	IndexFile   string
@@ -49,7 +49,7 @@ func newProjectPaths(root string) ProjectPaths {
 		CSVFile:     filepath.Join(root, "powerhour.csv"),
 		CookiesFile: filepath.Join(root, "cookies.txt"),
 		MetaDir:     metaDir,
-		SrcDir:      filepath.Join(metaDir, "src"),
+		CacheDir:    filepath.Join(metaDir, "cache"),
 		SegmentsDir: filepath.Join(metaDir, "segments"),
 		LogsDir:     filepath.Join(metaDir, "logs"),
 		IndexFile:   filepath.Join(metaDir, "index.json"),
@@ -83,7 +83,7 @@ func (p ProjectPaths) EnsureRoot() error {
 
 // EnsureMetaDirs creates the standard .powerhour cache hierarchy.
 func (p ProjectPaths) EnsureMetaDirs() error {
-	dirs := []string{p.MetaDir, p.SrcDir, p.SegmentsDir, p.LogsDir}
+	dirs := []string{p.MetaDir, p.CacheDir, p.SegmentsDir, p.LogsDir}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
