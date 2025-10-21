@@ -12,7 +12,7 @@ CONTEXT.md
 
 ## Guidance for Assistants
 - Avoid creating multiple sources of truth: the CSV plan and YAML config are authoritative inputs, and caches should be derived from them rather than storing duplicate state elsewhere.
-- Cached source media lives in `.powerhour/cache/`; assume callers keep that directory up to date if they restructure existing projects.
+- Cached source media lives in `cache/`; assume callers keep that directory up to date if they restructure existing projects.
 - Interactive progress tables (fetch/render) rely on ANSI escapes. The render table currently emits an initial “pending” snapshot before the live updates; treat the second table as the authoritative state until the UI bug is cleaned up.
 
 ## CSV schema (order = playback/order index)
@@ -32,14 +32,14 @@ CHAMBEA	BAD BUNNY	1:50	65	pierce	https://youtu.be/gpIBmED4oss
 project-root/
   powerhour.csv
   powerhour.yaml   # optional
+  cache/
+  segments/
+  logs/
   .powerhour/
-    src/
-    segments/
-    logs/
     index.json
 
 ## Rendering (v1)
-- For each row, output .powerhour/segments/{index:03}_{safe-title}.mp4
+- For each row, output segments/{index:03}_{safe-title}.mp4
 - ffmpeg: trim, scale/pad, fade in/out, overlays, audio normalized.
 - Default encoding: H.264 CRF 20, veryfast, yuv420p, AAC 192k, 48kHz.
 

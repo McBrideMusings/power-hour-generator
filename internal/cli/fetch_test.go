@@ -18,7 +18,7 @@ func TestWriteFetchJSON(t *testing.T) {
 		Index:      1,
 		Title:      "Song",
 		Status:     "copied",
-		CachedPath: "/tmp/.powerhour/cache/001_hash.mp4",
+		CachedPath: "/tmp/cache/001_hash.mp4",
 		Link:       "https://example.com/video",
 		Identifier: "youtube:videoid",
 		MediaID:    "videoid",

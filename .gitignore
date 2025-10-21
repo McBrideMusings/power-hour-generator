@@ -1,3 +1,6 @@
+cache/
+logs/
+segments/
 ffmpeg_commands.txt
 import.tsv
 ref/*

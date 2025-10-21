@@ -10,14 +10,14 @@ Tasks
 - Packages:
   - internal/paths: resolve project root (--project).
   - internal/config: load powerhour.yaml if present; apply defaults.
-  - internal/logx: file logger; .powerhour/logs/.
+  - internal/logx: file logger; logs/.
   - internal/tools: probe yt-dlp, ffmpeg, ffprobe.
 - Commands:
-  - powerhour init → create .powerhour/, empty powerhour.csv, default powerhour.yaml.
+  - powerhour init → create cache/logs/segments directories, `.powerhour/index.json`, empty powerhour.csv, default powerhour.yaml.
   - powerhour check → print resolved tool paths/versions.
 - Flags: --project DIR, --json.
 
 Acceptance
 - init idempotent.
 - check prints JSON with tool info.
-- Logs in .powerhour/logs.
+- Logs in logs/.

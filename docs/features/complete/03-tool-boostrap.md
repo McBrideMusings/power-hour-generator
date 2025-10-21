@@ -37,7 +37,7 @@ Tasks
   - `powerhour check` consumes `internal/tools.Detect`; with `--strict` exit non-zero if any required tool missing/incompatible.
 - Integrations:
   - `internal/config` exposes tool version pins.
-  - `internal/logx` captures download/extraction logs under .powerhour/logs/.
+  - `internal/logx` captures download/extraction logs under logs/.
   - Downstream packages request tool paths via `internal/tools.Lookup("ffmpeg")`.
 
 Acceptance

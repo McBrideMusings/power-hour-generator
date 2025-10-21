@@ -1,11 +1,11 @@
 04_project_cache_fetch.md
 
 Objective
-- Populate project-local .powerhour/src/ from CSV.
+- Populate project-local cache/ from CSV.
 
 Rules
-- URL: download with yt-dlp into .powerhour/src/.
-- Local path: copy (or hardlink) into .powerhour/src/.
+- URL: download with yt-dlp into cache/.
+- Local path: copy (or hardlink) into cache/.
 - Naming:
   - key = SHA256(link or abs path)
   - File: {index:03}_{key[0:10]}{ext}
