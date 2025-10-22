@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"powerhour/internal/config"
 )
@@ -57,7 +58,9 @@ func newProjectPaths(root string) ProjectPaths {
 }
 
 func ApplyConfig(pp ProjectPaths, cfg config.Config) ProjectPaths {
-	if plan := cfg.PlanFile(); plan != "" {
+	if plan := strings.TrimSpace(cfg.Clips.Song.Source.Plan); plan != "" {
+		pp.CSVFile = resolveProjectPath(pp.Root, plan)
+	} else if plan := cfg.PlanFile(); plan != "" {
 		pp.CSVFile = resolveProjectPath(pp.Root, plan)
 	}
 	if cookies := cfg.CookiesFile(); cookies != "" {

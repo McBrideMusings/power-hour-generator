@@ -11,6 +11,7 @@ CONTEXT.md
 - Cross-platform: macOS, Windows, Linux. Single self-contained binary for the CLI. External tools are managed/located/downloaded to per-user cache as needed.
 
 ## Guidance for Assistants
+- Do **not** preserve backwards compatibility. We freely break older project layouts; migrate forward and simplify instead of supporting legacy configs.
 - Avoid creating multiple sources of truth: the CSV plan and YAML config are authoritative inputs, and caches should be derived from them rather than storing duplicate state elsewhere.
 - Cached source media lives in `cache/`; assume callers keep that directory up to date if they restructure existing projects.
 - Interactive progress tables (fetch/render) rely on ANSI escapes. The render table currently emits an initial “pending” snapshot before the live updates; treat the second table as the authoritative state until the UI bug is cleaned up.
@@ -44,88 +45,103 @@ project-root/
 - Default encoding: H.264 CRF 20, veryfast, yuv420p, AAC 192k, 48kHz.
 
 ## Config (YAML)
+```yaml
 version: 1
 video:
   width: 1920
   height: 1080
   fps: 30
+  codec: libx264
+  crf: 20
+  preset: medium
 audio:
   acodec: aac
   bitrate_kbps: 192
-overlays:
-  default_style:
-    font_file: ""
-    font_size: 42
-    font_color: white
-    outline_color: black
-    outline_width: 2
-    line_spacing: 4
-  segments:
-    - name: intro-title
-      template: '{title}'
-      style:
-        font_size: 64
-      position:
-        origin: bottom-left
-        offset_x: 40
-        offset_y: 220
-      timing:
-        start:
-          type: from_start
-          offset_s: 0
-        end:
-          type: from_start
-          offset_s: 4
-         fade_in_s: 0.5
-         fade_out_s: 0.5
-     - name: intro-artist
-       template: '{artist}'
-       transform: uppercase
-       style:
-         font_size: 32
-       position:
-         origin: bottom-left
-         offset_x: 40
-         offset_y: 160
-       timing:
-         start:
-           type: from_start
-           offset_s: 0
-         end:
-           type: from_start
-           offset_s: 4
-         fade_in_s: 0.5
-         fade_out_s: 0.5
-     - name: outro-name
-       template: '{name}'
-       position:
-         origin: bottom-left
-         offset_x: 40
-         offset_y: 40
-       timing:
-         start:
-           type: from_end
-           offset_s: 4
-         end:
-           type: from_end
-           offset_s: 0
-     - name: index-badge
-       template: '{index}'
-       style:
-         font_size: 140
-       position:
-         origin: bottom-right
-         offset_x: 40
-         offset_y: 40
-       timing:
-         start:
-           type: from_start
-           offset_s: 0
-         end:
-           type: persistent
-  # additional segments override defaults per entry
+  sample_rate: 48000
+  channels: 2
+  loudnorm:
+    enabled: true
+    integrated_lufs: -14
+    true_peak_db: -1.5
+    lra_db: 11
+profiles:
+  overlays:
+    song-main:
+      default_style:
+        font_file: ""
+        font_size: 42
+        font_color: white
+        outline_color: black
+        outline_width: 2
+        line_spacing: 4
+      segments:
+        - name: intro-title
+          template: '{title}'
+          style:
+            font_size: 64
+          position:
+            origin: bottom-left
+            offset_x: 40
+            offset_y: 220
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: from_start
+              offset_s: 4
+            fade_in_s: 0.5
+            fade_out_s: 0.5
+        - name: intro-artist
+          template: '{artist}'
+          transform: uppercase
+          style:
+            font_size: 32
+          position:
+            origin: bottom-left
+            offset_x: 40
+            offset_y: 160
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: from_start
+              offset_s: 4
+            fade_in_s: 0.5
+            fade_out_s: 0.5
+        - name: index-badge
+          template: '{index}'
+          style:
+            font_size: 140
+          position:
+            origin: bottom-right
+            offset_x: 40
+            offset_y: 40
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: persistent
+clips:
+  overlay_profile: song-main
+  song:
+    source:
+      plan: powerhour.csv
+      default_duration_s: 60
+    render:
+      fade_in_s: 0.5
+      fade_out_s: 0.5
+    overlays:
+      profile: song-main
+outputs:
+  segment_template: "$INDEX_PAD3_$SAFE_TITLE"
+```
 
-Segments inherit `default_style` unless they set their own fields. Timing supports `from_start`, `from_end`, `absolute`, and `persistent` anchors. `transform` accepts `uppercase` / `lowercase` (default is none).
+Profiles are the single source of truth for overlays—do not recreate the legacy `overlays` block. Every clip type chooses a profile (directly or via `clips.overlay_profile`), and per-clip overrides live under `clips.overrides`.
+
+Timing supports `from_start`, `from_end`, `absolute`, and `persistent` anchors. `transform` accepts `uppercase` / `lowercase` (default is none). Additional profiles can be added under `profiles.overlays` and referenced by `clips.<type>.overlays.profile` or individual overrides.
 
 ## CLI notes
 - `powerhour fetch --index` accepts single values or ranges (e.g. `5` or `2-4`).

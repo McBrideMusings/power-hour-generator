@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"powerhour/internal/config"
+	"powerhour/internal/project"
 	"powerhour/pkg/csvplan"
 )
 
 // BuildFilterGraph constructs the ffmpeg video filter graph for a segment.
-func BuildFilterGraph(row csvplan.Row, cfg config.Config) (string, error) {
+func BuildFilterGraph(seg Segment, cfg config.Config) (string, error) {
 	width := cfg.Video.Width
 	height := cfg.Video.Height
 	if width <= 0 || height <= 0 {
@@ -24,9 +25,10 @@ func BuildFilterGraph(row csvplan.Row, cfg config.Config) (string, error) {
 		return "", errors.New("invalid video fps")
 	}
 
-	clipDuration := float64(row.DurationSeconds)
+	clip := seg.Clip
+	clipDuration := float64(clip.DurationSeconds)
 	if clipDuration <= 0 {
-		return "", fmt.Errorf("row %03d missing duration", row.Index)
+		return "", fmt.Errorf("clip %s#%d missing duration", clip.ClipType, clip.TypeIndex)
 	}
 
 	filters := []string{
@@ -36,14 +38,15 @@ func BuildFilterGraph(row csvplan.Row, cfg config.Config) (string, error) {
 		fmt.Sprintf("fps=%d", cfg.Video.FPS),
 	}
 
-	fadeDur := math.Min(0.5, clipDuration/2)
-	if fadeDur > 0 {
-		filters = append(filters, fmt.Sprintf("fade=t=in:st=0:d=%s", formatFloat(fadeDur)))
-		fadeOutStart := math.Max(clipDuration-fadeDur, 0)
-		filters = append(filters, fmt.Sprintf("fade=t=out:st=%s:d=%s", formatFloat(fadeOutStart), formatFloat(fadeDur)))
+	if fadeIn := math.Min(clipDuration, clip.FadeInSeconds); fadeIn > 0 {
+		filters = append(filters, fmt.Sprintf("fade=t=in:st=0:d=%s", formatFloat(fadeIn)))
+	}
+	if fadeOut := math.Min(clipDuration, clip.FadeOutSeconds); fadeOut > 0 {
+		start := math.Max(clipDuration-fadeOut, 0)
+		filters = append(filters, fmt.Sprintf("fade=t=out:st=%s:d=%s", formatFloat(start), formatFloat(fadeOut)))
 	}
 
-	overlays := buildOverlayFilters(row, cfg, clipDuration)
+	overlays := buildOverlayFilters(seg, cfg, clipDuration)
 	filters = append(filters, overlays...)
 
 	return strings.Join(filters, ","), nil
@@ -71,8 +74,12 @@ func BuildAudioFilters(cfg config.Config) string {
 }
 
 // BuildFFmpegCmd assembles the ffmpeg CLI arguments for the segment render.
-func BuildFFmpegCmd(row csvplan.Row, sourcePath, outputPath, videoFilters, audioFilters string, cfg config.Config) ([]string, error) {
-	if strings.TrimSpace(sourcePath) == "" {
+func BuildFFmpegCmd(seg Segment, outputPath, videoFilters, audioFilters string, cfg config.Config) ([]string, error) {
+	sourcePath := strings.TrimSpace(seg.SourcePath)
+	if sourcePath == "" {
+		sourcePath = strings.TrimSpace(seg.CachedPath)
+	}
+	if sourcePath == "" {
 		return nil, errors.New("source path is empty")
 	}
 	if strings.TrimSpace(outputPath) == "" {
@@ -82,37 +89,58 @@ func BuildFFmpegCmd(row csvplan.Row, sourcePath, outputPath, videoFilters, audio
 		return nil, errors.New("video filter graph is empty")
 	}
 
-	start := formatTimecode(row.Start)
-	duration := strconv.Itoa(row.DurationSeconds)
+	clip := seg.Clip
+	duration := clip.DurationSeconds
+	if duration <= 0 {
+		return nil, fmt.Errorf("clip %s#%d missing duration", clip.ClipType, clip.TypeIndex)
+	}
 
 	args := []string{
 		"-hide_banner",
 		"-y",
-		"-ss", start,
-		"-i", sourcePath,
-		"-t", duration,
-		"-vf", videoFilters,
 	}
+
+	if clip.SourceKind == project.SourceKindPlan {
+		args = append(args, "-ss", formatTimecode(clip.Row.Start))
+	}
+
+	args = append(args,
+		"-i", sourcePath,
+		"-t", strconv.Itoa(duration),
+		"-vf", videoFilters,
+	)
 
 	if strings.TrimSpace(audioFilters) != "" {
 		args = append(args, "-af", audioFilters)
 	}
 
-	args = append(args,
-		"-c:v", "libx264",
-		"-preset", "veryfast",
-		"-crf", "20",
-		"-pix_fmt", "yuv420p",
-	)
+	videoCodec := strings.TrimSpace(cfg.Video.Codec)
+	if videoCodec == "" {
+		videoCodec = "libx264"
+	}
+	args = append(args, "-c:v", videoCodec)
 
-	if cfg.Audio.ACodec != "" {
-		args = append(args, "-c:a", cfg.Audio.ACodec)
+	if preset := strings.TrimSpace(cfg.Video.Preset); preset != "" {
+		args = append(args, "-preset", preset)
+	}
+
+	if cfg.Video.CRF >= 0 {
+		args = append(args, "-crf", strconv.Itoa(cfg.Video.CRF))
+	}
+
+	args = append(args, "-pix_fmt", "yuv420p")
+
+	if acodec := strings.TrimSpace(cfg.Audio.ACodec); acodec != "" {
+		args = append(args, "-c:a", acodec)
 	}
 	if cfg.Audio.BitrateKbps > 0 {
 		args = append(args, "-b:a", fmt.Sprintf("%dk", cfg.Audio.BitrateKbps))
 	}
 	if cfg.Audio.SampleRate > 0 {
 		args = append(args, "-ar", strconv.Itoa(cfg.Audio.SampleRate))
+	}
+	if cfg.Audio.Channels > 0 {
+		args = append(args, "-ac", strconv.Itoa(cfg.Audio.Channels))
 	}
 
 	args = append(args,
@@ -123,10 +151,20 @@ func BuildFFmpegCmd(row csvplan.Row, sourcePath, outputPath, videoFilters, audio
 	return args, nil
 }
 
-func buildOverlayFilters(row csvplan.Row, cfg config.Config, clipDuration float64) []string {
+func buildOverlayFilters(seg Segment, cfg config.Config, clipDuration float64) []string {
 	var filters []string
 
-	for _, segment := range cfg.Overlays.Segments {
+	clip := seg.Clip
+	row := clip.Row
+
+	baseStyle := seg.Profile.DefaultStyle
+
+	segments := seg.Segments
+	if len(segments) == 0 {
+		segments = seg.Profile.Segments
+	}
+
+	for _, segment := range segments {
 		if segment.Disabled {
 			continue
 		}
@@ -143,7 +181,7 @@ func buildOverlayFilters(row csvplan.Row, cfg config.Config, clipDuration float6
 			continue
 		}
 
-		style := resolveTextStyle(cfg.Overlays.DefaultStyle, segment.Style)
+		style := resolveTextStyle(baseStyle, segment.Style)
 		position := resolvePosition(segment.Position)
 
 		filters = append(filters, buildDrawText(drawTextOptions{

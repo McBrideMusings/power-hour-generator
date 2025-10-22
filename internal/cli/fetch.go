@@ -17,6 +17,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/project"
 	"powerhour/pkg/csvplan"
 )
 
@@ -80,16 +81,32 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	planOpts := csvplan.Options{
-		HeaderAliases:   cfg.HeaderAliases(),
-		DefaultDuration: cfg.PlanDefaultDuration(),
-	}
-	rows, err := csvplan.LoadWithOptions(pp.CSVFile, planOpts)
+	resolver, err := project.NewResolver(cfg, pp)
 	if err != nil {
 		return err
 	}
 
-	rows, err = filterRowsByIndexArgs(rows, fetchIndexArg)
+	plans, err := resolver.LoadPlans()
+	if err != nil {
+		return err
+	}
+
+	if len(fetchIndexArg) > 0 {
+		songRows, ok := plans[project.ClipTypeSong]
+		if !ok || len(songRows) == 0 {
+			return fmt.Errorf("no song plan rows available to filter by index")
+		}
+		filtered, err := filterRowsByIndexArgs(songRows, fetchIndexArg)
+		if err != nil {
+			return err
+		}
+		plans[project.ClipTypeSong] = filtered
+	}
+
+	planRows := project.FlattenPlans(plans)
+	if len(planRows) == 0 {
+		return fmt.Errorf("no plan rows found; check clips configuration")
+	}
 	if err != nil {
 		return err
 	}
@@ -109,34 +126,36 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe, NoDownload: fetchNoDownload}
 
 	outWriter := cmd.OutOrStdout()
-	useInteractive := detectInteractiveProgress(outWriter, fetchNoProgress || outputJSON) && len(rows) > 0 && !outputJSON
+	useInteractive := detectInteractiveProgress(outWriter, fetchNoProgress || outputJSON) && len(planRows) > 0 && !outputJSON
 	if useInteractive {
 		fmt.Fprintf(outWriter, "Project: %s\n", pp.Root)
 	}
-	progress := newFetchProgressPrinter(outWriter, rows, useInteractive)
+	progress := newFetchProgressPrinter(outWriter, planRows, useInteractive)
 	if useInteractive {
 		progress.render()
 	}
 
-	outcomes := make([]fetchRowResult, 0, len(rows))
+	outcomes := make([]fetchRowResult, 0, len(planRows))
 	counts := fetchCounts{}
 	dirty := false
 
-	for _, row := range rows {
-		progress.Start(row, fetchForce, fetchNoDownload)
+	for _, planRow := range planRows {
+		row := planRow.Row
+		progress.Start(planRow, fetchForce, fetchNoDownload)
 
 		result, err := svc.Resolve(ctx, idx, row, opts)
 		if err != nil {
 			counts.Failed++
 			logger.Printf("fetch row %03d %q failed: %v", row.Index, row.Title, err)
 			fmt.Fprintf(cmd.ErrOrStderr(), "fetch row %03d %q failed: %v\n", row.Index, row.Title, err)
-			progress.Error(row, err)
+			progress.Error(planRow, err)
 			outcomes = append(outcomes, fetchRowResult{
-				Index:  row.Index,
-				Title:  row.Title,
-				Status: "error",
-				Link:   row.Link,
-				Error:  err.Error(),
+				ClipType: string(planRow.ClipType),
+				Index:    row.Index,
+				Title:    row.Title,
+				Status:   "error",
+				Link:     row.Link,
+				Error:    err.Error(),
 			})
 			continue
 		}
@@ -161,6 +180,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		}
 
 		outcomes = append(outcomes, fetchRowResult{
+			ClipType:   string(planRow.ClipType),
 			Index:      row.Index,
 			Title:      row.Title,
 			Status:     string(result.Status),
@@ -172,7 +192,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 			Probed:     result.Probed,
 		})
 
-		progress.Complete(row, result)
+		progress.Complete(planRow, result)
 	}
 
 	if dirty {
@@ -298,13 +318,14 @@ func writeFetchTable(cmd *cobra.Command, project string, rows []fetchRowResult, 
 	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "INDEX\tSTATUS\tID\tPATH\tLINK\tERROR")
+	fmt.Fprintln(w, "TYPE\tINDEX\tSTATUS\tID\tPATH\tLINK\tERROR")
 	for _, row := range rows {
 		id := row.MediaID
 		if id == "" {
 			id = row.Identifier
 		}
-		fmt.Fprintf(w, "%03d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
+			row.ClipType,
 			row.Index,
 			row.Status,
 			id,
@@ -319,6 +340,7 @@ func writeFetchTable(cmd *cobra.Command, project string, rows []fetchRowResult, 
 }
 
 type fetchRowResult struct {
+	ClipType   string `json:"clip_type"`
 	Index      int    `json:"index"`
 	Title      string `json:"title"`
 	Status     string `json:"status"`
@@ -348,7 +370,7 @@ func writeFetchFailures(cmd *cobra.Command, rows []fetchRowResult) {
 		if row.Status != "error" {
 			continue
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "  %03d %s (%s): %s\n", row.Index, row.Title, row.Link, row.Error)
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s %03d %s (%s): %s\n", row.ClipType, row.Index, row.Title, row.Link, row.Error)
 	}
 }
 
@@ -359,32 +381,34 @@ func printFetchSummary(w io.Writer, counts fetchCounts) {
 }
 
 type progressRow struct {
-	Index  int
-	Status string
-	ID     string
-	Path   string
-	Link   string
-	Error  string
+	ClipType project.ClipType
+	Index    int
+	Status   string
+	ID       string
+	Path     string
+	Link     string
+	Error    string
 }
 
 type fetchProgressPrinter struct {
 	out         io.Writer
 	interactive bool
-	order       []int
-	rows        map[int]*progressRow
+	order       []string
+	rows        map[string]*progressRow
 	lineCount   int
 }
 
-func newFetchProgressPrinter(out io.Writer, planRows []csvplan.Row, interactive bool) *fetchProgressPrinter {
-	rows := make(map[int]*progressRow, len(planRows))
-	order := make([]int, len(planRows))
-	for i, row := range planRows {
-		idx := row.Index
-		order[i] = idx
-		rows[idx] = &progressRow{
-			Index:  idx,
-			Status: "pending",
-			Link:   strings.TrimSpace(row.Link),
+func newFetchProgressPrinter(out io.Writer, planRows []project.PlanRow, interactive bool) *fetchProgressPrinter {
+	rows := make(map[string]*progressRow, len(planRows))
+	order := make([]string, len(planRows))
+	for i, entry := range planRows {
+		key := fetchProgressKey(entry)
+		order[i] = key
+		rows[key] = &progressRow{
+			ClipType: entry.ClipType,
+			Index:    entry.Row.Index,
+			Status:   "pending",
+			Link:     strings.TrimSpace(entry.Row.Link),
 		}
 	}
 	return &fetchProgressPrinter{
@@ -399,16 +423,16 @@ func (p *fetchProgressPrinter) Interactive() bool {
 	return p != nil && p.interactive
 }
 
-func (p *fetchProgressPrinter) Start(row csvplan.Row, force, noDownload bool) {
+func (p *fetchProgressPrinter) Start(entry project.PlanRow, force, noDownload bool) {
 	if p == nil {
 		return
 	}
-	state := p.ensureRow(row)
+	state := p.ensureRow(entry)
 	state.Error = ""
 	state.Path = ""
 	state.ID = ""
 	status := "resolving"
-	link := strings.TrimSpace(row.Link)
+	link := strings.TrimSpace(entry.Row.Link)
 	if isRemoteLink(link) {
 		if force {
 			status = "downloading"
@@ -422,11 +446,11 @@ func (p *fetchProgressPrinter) Start(row csvplan.Row, force, noDownload bool) {
 	p.render()
 }
 
-func (p *fetchProgressPrinter) Complete(row csvplan.Row, res cache.ResolveResult) {
+func (p *fetchProgressPrinter) Complete(entry project.PlanRow, res cache.ResolveResult) {
 	if p == nil {
 		return
 	}
-	state := p.ensureRow(row)
+	state := p.ensureRow(entry)
 	state.Status = string(res.Status)
 	state.Error = ""
 	if res.ID != "" {
@@ -438,11 +462,11 @@ func (p *fetchProgressPrinter) Complete(row csvplan.Row, res cache.ResolveResult
 	p.render()
 }
 
-func (p *fetchProgressPrinter) Error(row csvplan.Row, err error) {
+func (p *fetchProgressPrinter) Error(entry project.PlanRow, err error) {
 	if p == nil {
 		return
 	}
-	state := p.ensureRow(row)
+	state := p.ensureRow(entry)
 	state.Status = "error"
 	if err != nil {
 		state.Error = err.Error()
@@ -459,18 +483,22 @@ func (p *fetchProgressPrinter) Finalize() {
 	p.render()
 }
 
-func (p *fetchProgressPrinter) ensureRow(row csvplan.Row) *progressRow {
+func (p *fetchProgressPrinter) ensureRow(entry project.PlanRow) *progressRow {
 	if p.rows == nil {
-		p.rows = map[int]*progressRow{}
+		p.rows = map[string]*progressRow{}
 	}
-	state, ok := p.rows[row.Index]
+	key := fetchProgressKey(entry)
+	state, ok := p.rows[key]
 	if !ok {
-		state = &progressRow{Index: row.Index}
-		p.rows[row.Index] = state
-		p.order = append(p.order, row.Index)
+		state = &progressRow{
+			ClipType: entry.ClipType,
+			Index:    entry.Row.Index,
+		}
+		p.rows[key] = state
+		p.order = append(p.order, key)
 	}
-	if strings.TrimSpace(state.Link) == "" {
-		state.Link = strings.TrimSpace(row.Link)
+	if trimmed := strings.TrimSpace(state.Link); trimmed == "" {
+		state.Link = strings.TrimSpace(entry.Row.Link)
 	}
 	return state
 }
@@ -481,13 +509,14 @@ func (p *fetchProgressPrinter) render() {
 	}
 	var buf bytes.Buffer
 	tw := tabwriter.NewWriter(&buf, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "INDEX\tSTATUS\tID\tPATH\tLINK\tERROR")
-	for _, idx := range p.order {
-		state := p.rows[idx]
+	fmt.Fprintln(tw, "TYPE\tINDEX\tSTATUS\tID\tPATH\tLINK\tERROR")
+	for _, key := range p.order {
+		state := p.rows[key]
 		id := nonEmptyOrDash(state.ID)
 		path := nonEmptyOrDash(state.Path)
 		errMsg := state.Error
-		fmt.Fprintf(tw, "%03d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
+			state.ClipType,
 			state.Index,
 			state.Status,
 			id,
@@ -517,4 +546,8 @@ func (p *fetchProgressPrinter) render() {
 func isRemoteLink(link string) bool {
 	link = strings.ToLower(strings.TrimSpace(link))
 	return strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://")
+}
+
+func fetchProgressKey(entry project.PlanRow) string {
+	return fmt.Sprintf("%s:%03d", entry.ClipType, entry.Row.Index)
 }

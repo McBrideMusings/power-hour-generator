@@ -14,8 +14,8 @@ import (
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/project"
 	"powerhour/internal/render"
-	"powerhour/pkg/csvplan"
 )
 
 var (
@@ -67,23 +67,34 @@ func runValidateSegments(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	planOpts := csvplan.Options{
-		HeaderAliases:   cfg.HeaderAliases(),
-		DefaultDuration: cfg.PlanDefaultDuration(),
+	resolver, err := project.NewResolver(cfg, pp)
+	if err != nil {
+		return err
 	}
-	rows, err := csvplan.LoadWithOptions(pp.CSVFile, planOpts)
+
+	plans, err := resolver.LoadPlans()
 	if err != nil {
 		return err
 	}
 
 	if len(validateSegmentIndexes) > 0 {
-		rows, err = filterRowsByIndex(rows, validateSegmentIndexes)
+		songRows, ok := plans[project.ClipTypeSong]
+		if !ok || len(songRows) == 0 {
+			return fmt.Errorf("no song plan rows available to filter by index")
+		}
+		filtered, err := filterRowsByIndex(songRows, validateSegmentIndexes)
 		if err != nil {
 			return err
 		}
+		plans[project.ClipTypeSong] = filtered
 	}
 
-	results, summary := collectSegmentChecks(pp, cfg, idx, rows)
+	timeline, err := resolver.BuildTimeline(plans)
+	if err != nil {
+		return err
+	}
+
+	results, summary := collectSegmentChecks(pp, cfg, resolver, idx, timeline)
 
 	if outputJSON {
 		if err := writeSegmentValidationJSON(cmd, pp.Root, results, summary); err != nil {
@@ -101,21 +112,41 @@ func runValidateSegments(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rows []csvplan.Row) ([]segmentValidationResult, segmentValidationSummary) {
-	results := make([]segmentValidationResult, 0, len(rows))
-	summary := segmentValidationSummary{Total: len(rows)}
+func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, resolver *project.Resolver, idx *cache.Index, clips []project.Clip) ([]segmentValidationResult, segmentValidationSummary) {
+	results := make([]segmentValidationResult, 0, len(clips))
+	summary := segmentValidationSummary{}
 
 	template := cfg.SegmentFilenameTemplate()
 	if template == "" {
 		template = config.Default().SegmentFilenameTemplate()
 	}
 
-	for _, row := range rows {
+	for _, clip := range clips {
 		res := segmentValidationResult{
-			Index: row.Index,
+			ClipType: string(clip.ClipType),
+			Index:    clip.TypeIndex,
+		}
+		summary.Total++
+
+		if clip.SourceKind == project.SourceKindPlan {
+			entry, ok, err := resolveEntryForRow(pp, idx, clip.Row)
+			if err != nil {
+				res.Status = "error"
+				res.Notes = append(res.Notes, err.Error())
+				summary.Errors++
+				results = append(results, res)
+				continue
+			}
+			if !ok || strings.TrimSpace(entry.CachedPath) == "" {
+				res.Status = "not_cached"
+				res.Notes = append(res.Notes, "cached source not available; run fetch")
+				summary.NotCached++
+				results = append(results, res)
+				continue
+			}
 		}
 
-		entry, ok, err := resolveEntryForRow(pp, idx, row)
+		segment, err := buildRenderSegment(pp, idx, resolver, clip)
 		if err != nil {
 			res.Status = "error"
 			res.Notes = append(res.Notes, err.Error())
@@ -123,21 +154,8 @@ func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, idx *cache.I
 			results = append(results, res)
 			continue
 		}
-		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
-			res.Status = "not_cached"
-			res.Notes = append(res.Notes, "cache entry not available; skip segment rename")
-			summary.NotCached++
-			results = append(results, res)
-			continue
-		}
 
-		seg := render.Segment{
-			Row:        row,
-			CachedPath: entry.CachedPath,
-			Entry:      entry,
-		}
-
-		expectedBase := render.SegmentBaseName(template, seg)
+		expectedBase := render.SegmentBaseName(template, segment)
 		expectedVideo := filepath.Join(pp.SegmentsDir, expectedBase+".mp4")
 		expectedLog := filepath.Join(pp.LogsDir, expectedBase+".log")
 
@@ -162,7 +180,7 @@ func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, idx *cache.I
 			continue
 		}
 
-		candidate, notes, err := locateSegmentCandidate(pp, row, expectedVideo)
+		candidate, notes, err := locateSegmentCandidate(segment, pp, expectedVideo)
 		if err != nil {
 			res.Status = "error"
 			res.Notes = append(res.Notes, err.Error())
@@ -239,10 +257,10 @@ func collectSegmentChecks(pp paths.ProjectPaths, cfg config.Config, idx *cache.I
 	return results, summary
 }
 
-func locateSegmentCandidate(pp paths.ProjectPaths, row csvplan.Row, expected string) (string, []string, error) {
+func locateSegmentCandidate(seg render.Segment, pp paths.ProjectPaths, expected string) (string, []string, error) {
 	notes := []string{}
 
-	legacyBase := render.SegmentBaseName("", render.Segment{Row: row})
+	legacyBase := render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", seg)
 	legacyPath := filepath.Join(pp.SegmentsDir, legacyBase+".mp4")
 	if !samePath(legacyPath, expected) {
 		if exists, err := paths.FileExists(legacyPath); err != nil {
@@ -252,7 +270,11 @@ func locateSegmentCandidate(pp paths.ProjectPaths, row csvplan.Row, expected str
 		}
 	}
 
-	pattern := filepath.Join(pp.SegmentsDir, fmt.Sprintf("%03d*.mp4", row.Index))
+	index := seg.Clip.TypeIndex
+	if index <= 0 {
+		index = seg.Clip.Sequence
+	}
+	pattern := filepath.Join(pp.SegmentsDir, fmt.Sprintf("%03d*.mp4", index))
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		return "", nil, fmt.Errorf("glob segment pattern: %w", err)
@@ -312,10 +334,11 @@ func writeSegmentValidationTable(cmd *cobra.Command, project string, rows []segm
 	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "INDEX\tSTATUS\tEXPECTED_BASE\tACTUAL_BASE\tVIDEO_PATH\tNOTES")
+	fmt.Fprintln(w, "TYPE\tINDEX\tSTATUS\tEXPECTED_BASE\tACTUAL_BASE\tVIDEO_PATH\tNOTES")
 	for _, row := range rows {
 		note := strings.Join(row.Notes, "; ")
-		fmt.Fprintf(w, "%03d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
+			row.ClipType,
 			row.Index,
 			row.Status,
 			row.ExpectedBase,
@@ -332,6 +355,7 @@ func writeSegmentValidationTable(cmd *cobra.Command, project string, rows []segm
 }
 
 type segmentValidationResult struct {
+	ClipType      string   `json:"clip_type"`
 	Index         int      `json:"index"`
 	Status        string   `json:"status"`
 	ExpectedBase  string   `json:"expected_base"`
