@@ -14,7 +14,7 @@ import (
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
-	"powerhour/pkg/csvplan"
+	"powerhour/internal/project"
 )
 
 var (
@@ -77,23 +77,41 @@ func runValidateFilenames(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	planOpts := csvplan.Options{
-		HeaderAliases:   cfg.HeaderAliases(),
-		DefaultDuration: cfg.PlanDefaultDuration(),
+	resolver, err := project.NewResolver(cfg, pp)
+	if err != nil {
+		return err
 	}
-	rows, err := csvplan.LoadWithOptions(pp.CSVFile, planOpts)
+
+	plans, err := resolver.LoadPlans()
 	if err != nil {
 		return err
 	}
 
 	if len(validateIndexes) > 0 {
-		rows, err = filterRowsByIndex(rows, validateIndexes)
+		songRows, ok := plans[project.ClipTypeSong]
+		if !ok || len(songRows) == 0 {
+			return fmt.Errorf("no song plan rows available to filter by index")
+		}
+		filtered, err := filterRowsByIndex(songRows, validateIndexes)
 		if err != nil {
 			return err
 		}
+		plans[project.ClipTypeSong] = filtered
 	}
 
-	if outputJSON && len(rows) == 0 {
+	timeline, err := resolver.BuildTimeline(plans)
+	if err != nil {
+		return err
+	}
+
+	planClips := make([]project.Clip, 0, len(timeline))
+	for _, clip := range timeline {
+		if clip.SourceKind == project.SourceKindPlan {
+			planClips = append(planClips, clip)
+		}
+	}
+
+	if outputJSON && len(planClips) == 0 {
 		return writeNameValidationJSON(cmd, pp.Root, nil, filenameCheckSummary{})
 	}
 
@@ -102,7 +120,7 @@ func runValidateFilenames(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	results, summary, dirty := collectFilenameChecks(pp, svc, idx, rows)
+	results, summary, dirty := collectFilenameChecks(pp, cfg, svc, idx, planClips)
 	if dirty {
 		if err := cache.Save(pp, idx); err != nil {
 			return fmt.Errorf("save cache index: %w", err)
@@ -125,13 +143,19 @@ func runValidateFilenames(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func collectFilenameChecks(pp paths.ProjectPaths, svc *cache.Service, idx *cache.Index, rows []csvplan.Row) ([]filenameCheckResult, filenameCheckSummary, bool) {
-	results := make([]filenameCheckResult, 0, len(rows))
-	summary := filenameCheckSummary{Total: len(rows)}
+func collectFilenameChecks(pp paths.ProjectPaths, cfg config.Config, svc *cache.Service, idx *cache.Index, clips []project.Clip) ([]filenameCheckResult, filenameCheckSummary, bool) {
+	results := make([]filenameCheckResult, 0, len(clips))
+	summary := filenameCheckSummary{}
 	dirty := false
 
-	for _, row := range rows {
-		res := filenameCheckResult{Index: row.Index}
+	for _, clip := range clips {
+		row := clip.Row
+		res := filenameCheckResult{
+			ClipType: string(clip.ClipType),
+			Index:    clip.TypeIndex,
+		}
+
+		summary.Total++
 
 		entry, ok, err := resolveEntryForRow(pp, idx, row)
 		if err != nil {
@@ -216,6 +240,7 @@ func collectFilenameChecks(pp paths.ProjectPaths, svc *cache.Service, idx *cache
 		res.Notes = append(res.Notes, fmt.Sprintf("renamed to %s", filepath.Base(expectedPath)))
 		res.CachedPath = expectedPath
 		res.Actual = expectedBase
+		summary.Mismatched++
 		summary.Renamed++
 		results = append(results, res)
 	}
@@ -247,10 +272,11 @@ func writeNameValidationTable(cmd *cobra.Command, project string, rows []filenam
 	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "INDEX\tSTATUS\tEXPECTED\tACTUAL\tPATH\tNOTES")
+	fmt.Fprintln(w, "TYPE\tINDEX\tSTATUS\tEXPECTED\tACTUAL\tPATH\tNOTES")
 	for _, row := range rows {
 		note := strings.Join(row.Notes, "; ")
-		fmt.Fprintf(w, "%03d\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
+			row.ClipType,
 			row.Index,
 			row.Status,
 			row.Expected,
@@ -354,6 +380,7 @@ func samePath(a, b string) bool {
 }
 
 type filenameCheckResult struct {
+	ClipType   string   `json:"clip_type"`
 	Index      int      `json:"index"`
 	Status     string   `json:"status"`
 	Expected   string   `json:"expected_base"`

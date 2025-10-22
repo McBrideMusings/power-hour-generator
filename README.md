@@ -30,6 +30,8 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 
 - `powerhour init --project <dir>` – create the project directory, starter CSV, and default YAML.
 - `powerhour check --project <dir> [--strict]` – verify configuration and external tool availability (fails on missing tools when `--strict` is set).
+- `powerhour config show --project <dir>` – print the effective configuration (defaults applied) as YAML.
+- `powerhour config edit --project <dir>` – open the project configuration in `$EDITOR`, creating a starter file when missing.
 - `powerhour status --project <dir> [--json]` – print the parsed song plan and any validation issues.
 - `powerhour fetch --project <dir> [--force] [--reprobe] [--no-download] [--no-progress] [--index <n|n-m>] [--json]` – match existing cache files and download or copy missing sources, refreshing probe metadata. Optional flags: `--force` re-downloads even when cached, `--reprobe` runs ffprobe on cached files, `--no-download` skips new downloads and only reindexes existing files, `--no-progress` disables the interactive progress table, `--index` limits work to specific 1-based plan rows (single values or ranges, repeatable), and `--json` emits machine-readable output.
 - `powerhour validate filenames --project <dir> [--index <n>] [--json]` – audit cached source filenames against the active template, renaming cached files that no longer match. Repeat `--index` to target specific rows.
@@ -85,10 +87,14 @@ video:
   width: 1920
   height: 1080
   fps: 30
+  codec: libx264
+  crf: 20
+  preset: medium
 audio:
   acodec: aac
   bitrate_kbps: 192
   sample_rate: 48000
+  channels: 2
   loudnorm:
     enabled: true
     integrated_lufs: -14
@@ -96,77 +102,77 @@ audio:
     lra_db: 11
 outputs:
   segment_template: "$INDEX_PAD3_$SAFE_TITLE"
-overlays:
-  default_style:
-    font_file: ""
-    font_size: 42
-    font_color: white
-    outline_color: black
-    outline_width: 2
-    line_spacing: 4
-  segments:
-    - name: intro-title
-      template: '{title}'
-      style:
-        font_size: 64
-      position:
-        origin: bottom-left
-        offset_x: 40
-        offset_y: 220
-      timing:
-        start:
-          type: from_start
-          offset_s: 0
-        end:
-          type: from_start
-          offset_s: 4
-        fade_in_s: 0.5
-        fade_out_s: 0.5
-    - name: intro-artist
-      template: '{artist}'
-      transform: uppercase
-      style:
-        font_size: 32
-      position:
-        origin: bottom-left
-        offset_x: 40
-        offset_y: 160
-      timing:
-        start:
-          type: from_start
-          offset_s: 0
-        end:
-          type: from_start
-          offset_s: 4
-        fade_in_s: 0.5
-        fade_out_s: 0.5
-    - name: outro-name
-      template: '{name}'
-      position:
-        origin: bottom-left
-        offset_x: 40
-        offset_y: 40
-      timing:
-        start:
-          type: from_end
-          offset_s: 4
-        end:
-          type: from_end
-          offset_s: 0
-    - name: index-badge
-      template: '{index}'
-      style:
-        font_size: 140
-      position:
-        origin: bottom-right
-        offset_x: 40
-        offset_y: 40
-      timing:
-        start:
-          type: from_start
-          offset_s: 0
-        end:
-          type: persistent
+profiles:
+  overlays:
+    song-main:
+      default_style:
+        font_file: ""
+        font_size: 42
+        font_color: white
+        outline_color: black
+        outline_width: 2
+        line_spacing: 4
+      segments:
+        - name: intro-title
+          template: '{title}'
+          style:
+            font_size: 64
+          position:
+            origin: bottom-left
+            offset_x: 40
+            offset_y: 220
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: from_start
+              offset_s: 4
+            fade_in_s: 0.5
+            fade_out_s: 0.5
+        - name: intro-artist
+          template: '{artist}'
+          transform: uppercase
+          style:
+            font_size: 32
+          position:
+            origin: bottom-left
+            offset_x: 40
+            offset_y: 160
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: from_start
+              offset_s: 4
+            fade_in_s: 0.5
+            fade_out_s: 0.5
+        - name: index-badge
+          template: '{index}'
+          style:
+            font_size: 140
+          position:
+            origin: bottom-right
+            offset_x: 40
+            offset_y: 40
+          timing:
+            start:
+              type: from_start
+              offset_s: 0
+            end:
+              type: persistent
+clips:
+  overlay_profile: song-main
+  song:
+    source:
+      plan: powerhour.csv
+      default_duration_s: 60
+    render:
+      fade_in_s: 0.5
+      fade_out_s: 0.5
+    overlays:
+      profile: song-main
 files:
   plan: powerhour.csv
   cookies: cookies.txt
@@ -184,11 +190,11 @@ tools:
     proxy: socks5://127.0.0.1:9050
 ```
 
-Each segment inherits properties from `overlays.default_style` and can override font, colors, spacing, or even choose a different font file. `transform` supports `uppercase` or `lowercase`, letting you tweak casing without touching the source CSV. Timing anchors accept `from_start`, `from_end`, `absolute`, or `persistent`, and fades apply per segment. Position helpers (`origin`, `offset_x`, `offset_y`) compute sensible `drawtext` expressions, but you can always provide explicit `x`/`y` expressions for advanced layouts.
+Each segment inherits properties from its profile’s `default_style` and can override font, colors, spacing, or even choose a different font file. `transform` supports `uppercase` or `lowercase`, letting you tweak casing without touching the source CSV. Timing anchors accept `from_start`, `from_end`, `absolute`, or `persistent`, and fades apply per segment. Position helpers (`origin`, `offset_x`, `offset_y`) compute sensible `drawtext` expressions, but you can always provide explicit `x`/`y` expressions for advanced layouts.
 
 Use the optional `files` block to point at a different CSV/TSV plan or supply a cookies text file that will be passed to `yt-dlp` during fetches.
 
-`overlays.default_style.font_file` expects a path to a TrueType or OpenType file. Leave it empty to fall back to FFmpeg's default font, or point at a font in `/System/Library/Fonts`, `/Library/Fonts`, or `~/Library/Fonts` on macOS (similar platform-specific font folders work on other OSes).
+`profiles.overlays.<name>.default_style.font_file` expects a path to a TrueType or OpenType file. Leave it empty to fall back to FFmpeg's default font, or point at a font in `/System/Library/Fonts`, `/Library/Fonts`, or `~/Library/Fonts` on macOS (similar platform-specific font folders work on other OSes).
 
 Provide alternate column names under `plan.headers` when your CSV uses friendly titles (e.g., map `duration` to accept `length`). Each canonical field can list multiple acceptable header strings; when omitted, the loader falls back to the standard schema. The `plan.default_duration_s` value supplies a project-wide fallback (default 60 seconds) that applies when the `duration` column is absent or empty, while per-row values still override it when present.
 

@@ -11,6 +11,7 @@ import (
 
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/project"
 	"powerhour/pkg/csvplan"
 )
 
@@ -35,42 +36,37 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	}
 	pp = paths.ApplyConfig(pp, cfg)
 
-	exists, err := paths.FileExists(pp.CSVFile)
-	if err != nil {
-		return fmt.Errorf("stat csv: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("plan file not found: %s", pp.CSVFile)
-	}
-
 	if err := ensureProjectDirs(pp); err != nil {
 		return err
 	}
 
-	opts := csvplan.Options{
-		HeaderAliases:   cfg.HeaderAliases(),
-		DefaultDuration: cfg.PlanDefaultDuration(),
-	}
-	rows, loadErr := csvplan.LoadWithOptions(pp.CSVFile, opts)
-	var validationErrs csvplan.ValidationErrors
-	if loadErr != nil {
-		if ve, ok := loadErr.(csvplan.ValidationErrors); ok {
-			validationErrs = ve
-		} else {
-			return loadErr
-		}
+	resolver, err := project.NewResolver(cfg, pp)
+	if err != nil {
+		return err
 	}
 
+	plans, err := resolver.LoadPlans()
+	if err != nil {
+		return err
+	}
+
+	planRows := project.FlattenPlans(plans)
+	planErrors := resolver.PlanErrors()
+
 	if outputJSON {
-		if err := writeStatusJSON(cmd, pp.Root, rows, validationErrs); err != nil {
+		if err := writeStatusJSON(cmd, pp.Root, planRows, planErrors); err != nil {
 			return err
 		}
 	} else {
-		writeStatusTable(cmd, pp.Root, rows, validationErrs)
+		writeStatusTable(cmd, pp.Root, planRows, planErrors)
 	}
 
-	if len(validationErrs) > 0 {
-		return validationErrs
+	if len(planErrors) > 0 {
+		var agg csvplan.ValidationErrors
+		for _, errs := range planErrors {
+			agg = append(agg, errs...)
+		}
+		return agg
 	}
 
 	return nil
@@ -92,13 +88,15 @@ func ensureProjectDirs(pp paths.ProjectPaths) error {
 	return nil
 }
 
-func writeStatusTable(cmd *cobra.Command, project string, rows []csvplan.Row, errs csvplan.ValidationErrors) {
-	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
+func writeStatusTable(cmd *cobra.Command, projectName string, rows []project.PlanRow, errs map[project.ClipType]csvplan.ValidationErrors) {
+	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", projectName)
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "INDEX\tTITLE\tARTIST\tSTART\tDURATION\tNAME\tLINK")
-	for _, row := range rows {
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%d\t%s\t%s\n",
+	fmt.Fprintln(w, "TYPE\tINDEX\tTITLE\tARTIST\tSTART\tDURATION\tNAME\tLINK")
+	for _, entry := range rows {
+		row := entry.Row
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			entry.ClipType,
 			row.Index,
 			row.Title,
 			row.Artist,
@@ -112,24 +110,28 @@ func writeStatusTable(cmd *cobra.Command, project string, rows []csvplan.Row, er
 
 	if len(errs) > 0 {
 		fmt.Fprintln(cmd.ErrOrStderr(), "Validation issues:")
-		for _, issue := range errs {
-			fmt.Fprintf(cmd.ErrOrStderr(), "  - %s\n", issue.Error())
+		for clipType, issues := range errs {
+			for _, issue := range issues {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  - %s: %s\n", clipType, issue.Error())
+			}
 		}
 	}
 }
 
-func writeStatusJSON(cmd *cobra.Command, project string, rows []csvplan.Row, errs csvplan.ValidationErrors) error {
+func writeStatusJSON(cmd *cobra.Command, projectName string, rows []project.PlanRow, errs map[project.ClipType]csvplan.ValidationErrors) error {
 	payload := struct {
-		Project string                    `json:"project"`
-		Rows    []statusJSONRow           `json:"rows"`
-		Errors  []csvplan.ValidationError `json:"errors,omitempty"`
+		Project string                        `json:"project"`
+		Rows    []statusJSONRow               `json:"rows"`
+		Errors  map[project.ClipType][]string `json:"errors,omitempty"`
 	}{
-		Project: project,
+		Project: projectName,
 		Rows:    make([]statusJSONRow, 0, len(rows)),
 	}
 
-	for _, row := range rows {
+	for _, entry := range rows {
+		row := entry.Row
 		payload.Rows = append(payload.Rows, statusJSONRow{
+			ClipType:        string(entry.ClipType),
 			Index:           row.Index,
 			Title:           row.Title,
 			Artist:          row.Artist,
@@ -142,7 +144,12 @@ func writeStatusJSON(cmd *cobra.Command, project string, rows []csvplan.Row, err
 	}
 
 	if len(errs) > 0 {
-		payload.Errors = errs.Issues()
+		payload.Errors = make(map[project.ClipType][]string, len(errs))
+		for clipType, issues := range errs {
+			for _, issue := range issues {
+				payload.Errors[clipType] = append(payload.Errors[clipType], issue.Error())
+			}
+		}
 	}
 
 	out, err := json.MarshalIndent(payload, "", "  ")
@@ -190,6 +197,7 @@ func formatDuration(d time.Duration) string {
 }
 
 type statusJSONRow struct {
+	ClipType        string `json:"clip_type"`
 	Index           int    `json:"index"`
 	Title           string `json:"title"`
 	Artist          string `json:"artist"`

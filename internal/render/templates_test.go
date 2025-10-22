@@ -5,24 +5,25 @@ import (
 	"time"
 
 	"powerhour/internal/cache"
+	"powerhour/internal/config"
 	"powerhour/pkg/csvplan"
 )
 
 func TestSegmentBaseNameWithTemplate(t *testing.T) {
-	seg := Segment{
-		Row: csvplan.Row{
-			Index:           28,
-			Title:           "Chic, C'est La Vie",
-			Artist:          "Countess Luann",
-			Name:            "Madison",
-			DurationSeconds: 60,
-			Start:           39 * time.Second,
-		},
-		CachedPath: "/tmp/cache/4rgzBdOpDt8.webm",
-		Entry: cache.Entry{
-			Key:    "0J3vgcE5i2o",
-			Source: "https://www.youtube.com/watch?v=4rgzBdOpDt8",
-		},
+	cfg := config.Default()
+	row := csvplan.Row{
+		Index:           28,
+		Title:           "Chic, C'est La Vie",
+		Artist:          "Countess Luann",
+		Name:            "Madison",
+		DurationSeconds: 60,
+		Start:           39 * time.Second,
+	}
+	seg := newTestSegment(cfg, row)
+	seg.CachedPath = "/tmp/cache/4rgzBdOpDt8.webm"
+	seg.Entry = cache.Entry{
+		Key:    "0J3vgcE5i2o",
+		Source: "https://www.youtube.com/watch?v=4rgzBdOpDt8",
 	}
 
 	base := SegmentBaseName("$ID_$INDEX_$TITLE_$NAME", seg)
@@ -33,19 +34,19 @@ func TestSegmentBaseNameWithTemplate(t *testing.T) {
 }
 
 func TestSegmentBaseNameFallback(t *testing.T) {
-	seg := Segment{
-		Row: csvplan.Row{
-			Index:           5,
-			Title:           "Fellow Feeling",
-			DurationSeconds: 60,
-		},
+	cfg := config.Default()
+	row := csvplan.Row{
+		Index:           5,
+		Title:           "Fellow Feeling",
+		DurationSeconds: 60,
 	}
+	seg := newTestSegment(cfg, row)
 
 	base := SegmentBaseName("", seg)
 	if base == "" {
 		t.Fatalf("expected fallback base name, got empty string")
 	}
-	if base != "005_fellow-feeling" {
+	if base != "song_005_fellow-feeling" {
 		t.Fatalf("unexpected fallback base: %q", base)
 	}
 }

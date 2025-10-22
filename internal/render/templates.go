@@ -6,38 +6,55 @@ import (
 	"strconv"
 	"strings"
 
-	"powerhour/pkg/csvplan"
+	"powerhour/internal/project"
 )
 
 func SegmentBaseName(template string, seg Segment) string {
 	template = strings.TrimSpace(template)
 	values := segmentTemplateValues(seg)
 	if template == "" {
-		return sanitizeSegment(fallbackSegmentBase(seg.Row))
+		return sanitizeSegment(fallbackSegmentBase(seg.Clip))
 	}
 	rendered := applySegmentTemplate(template, values)
 	base := sanitizeSegment(rendered)
 	if base == "" {
-		return sanitizeSegment(fallbackSegmentBase(seg.Row))
+		return sanitizeSegment(fallbackSegmentBase(seg.Clip))
 	}
 	return base
 }
 
-func fallbackSegmentBase(row csvplan.Row) string {
+func fallbackSegmentBase(clip project.Clip) string {
+	row := clip.Row
 	name := safeFileSlug(row.Title)
 	if name == "" {
-		name = fmt.Sprintf("segment_%03d", row.Index)
+		name = safeFileSlug(row.Name)
 	}
-	return fmt.Sprintf("%03d_%s", row.Index, name)
+	if name == "" && clip.SourceKind == project.SourceKindMedia && strings.TrimSpace(clip.MediaPath) != "" {
+		base := strings.TrimSuffix(filepath.Base(clip.MediaPath), filepath.Ext(clip.MediaPath))
+		name = safeFileSlug(base)
+	}
+	if name == "" {
+		name = fmt.Sprintf("clip_%03d", clip.TypeIndex)
+	}
+	index := clip.TypeIndex
+	if index <= 0 {
+		index = clip.Sequence
+	}
+	return fmt.Sprintf("%s_%03d_%s", clip.ClipType, index, name)
 }
 
 func segmentTemplateValues(seg Segment) map[string]string {
-	row := seg.Row
+	clip := seg.Clip
+	row := clip.Row
 	entry := seg.Entry
 
 	duration := ""
-	if row.DurationSeconds > 0 {
-		duration = strconv.Itoa(row.DurationSeconds)
+	durationSeconds := clip.DurationSeconds
+	if durationSeconds <= 0 {
+		durationSeconds = row.DurationSeconds
+	}
+	if durationSeconds > 0 {
+		duration = strconv.Itoa(durationSeconds)
 	}
 
 	start := strings.TrimSpace(row.StartRaw)
@@ -45,13 +62,26 @@ func segmentTemplateValues(seg Segment) map[string]string {
 		start = row.Start.String()
 	}
 
+	typeIndex := clip.TypeIndex
+	if typeIndex <= 0 {
+		typeIndex = row.Index
+	}
+
+	indexValue := row.Index
+	if indexValue <= 0 {
+		indexValue = typeIndex
+	}
+	if indexValue <= 0 {
+		indexValue = clip.Sequence
+	}
+
 	values := map[string]string{
-		"INDEX":      fmt.Sprintf("%03d", row.Index),
-		"INDEX_PAD2": fmt.Sprintf("%02d", row.Index),
-		"INDEX_PAD3": fmt.Sprintf("%03d", row.Index),
-		"INDEX_PAD4": fmt.Sprintf("%04d", row.Index),
-		"INDEX_RAW":  strconv.Itoa(row.Index),
-		"ROW_ID":     strconv.Itoa(row.Index),
+		"INDEX":      fmt.Sprintf("%03d", indexValue),
+		"INDEX_PAD2": fmt.Sprintf("%02d", indexValue),
+		"INDEX_PAD3": fmt.Sprintf("%03d", indexValue),
+		"INDEX_PAD4": fmt.Sprintf("%04d", indexValue),
+		"INDEX_RAW":  strconv.Itoa(indexValue),
+		"ROW_ID":     strconv.Itoa(indexValue),
 
 		"TITLE":    sanitizeSegment(row.Title),
 		"ARTIST":   sanitizeSegment(row.Artist),
@@ -68,6 +98,15 @@ func segmentTemplateValues(seg Segment) map[string]string {
 		"PLAN_NAME":     sanitizeSegment(row.Name),
 		"PLAN_START":    sanitizeSegment(start),
 		"PLAN_DURATION": sanitizeSegment(duration),
+
+		"CLIP_TYPE":        sanitizeSegment(string(clip.ClipType)),
+		"CLIP_INDEX":       fmt.Sprintf("%03d", typeIndex),
+		"CLIP_INDEX_RAW":   strconv.Itoa(typeIndex),
+		"SEQUENCE":         fmt.Sprintf("%03d", clip.Sequence),
+		"SEQUENCE_RAW":     strconv.Itoa(clip.Sequence),
+		"SOURCE_KIND":      sanitizeSegment(string(clip.SourceKind)),
+		"SOURCE_PATH":      sanitizeSegment(seg.SourcePath),
+		"SAFE_SOURCE_PATH": safeFileSlug(seg.SourcePath),
 	}
 
 	if entry.Key != "" {

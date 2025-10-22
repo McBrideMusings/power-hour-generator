@@ -13,8 +13,8 @@ import (
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/project"
 	"powerhour/internal/tools"
-	"powerhour/pkg/csvplan"
 )
 
 // Service coordinates ffmpeg segment rendering for plan rows.
@@ -37,7 +37,10 @@ type Options struct {
 
 // Segment encapsulates the information required to render a clip.
 type Segment struct {
-	Row        csvplan.Row
+	Clip       project.Clip
+	Profile    project.ResolvedProfile
+	Segments   []config.OverlaySegment
+	SourcePath string
 	CachedPath string
 	Entry      cache.Entry
 }
@@ -45,6 +48,8 @@ type Segment struct {
 // Result captures the outcome of a render attempt.
 type Result struct {
 	Index      int
+	ClipType   project.ClipType
+	TypeIndex  int
 	Title      string
 	OutputPath string
 	LogPath    string
@@ -144,15 +149,21 @@ func (s *Service) Render(ctx context.Context, segments []Segment, opts Options) 
 }
 
 func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result {
-	row := seg.Row
+	clip := seg.Clip
+	row := clip.Row
 	result := Result{
-		Index: row.Index,
-		Title: row.Title,
+		Index:     clip.Sequence,
+		ClipType:  clip.ClipType,
+		TypeIndex: clip.TypeIndex,
+		Title:     clipTitle(clip),
 	}
 
-	source := strings.TrimSpace(seg.CachedPath)
+	source := strings.TrimSpace(seg.SourcePath)
 	if source == "" {
-		result.Err = fmt.Errorf("row %03d %q missing cached source path", row.Index, row.Title)
+		source = strings.TrimSpace(seg.CachedPath)
+	}
+	if source == "" {
+		result.Err = fmt.Errorf("clip %s#%03d missing source path", clip.ClipType, clip.TypeIndex)
 		return result
 	}
 
@@ -175,7 +186,7 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 		return result
 	}
 
-	filterGraph, err := BuildFilterGraph(row, s.Config)
+	filterGraph, err := BuildFilterGraph(seg, s.Config)
 	if err != nil {
 		result.Err = fmt.Errorf("build filter graph: %w", err)
 		return result
@@ -183,7 +194,7 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 
 	audioFilters := BuildAudioFilters(s.Config)
 
-	args, err := BuildFFmpegCmd(row, source, outputPath, filterGraph, audioFilters, s.Config)
+	args, err := BuildFFmpegCmd(seg, outputPath, filterGraph, audioFilters, s.Config)
 	if err != nil {
 		result.Err = err
 		return result
@@ -197,7 +208,7 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 	}
 	defer logFile.Close()
 
-	s.printf("rendering %03d %s -> %s\n", row.Index, outputPathName(outputPath), filepath.Base(outputPath))
+	s.printf("rendering %s -> %s\n", segmentLabel(seg), filepath.Base(outputPath))
 
 	runOpts := cache.RunOptions{
 		Dir:    s.Paths.Root,
@@ -223,7 +234,7 @@ func (s *Service) segmentPaths(seg Segment) (string, string) {
 	}
 	base := SegmentBaseName(template, seg)
 	if base == "" {
-		base = fallbackSegmentBase(seg.Row)
+		base = fallbackSegmentBase(seg.Clip)
 	}
 	output := filepath.Join(s.Paths.SegmentsDir, base+".mp4")
 	log := filepath.Join(s.Paths.LogsDir, base+".log")
@@ -235,6 +246,31 @@ func (s *Service) printf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(s.stdout, format, args...)
+}
+
+func clipTitle(clip project.Clip) string {
+	if title := strings.TrimSpace(clip.Row.Title); title != "" {
+		return title
+	}
+	if name := strings.TrimSpace(clip.Row.Name); name != "" {
+		return name
+	}
+	if clip.SourceKind == project.SourceKindMedia && strings.TrimSpace(clip.MediaPath) != "" {
+		return filepath.Base(clip.MediaPath)
+	}
+	return string(clip.ClipType)
+}
+
+func segmentLabel(seg Segment) string {
+	clip := seg.Clip
+	label := fmt.Sprintf("%s#%03d", clip.ClipType, clip.TypeIndex)
+	if clip.TypeIndex <= 0 {
+		label = fmt.Sprintf("%s@%03d", clip.ClipType, clip.Sequence)
+	}
+	if title := strings.TrimSpace(clipTitle(clip)); title != "" {
+		return fmt.Sprintf("%s %s", label, title)
+	}
+	return label
 }
 
 func outputPathName(path string) string {

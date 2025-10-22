@@ -19,7 +19,9 @@ func TestBuildFilterGraphIncludesOverlays(t *testing.T) {
 		DurationSeconds: 60,
 	}
 
-	graph, err := BuildFilterGraph(row, cfg)
+	seg := newTestSegment(cfg, row)
+
+	graph, err := BuildFilterGraph(seg, cfg)
 	if err != nil {
 		t.Fatalf("BuildFilterGraph error: %v", err)
 	}
@@ -79,12 +81,13 @@ func TestBuildFFmpegCmd(t *testing.T) {
 		Start:           time.Minute + 30*time.Second,
 	}
 
-	graph, err := BuildFilterGraph(row, cfg)
+	seg := newTestSegment(cfg, row)
+	graph, err := BuildFilterGraph(seg, cfg)
 	if err != nil {
 		t.Fatalf("BuildFilterGraph error: %v", err)
 	}
 
-	cmd, err := BuildFFmpegCmd(row, "/tmp/source.mp4", "/tmp/out.mp4", graph, "aresample=48000", cfg)
+	cmd, err := BuildFFmpegCmd(seg, "/tmp/out.mp4", graph, "aresample=48000", cfg)
 	if err != nil {
 		t.Fatalf("BuildFFmpegCmd error: %v", err)
 	}
@@ -95,7 +98,11 @@ func TestBuildFFmpegCmd(t *testing.T) {
 		{"-t", "45"},
 		{"-vf", graph},
 		{"-af", "aresample=48000"},
+		{"-c:v", "libx264"},
+		{"-preset", "medium"},
+		{"-crf", "20"},
 		{"-ar", "48000"},
+		{"-ac", "2"},
 		{"-b:a", "192k"},
 		{"-c:a", cfg.Audio.ACodec},
 		{"-movflags", "+faststart"},
