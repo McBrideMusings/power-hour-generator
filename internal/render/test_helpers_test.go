@@ -19,9 +19,9 @@ func newTestSegment(cfg config.Config, row csvplan.Row) Segment {
 		OverlayProfile:  "default",
 	}
 
-	profileDef, ok := cfg.Profiles.Overlays["default"]
+	profileDef, ok := cfg.Profiles["default"]
 	if !ok {
-		for name, def := range cfg.Profiles.Overlays {
+		for name, def := range cfg.Profiles {
 			profileDef = def
 			clip.OverlayProfile = name
 			break

@@ -6,3 +6,6 @@ import.tsv
 ref/*
 sample_project/*
 *.DS_Store
+docs/.vitepress/cache
+docs/.vitepress/dist
+docs/node_modules

@@ -58,15 +58,52 @@ func newProjectPaths(root string) ProjectPaths {
 }
 
 func ApplyConfig(pp ProjectPaths, cfg config.Config) ProjectPaths {
-	if plan := strings.TrimSpace(cfg.Clips.Song.Source.Plan); plan != "" {
-		pp.CSVFile = resolveProjectPath(pp.Root, plan)
-	} else if plan := cfg.PlanFile(); plan != "" {
+	if plan := cfg.PlanFile(); plan != "" {
 		pp.CSVFile = resolveProjectPath(pp.Root, plan)
 	}
 	if cookies := cfg.CookiesFile(); cookies != "" {
 		pp.CookiesFile = resolveProjectPath(pp.Root, cookies)
 	}
+	// Apply segments base directory from config
+	if segmentsBase := strings.TrimSpace(cfg.SegmentsBaseDir); segmentsBase != "" {
+		pp.SegmentsDir = resolveProjectPath(pp.Root, segmentsBase)
+	}
 	return pp
+}
+
+// CollectionOutputDir returns the output directory for a specific collection.
+func (p ProjectPaths) CollectionOutputDir(cfg config.Config, collectionName string) string {
+	collection, ok := cfg.Collections[collectionName]
+	if !ok {
+		// Fallback to collection name under segments dir
+		return filepath.Join(p.SegmentsDir, collectionName)
+	}
+
+	outputDir := strings.TrimSpace(collection.OutputDir)
+	if outputDir == "" {
+		outputDir = collectionName
+	}
+
+	// If outputDir is relative, it's relative to SegmentsDir
+	if filepath.IsAbs(outputDir) {
+		return filepath.Clean(outputDir)
+	}
+	return filepath.Join(p.SegmentsDir, outputDir)
+}
+
+// EnsureCollectionDirs creates output directories for all configured collections.
+func (p ProjectPaths) EnsureCollectionDirs(cfg config.Config) error {
+	if cfg.Collections == nil {
+		return nil
+	}
+
+	for name := range cfg.Collections {
+		dir := p.CollectionOutputDir(cfg, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create collection %q output dir: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func resolveProjectPath(root, value string) string {
@@ -94,6 +131,34 @@ func (p ProjectPaths) EnsureMetaDirs() error {
 		}
 	}
 	return nil
+}
+
+// GlobalDir returns the user-level powerhour directory (~/.powerhour).
+// It creates the directory if it does not exist.
+func GlobalDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("detect user home: %w", err)
+	}
+	dir := filepath.Join(home, ".powerhour")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create global dir: %w", err)
+	}
+	return dir, nil
+}
+
+// GlobalLogsDir returns the global logs directory (~/.powerhour/logs).
+// It creates the directory if it does not exist.
+func GlobalLogsDir() (string, error) {
+	global, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(global, "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create global logs dir: %w", err)
+	}
+	return dir, nil
 }
 
 // FileExists reports whether a path exists and is a regular file.

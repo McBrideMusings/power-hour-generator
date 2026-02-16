@@ -29,3 +29,28 @@ func New(p paths.ProjectPaths) (*log.Logger, io.Closer, error) {
 	logger := log.New(file, "", log.LstdFlags|log.Lmicroseconds)
 	return logger, file, nil
 }
+
+// NewGlobal creates a logger that writes to ~/.powerhour/logs/<timestamp>.log.
+// Use this for logging that happens outside a project context or for
+// debugging CLI startup issues.
+func NewGlobal(prefix string) (*log.Logger, io.Closer, error) {
+	logsDir, err := paths.GlobalLogsDir()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	filename := time.Now().Format("20060102-150405")
+	if prefix != "" {
+		filename = prefix + "-" + filename
+	}
+	filename += ".log"
+
+	filePath := filepath.Join(logsDir, filename)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open global log file: %w", err)
+	}
+
+	logger := log.New(file, "", log.LstdFlags|log.Lmicroseconds)
+	return logger, file, nil
+}

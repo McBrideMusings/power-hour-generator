@@ -130,6 +130,16 @@ func segmentTemplateValues(seg Segment) map[string]string {
 		values["SAFE_CACHE_BASENAME"] = safeFileSlug(base)
 	}
 
+	// Add custom fields from Row.CustomFields
+	if row.CustomFields != nil {
+		for key, value := range row.CustomFields {
+			// Add both raw and safe versions of custom fields
+			upperKey := strings.ToUpper(key)
+			values[upperKey] = sanitizeSegment(value)
+			values["SAFE_"+upperKey] = safeFileSlug(value)
+		}
+	}
+
 	return values
 }
 

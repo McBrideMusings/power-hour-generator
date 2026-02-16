@@ -34,7 +34,7 @@ func TestBuildFilterGraphIncludesOverlays(t *testing.T) {
 		"fade=t=out",
 		"drawtext=text='Don''t Stop\\, Believin''",
 		"drawtext=text='JOURNEY'",
-		"drawtext=text='O''Brien'",
+		// Note: 'name' field (O'Brien) not included in default song-main profile
 		"enable='between(t\\,0\\,4)'",
 		"alpha='if(lt(t\\,0)",
 		"drawtext=text='1'",

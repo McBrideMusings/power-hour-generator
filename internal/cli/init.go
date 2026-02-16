@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -11,7 +12,10 @@ import (
 	"powerhour/internal/paths"
 )
 
-const csvHeader = "title,artist,start_time,duration,name,link\n"
+const (
+	csvHeader              = "title,artist,start_time,duration,name,link\n"
+	interstitialsCsvHeader = "link,start_time,duration\n"
+)
 
 func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -43,9 +47,13 @@ func runInit(cmd *cobra.Command, _ []string) error {
 	defer closer.Close()
 	logger.Printf("powerhour init: project=%s", pp.Root)
 
-	created := make([]string, 0, 3)
+	created := make([]string, 0, 4)
 
 	if err := ensureCSV(pp, &created, logger); err != nil {
+		return err
+	}
+
+	if err := ensureInterstitialsCSV(pp, &created, logger); err != nil {
 		return err
 	}
 
@@ -81,6 +89,25 @@ func ensureCSV(pp paths.ProjectPaths, created *[]string, logger Logger) error {
 	}
 	logger.Printf("created csv: %s", pp.CSVFile)
 	*created = append(*created, "powerhour.csv")
+	return nil
+}
+
+func ensureInterstitialsCSV(pp paths.ProjectPaths, created *[]string, logger Logger) error {
+	interstitialsPath := filepath.Join(pp.Root, "interstitials.csv")
+	exists, err := paths.FileExists(interstitialsPath)
+	if err != nil {
+		return fmt.Errorf("check interstitials csv: %w", err)
+	}
+	if exists {
+		logger.Printf("interstitials csv exists: %s", interstitialsPath)
+		return nil
+	}
+
+	if err := os.WriteFile(interstitialsPath, []byte(interstitialsCsvHeader), 0o644); err != nil {
+		return fmt.Errorf("write interstitials csv: %w", err)
+	}
+	logger.Printf("created interstitials csv: %s", interstitialsPath)
+	*created = append(*created, "interstitials.csv")
 	return nil
 }
 

@@ -90,6 +90,7 @@ type Row struct {
 	DurationSeconds int
 	Name            string
 	Link            string
+	CustomFields    map[string]string // Dynamic fields from CSV headers
 }
 
 // Load reads a CSV/TSV file, validates its contents, and returns normalized rows.
@@ -333,13 +334,10 @@ func parseRecord(record []string, header map[string]int, index, line int, opts O
 		durationRaw := get("duration")
 		if strings.TrimSpace(durationRaw) != "" {
 			value, err := strconv.Atoi(durationRaw)
-			if err != nil {
-				errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be an integer"})
-			} else if value <= 0 {
-				errs = append(errs, ValidationError{Line: line, Field: "duration", Message: "duration must be greater than 0"})
-			} else {
+			if err == nil && value > 0 {
 				durationSeconds = value
 			}
+			// If invalid or <= 0, keep the default duration (no error)
 		}
 	}
 
@@ -353,6 +351,30 @@ func parseRecord(record []string, header map[string]int, index, line int, opts O
 		errs = append(errs, ValidationError{Line: line, Field: "link", Message: "link is required"})
 	}
 
+	// Collect custom fields (non-canonical headers)
+	customFields := make(map[string]string)
+	for headerName, pos := range header {
+		// Skip canonical headers
+		isCanonical := false
+		for _, canonical := range canonicalHeaders {
+			if headerName == canonical {
+				isCanonical = true
+				break
+			}
+		}
+		if isCanonical {
+			continue
+		}
+
+		// Add custom field
+		if pos < len(record) {
+			value := strings.TrimSpace(record[pos])
+			if value != "" {
+				customFields[headerName] = value
+			}
+		}
+	}
+
 	row := Row{
 		Index:           index,
 		Title:           title,
@@ -362,6 +384,7 @@ func parseRecord(record []string, header map[string]int, index, line int, opts O
 		DurationSeconds: durationSeconds,
 		Name:            name,
 		Link:            link,
+		CustomFields:    customFields,
 	}
 
 	return row, errs

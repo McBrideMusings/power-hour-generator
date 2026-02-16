@@ -23,8 +23,9 @@ import (
 
 // InstallOptions configures install behaviour.
 type InstallOptions struct {
-	Force   bool
-	Version string
+	Force            bool
+	Version          string
+	SkipInitialCheck bool // Skip the pre-lock Detect call (caller already checked).
 }
 
 // Install downloads and installs the requested tool version into the cache.
@@ -40,9 +41,13 @@ func Install(ctx context.Context, toolName string, version string, opts InstallO
 		return Status{}, fmt.Errorf("unknown tool: %s", toolName)
 	}
 
-	current, err := currentStatus(ctx, toolName)
-	if err != nil {
-		return Status{Tool: toolName, Error: err.Error()}, err
+	var current Status
+	if !opts.SkipInitialCheck {
+		var err error
+		current, err = currentStatus(ctx, toolName)
+		if err != nil {
+			return Status{Tool: toolName, Error: err.Error()}, err
+		}
 	}
 
 	requestedVersion := resolveRequestedVersion(def, current, version, opts)
@@ -50,7 +55,7 @@ func Install(ctx context.Context, toolName string, version string, opts InstallO
 		requestedVersion = def.DefaultVersion
 	}
 
-	if current.Source == SourceCache && current.Satisfied && !opts.Force {
+	if !opts.SkipInitialCheck && current.Source == SourceCache && current.Satisfied && !opts.Force {
 		if requestedVersion == "" || requestedVersion == current.Version {
 			return current, nil
 		}
@@ -139,6 +144,14 @@ func installFromRelease(ctx context.Context, def ToolDefinition, spec releaseSpe
 	archivePath, err := resolveArchivePath(downloads, spec.URL)
 	if err != nil {
 		return Status{Tool: def.Name, Notes: notes}, err
+	}
+	// Version-qualify the archive filename so different versions don't
+	// shadow each other in the downloads cache (e.g. yt-dlp_macos →
+	// yt-dlp_macos.2026.02.04). Without this, ensureDownload would
+	// skip downloading a new version because the old file already exists
+	// and no checksum is available to detect the mismatch.
+	if spec.Version != "" {
+		archivePath = archivePath + "." + spec.Version
 	}
 
 	if err := ensureDownload(ctx, archivePath, spec.URL, spec.Checksum, opts.Force); err != nil {
@@ -347,6 +360,8 @@ func saveCacheInstall(def ToolDefinition, version string, destPaths map[string]s
 	return status, nil
 }
 
+const staleLockAge = 10 * time.Minute
+
 func acquireInstallLock(ctx context.Context, tool string) (func(), error) {
 	root, err := cacheRoot()
 	if err != nil {
@@ -368,6 +383,13 @@ func acquireInstallLock(ctx context.Context, tool string) (func(), error) {
 		}
 		if !errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("acquire lock: %w", err)
+		}
+		// Break stale locks left behind by killed processes.
+		if info, statErr := os.Stat(lockPath); statErr == nil {
+			if time.Since(info.ModTime()) > staleLockAge {
+				_ = os.Remove(lockPath)
+				continue
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -640,6 +662,9 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
+// StatusFunc is a callback for reporting tool check progress.
+type StatusFunc func(msg string)
+
 // Ensure makes sure the requested tool is available, attempting installation if required.
 func Ensure(ctx context.Context, toolName string) (Status, error) {
 	statuses, err := Detect(ctx)
@@ -655,6 +680,47 @@ func Ensure(ctx context.Context, toolName string) (Status, error) {
 		}
 	}
 	return Install(ctx, toolName, "", InstallOptions{})
+}
+
+// EnsureAll checks all requested tools in a single Detect pass and installs
+// any that are missing or unsatisfied. It accepts an optional status callback
+// to report per-tool progress. Returns a map of tool name to Status.
+func EnsureAll(ctx context.Context, names []string, statusFn StatusFunc) (map[string]Status, error) {
+	if statusFn == nil {
+		statusFn = func(string) {}
+	}
+
+	statusFn(fmt.Sprintf("Detecting tools (%s)...", strings.Join(names, ", ")))
+	statuses, err := Detect(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	statusMap := make(map[string]Status, len(statuses))
+	for _, s := range statuses {
+		statusMap[s.Tool] = s
+	}
+
+	result := make(map[string]Status, len(names))
+	for _, name := range names {
+		st, ok := statusMap[name]
+		if ok && st.Satisfied {
+			statusFn(fmt.Sprintf("Found %s %s", name, st.Version))
+			result[name] = st
+			continue
+		}
+		// Pass the minimum version so Install fetches the right release
+		// instead of re-installing the current (outdated) version.
+		targetVersion := st.Minimum
+		statusFn(fmt.Sprintf("Installing %s %s...", name, targetVersion))
+		installed, err := Install(ctx, name, targetVersion, InstallOptions{SkipInitialCheck: true})
+		if err != nil {
+			return nil, fmt.Errorf("ensure %s: %w", name, err)
+		}
+		statusFn(fmt.Sprintf("Installed %s %s", name, installed.Version))
+		result[name] = installed
+	}
+	return result, nil
 }
 
 // Lookup returns the main binary path for the requested tool if recorded in the manifest.

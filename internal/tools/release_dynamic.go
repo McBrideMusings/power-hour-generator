@@ -15,8 +15,18 @@ import (
 var errDynamicReleaseUnsupported = errors.New("dynamic release unsupported")
 
 func resolveRelease(ctx context.Context, tool, version string) (releaseSpec, bool, error) {
+	// Check the on-disk cache for "latest" lookups (version == "").
+	if version == "" {
+		if cached, ok := cachedLatestRelease(tool); ok {
+			return cached, true, nil
+		}
+	}
+
 	spec, err := fetchDynamicRelease(ctx, tool, version)
 	if err == nil {
+		if version == "" {
+			cacheLatestRelease(tool, spec)
+		}
 		return spec, true, nil
 	}
 

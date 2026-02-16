@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -164,7 +165,10 @@ func buildOverlayFilters(seg Segment, cfg config.Config, clipDuration float64) [
 		segments = seg.Profile.Segments
 	}
 
-	for _, segment := range segments {
+	// Sort segments by z_index (if set), otherwise preserve array order
+	sortedSegments := sortSegmentsByZIndex(segments)
+
+	for _, segment := range sortedSegments {
 		if segment.Disabled {
 			continue
 		}
@@ -510,12 +514,28 @@ func renderOverlayTemplate(tmpl string, row csvplan.Row) string {
 	if tmpl == "" {
 		return ""
 	}
-	replacer := strings.NewReplacer(
+
+	// Start with standard fields
+	replacements := []string{
 		"{title}", row.Title,
 		"{artist}", row.Artist,
 		"{name}", row.Name,
 		"{index}", strconv.Itoa(row.Index),
-	)
+	}
+
+	// Add custom fields from Row.CustomFields
+	if row.CustomFields != nil {
+		for key, value := range row.CustomFields {
+			// Support both lowercase and original case
+			replacements = append(replacements, "{"+key+"}", value)
+			lowerKey := strings.ToLower(key)
+			if lowerKey != key {
+				replacements = append(replacements, "{"+lowerKey+"}", value)
+			}
+		}
+	}
+
+	replacer := strings.NewReplacer(replacements...)
 	rendered := strings.TrimSpace(replacer.Replace(tmpl))
 	return rendered
 }
@@ -639,4 +659,60 @@ func escapeFilterValueNoQuotes(value string) string {
 	value = strings.ReplaceAll(value, ":", `\:`)
 	value = strings.ReplaceAll(value, ",", `\,`)
 	return value
+}
+
+// sortSegmentsByZIndex sorts overlay segments by their z_index field.
+// Segments without z_index preserve their original array order (stable sort).
+// Lower z_index = drawn first (behind), higher z_index = drawn last (on top).
+func sortSegmentsByZIndex(segments []config.OverlaySegment) []config.OverlaySegment {
+	// Create a copy to avoid modifying the original
+	sorted := make([]config.OverlaySegment, len(segments))
+	copy(sorted, segments)
+
+	// Create a slice of indices with their original positions for stable sorting
+	type indexedSegment struct {
+		segment       config.OverlaySegment
+		originalIndex int
+	}
+
+	indexed := make([]indexedSegment, len(sorted))
+	for i, seg := range sorted {
+		indexed[i] = indexedSegment{segment: seg, originalIndex: i}
+	}
+
+	// Stable sort by z_index, then by original index
+	sort.SliceStable(indexed, func(i, j int) bool {
+		a, b := indexed[i], indexed[j]
+
+		// If both have z_index, sort by z_index
+		if a.segment.ZIndex != nil && b.segment.ZIndex != nil {
+			if *a.segment.ZIndex != *b.segment.ZIndex {
+				return *a.segment.ZIndex < *b.segment.ZIndex
+			}
+			// If z_index is equal, preserve original order
+			return a.originalIndex < b.originalIndex
+		}
+
+		// If only a has z_index, it should be sorted by its value
+		if a.segment.ZIndex != nil {
+			// Treat missing z_index as 0
+			return *a.segment.ZIndex < 0
+		}
+
+		// If only b has z_index
+		if b.segment.ZIndex != nil {
+			// Treat missing z_index as 0
+			return 0 < *b.segment.ZIndex
+		}
+
+		// If neither has z_index, preserve original order
+		return a.originalIndex < b.originalIndex
+	})
+
+	// Extract sorted segments
+	for i, item := range indexed {
+		sorted[i] = item.segment
+	}
+
+	return sorted
 }

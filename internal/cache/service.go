@@ -83,6 +83,17 @@ type sourceInfo struct {
 	Extractor  string
 }
 
+// LocalSourceMissingError is returned when a local file reference doesn't exist.
+// This is distinct from other errors because local files aren't "fetched" —
+// they're just validated, so a missing local file is a warning, not a failure.
+type LocalSourceMissingError struct {
+	Path string
+}
+
+func (e *LocalSourceMissingError) Error() string {
+	return fmt.Sprintf("local source not found: %s", e.Path)
+}
+
 type filenameParts struct {
 	Remote string
 	Local  string
@@ -91,6 +102,12 @@ type filenameParts struct {
 var nowFunc = time.Now
 
 func NewService(ctx context.Context, pp paths.ProjectPaths, logger Logger, runner Runner) (*Service, error) {
+	return NewServiceWithStatus(ctx, pp, logger, runner, nil)
+}
+
+// NewServiceWithStatus is like NewService but accepts a StatusFunc callback
+// to report per-tool progress during tool detection and installation.
+func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Logger, runner Runner, statusFn tools.StatusFunc) (*Service, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -118,19 +135,18 @@ func NewService(ctx context.Context, pp paths.ProjectPaths, logger Logger, runne
 	}
 	ytProxy := cfg.ToolProxy("yt-dlp")
 
-	ytStatus, err := tools.Ensure(ctx, "yt-dlp")
+	toolStatuses, err := tools.EnsureAll(ctx, []string{"yt-dlp", "ffmpeg"}, statusFn)
 	if err != nil {
-		return nil, fmt.Errorf("ensure yt-dlp: %w", err)
+		return nil, err
 	}
+
+	ytStatus := toolStatuses["yt-dlp"]
 	ytPath := firstNonEmpty(ytStatus.Path, ytStatus.Paths["yt-dlp"])
 	if ytPath == "" {
 		return nil, errors.New("yt-dlp path not resolved")
 	}
 
-	ffStatus, err := tools.Ensure(ctx, "ffmpeg")
-	if err != nil {
-		return nil, fmt.Errorf("ensure ffmpeg: %w", err)
-	}
+	ffStatus := toolStatuses["ffmpeg"]
 	ffprobePath := ffStatus.Paths["ffprobe"]
 	if ffprobePath == "" {
 		return nil, errors.New("ffprobe path not recorded in manifest")
@@ -177,6 +193,14 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 
 	src, err := s.resolveSource(ctx, idx, row, opts.Force)
 	if err != nil {
+		var localMissing *LocalSourceMissingError
+		if errors.As(err, &localMissing) {
+			return ResolveResult{
+				Status:     ResolveStatusMissing,
+				Identifier: localMissing.Path,
+				Entry:      Entry{Source: localMissing.Path, SourceType: SourceTypeLocal},
+			}, nil
+		}
 		return ResolveResult{}, err
 	}
 	key := hashIdentifier(src.Identifier)
@@ -415,7 +439,7 @@ func (s *Service) resolveSource(ctx context.Context, idx *Index, row csvplan.Row
 		return sourceInfo{}, fmt.Errorf("resolve path %q: %w", raw, err)
 	}
 	if _, err := os.Stat(abs); err != nil {
-		return sourceInfo{}, fmt.Errorf("stat local source %q: %w", abs, err)
+		return sourceInfo{}, &LocalSourceMissingError{Path: abs}
 	}
 	return sourceInfo{
 		Raw:        raw,

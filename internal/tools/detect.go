@@ -66,6 +66,27 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 	// Validate manifest entry if present.
 	if entry.Tool != "" {
 		if ok := validateManifestEntry(entry, def); ok {
+			// If the manifest has a version and a checksum that matches the
+			// binary on disk, trust the recorded version and skip the
+			// expensive readVersion shell-out. (yt-dlp --version can take
+			// several seconds on some versions.)
+			if entry.Version != "" && entry.Checksum != "" {
+				mainPath := entry.Paths[def.Binaries[0].ID]
+				if diskChecksum, err := computeChecksum(mainPath); err == nil && diskChecksum == entry.Checksum {
+					status.Version = entry.Version
+					status.Path = mainPath
+					status.Paths = entry.Paths
+					status.Source = entry.Source
+					status.Checksum = entry.Checksum
+					status.InstalledAt = entry.InstalledAt
+					status.Satisfied = meetsMinimum(entry.Version, status.Minimum)
+					if !status.Satisfied {
+						status.Error = fmt.Sprintf("version %s below minimum %s", entry.Version, status.Minimum)
+					}
+					return status, entry, false
+				}
+			}
+
 			version, err := readVersion(ctx, def, entry.Paths)
 			if err == nil {
 				status.Version = version

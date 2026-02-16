@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -17,7 +16,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
-	"powerhour/internal/project"
+	"powerhour/internal/tui"
 	"powerhour/pkg/csvplan"
 )
 
@@ -29,7 +28,7 @@ var (
 	fetchIndexArg   []string
 )
 
-var newCacheService = cache.NewService
+var newCacheServiceWithStatus = cache.NewServiceWithStatus
 
 func newFetchCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -43,6 +42,7 @@ func newFetchCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fetchNoDownload, "no-download", false, "Skip downloading new sources; only match existing files")
 	cmd.Flags().BoolVar(&fetchNoProgress, "no-progress", false, "Disable interactive progress output")
 	cmd.Flags().StringSliceVar(&fetchIndexArg, "index", nil, "Limit fetch to specific 1-based row index or range like 5-10 (repeat flag for multiple)")
+	addCollectionFetchFlags(cmd)
 
 	return cmd
 }
@@ -53,16 +53,34 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		ctx = context.Background()
 	}
 
+	glog, gcloser, _ := logx.NewGlobal("fetch")
+	if gcloser != nil {
+		defer gcloser.Close()
+	}
+	glogf := func(format string, v ...any) {
+		if glog != nil {
+			glog.Printf(format, v...)
+		}
+	}
+	glogf("fetch started")
+
+	status := tui.NewStatusWriter(cmd.ErrOrStderr())
+	defer status.Stop()
+
+	status.Update("Resolving project...")
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
+	status.Update("Loading config...")
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {
 		return err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
+	glogf("config loaded")
 
 	exists, err := paths.DirExists(pp.Root)
 	if err != nil {
@@ -72,152 +90,12 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("project directory does not exist: %s", pp.Root)
 	}
 
-	if err := pp.EnsureMetaDirs(); err != nil {
-		return err
+	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+		return fmt.Errorf("no collections configured")
 	}
 
-	idx, err := cache.Load(pp)
-	if err != nil {
-		return err
-	}
-
-	resolver, err := project.NewResolver(cfg, pp)
-	if err != nil {
-		return err
-	}
-
-	plans, err := resolver.LoadPlans()
-	if err != nil {
-		return err
-	}
-
-	if len(fetchIndexArg) > 0 {
-		songRows, ok := plans[project.ClipTypeSong]
-		if !ok || len(songRows) == 0 {
-			return fmt.Errorf("no song plan rows available to filter by index")
-		}
-		filtered, err := filterRowsByIndexArgs(songRows, fetchIndexArg)
-		if err != nil {
-			return err
-		}
-		plans[project.ClipTypeSong] = filtered
-	}
-
-	planRows := project.FlattenPlans(plans)
-	if len(planRows) == 0 {
-		return fmt.Errorf("no plan rows found; check clips configuration")
-	}
-	if err != nil {
-		return err
-	}
-
-	logger, closer, err := logx.New(pp)
-	if err != nil {
-		return err
-	}
-	defer closer.Close()
-
-	svc, err := newCacheService(ctx, pp, logger, nil)
-	if err != nil {
-		return err
-	}
-	svc.SetLogOutput(cmd.ErrOrStderr())
-
-	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe, NoDownload: fetchNoDownload}
-
-	outWriter := cmd.OutOrStdout()
-	useInteractive := detectInteractiveProgress(outWriter, fetchNoProgress || outputJSON) && len(planRows) > 0 && !outputJSON
-	if useInteractive {
-		fmt.Fprintf(outWriter, "Project: %s\n", pp.Root)
-	}
-	progress := newFetchProgressPrinter(outWriter, planRows, useInteractive)
-	if useInteractive {
-		progress.render()
-	}
-
-	outcomes := make([]fetchRowResult, 0, len(planRows))
-	counts := fetchCounts{}
-	dirty := false
-
-	for _, planRow := range planRows {
-		row := planRow.Row
-		progress.Start(planRow, fetchForce, fetchNoDownload)
-
-		result, err := svc.Resolve(ctx, idx, row, opts)
-		if err != nil {
-			counts.Failed++
-			logger.Printf("fetch row %03d %q failed: %v", row.Index, row.Title, err)
-			fmt.Fprintf(cmd.ErrOrStderr(), "fetch row %03d %q failed: %v\n", row.Index, row.Title, err)
-			progress.Error(planRow, err)
-			outcomes = append(outcomes, fetchRowResult{
-				ClipType: string(planRow.ClipType),
-				Index:    row.Index,
-				Title:    row.Title,
-				Status:   "error",
-				Link:     row.Link,
-				Error:    err.Error(),
-			})
-			continue
-		}
-
-		switch result.Status {
-		case cache.ResolveStatusDownloaded:
-			counts.Downloaded++
-		case cache.ResolveStatusCopied:
-			counts.Copied++
-		case cache.ResolveStatusMatched:
-			counts.Matched++
-		case cache.ResolveStatusMissing:
-			counts.Missing++
-		case cache.ResolveStatusCached:
-			counts.Reused++
-		}
-		if result.Probed {
-			counts.Probed++
-		}
-		if result.Updated {
-			dirty = true
-		}
-
-		outcomes = append(outcomes, fetchRowResult{
-			ClipType:   string(planRow.ClipType),
-			Index:      row.Index,
-			Title:      row.Title,
-			Status:     string(result.Status),
-			CachedPath: result.Entry.CachedPath,
-			Link:       row.Link,
-			Identifier: result.Identifier,
-			MediaID:    result.ID,
-			SizeBytes:  result.Entry.SizeBytes,
-			Probed:     result.Probed,
-		})
-
-		progress.Complete(planRow, result)
-	}
-
-	if dirty {
-		if err := cache.Save(pp, idx); err != nil {
-			return err
-		}
-	}
-
-	if outputJSON {
-		return writeFetchJSON(cmd, pp.Root, outcomes, counts)
-	}
-
-	if progress.Interactive() {
-		progress.Finalize()
-		printFetchSummary(outWriter, counts)
-		if counts.Failed > 0 {
-			writeFetchFailures(cmd, outcomes)
-		}
-	} else {
-		writeFetchTable(cmd, pp.Root, outcomes, counts)
-		if counts.Failed > 0 {
-			writeFetchFailures(cmd, outcomes)
-		}
-	}
-	return nil
+	glogf("routing to collection fetch (%d collections)", len(cfg.Collections))
+	return runCollectionFetch(ctx, cmd, pp, cfg, glog, status)
 }
 
 func parseIndexArgs(args []string) ([]int, error) {
@@ -380,174 +258,7 @@ func printFetchSummary(w io.Writer, counts fetchCounts) {
 	)
 }
 
-type progressRow struct {
-	ClipType project.ClipType
-	Index    int
-	Status   string
-	ID       string
-	Path     string
-	Link     string
-	Error    string
-}
-
-type fetchProgressPrinter struct {
-	out         io.Writer
-	interactive bool
-	order       []string
-	rows        map[string]*progressRow
-	lineCount   int
-}
-
-func newFetchProgressPrinter(out io.Writer, planRows []project.PlanRow, interactive bool) *fetchProgressPrinter {
-	rows := make(map[string]*progressRow, len(planRows))
-	order := make([]string, len(planRows))
-	for i, entry := range planRows {
-		key := fetchProgressKey(entry)
-		order[i] = key
-		rows[key] = &progressRow{
-			ClipType: entry.ClipType,
-			Index:    entry.Row.Index,
-			Status:   "pending",
-			Link:     strings.TrimSpace(entry.Row.Link),
-		}
-	}
-	return &fetchProgressPrinter{
-		out:         out,
-		interactive: interactive,
-		order:       order,
-		rows:        rows,
-	}
-}
-
-func (p *fetchProgressPrinter) Interactive() bool {
-	return p != nil && p.interactive
-}
-
-func (p *fetchProgressPrinter) Start(entry project.PlanRow, force, noDownload bool) {
-	if p == nil {
-		return
-	}
-	state := p.ensureRow(entry)
-	state.Error = ""
-	state.Path = ""
-	state.ID = ""
-	status := "resolving"
-	link := strings.TrimSpace(entry.Row.Link)
-	if isRemoteLink(link) {
-		if force {
-			status = "downloading"
-		} else {
-			status = "matching"
-		}
-	} else {
-		status = "copying"
-	}
-	state.Status = status
-	p.render()
-}
-
-func (p *fetchProgressPrinter) Complete(entry project.PlanRow, res cache.ResolveResult) {
-	if p == nil {
-		return
-	}
-	state := p.ensureRow(entry)
-	state.Status = string(res.Status)
-	state.Error = ""
-	if res.ID != "" {
-		state.ID = res.ID
-	} else {
-		state.ID = res.Identifier
-	}
-	state.Path = res.Entry.CachedPath
-	p.render()
-}
-
-func (p *fetchProgressPrinter) Error(entry project.PlanRow, err error) {
-	if p == nil {
-		return
-	}
-	state := p.ensureRow(entry)
-	state.Status = "error"
-	if err != nil {
-		state.Error = err.Error()
-	} else {
-		state.Error = ""
-	}
-	p.render()
-}
-
-func (p *fetchProgressPrinter) Finalize() {
-	if !p.Interactive() {
-		return
-	}
-	p.render()
-}
-
-func (p *fetchProgressPrinter) ensureRow(entry project.PlanRow) *progressRow {
-	if p.rows == nil {
-		p.rows = map[string]*progressRow{}
-	}
-	key := fetchProgressKey(entry)
-	state, ok := p.rows[key]
-	if !ok {
-		state = &progressRow{
-			ClipType: entry.ClipType,
-			Index:    entry.Row.Index,
-		}
-		p.rows[key] = state
-		p.order = append(p.order, key)
-	}
-	if trimmed := strings.TrimSpace(state.Link); trimmed == "" {
-		state.Link = strings.TrimSpace(entry.Row.Link)
-	}
-	return state
-}
-
-func (p *fetchProgressPrinter) render() {
-	if !p.Interactive() {
-		return
-	}
-	var buf bytes.Buffer
-	tw := tabwriter.NewWriter(&buf, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "TYPE\tINDEX\tSTATUS\tID\tPATH\tLINK\tERROR")
-	for _, key := range p.order {
-		state := p.rows[key]
-		id := nonEmptyOrDash(state.ID)
-		path := nonEmptyOrDash(state.Path)
-		errMsg := state.Error
-		fmt.Fprintf(tw, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
-			state.ClipType,
-			state.Index,
-			state.Status,
-			id,
-			path,
-			state.Link,
-			errMsg,
-		)
-	}
-	tw.Flush()
-	lines := bytes.Split(buf.Bytes(), []byte{'\n'})
-	if len(lines) > 0 && len(lines[len(lines)-1]) == 0 {
-		lines = lines[:len(lines)-1]
-	}
-	if p.lineCount > 0 {
-		fmt.Fprintf(p.out, "\x1b[%dA\r", p.lineCount)
-	}
-	for i, line := range lines {
-		fmt.Fprintf(p.out, "\x1b[2K%s", line)
-		if i < len(lines)-1 {
-			fmt.Fprint(p.out, "\n")
-		}
-	}
-	fmt.Fprint(p.out, "\n")
-	p.lineCount = len(lines)
-}
-
 func isRemoteLink(link string) bool {
 	link = strings.ToLower(strings.TrimSpace(link))
 	return strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://")
-}
-
-func fetchProgressKey(entry project.PlanRow) string {
-	return fmt.Sprintf("%s:%03d", entry.ClipType, entry.Row.Index)
 }

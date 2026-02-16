@@ -1,20 +1,14 @@
 package cli
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
-	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
-	"powerhour/internal/project"
 )
 
 var (
@@ -29,6 +23,7 @@ func newValidateCmd() *cobra.Command {
 
 	cmd.AddCommand(newValidateFilenamesCmd())
 	cmd.AddCommand(newValidateSegmentsCmd())
+	cmd.AddCommand(newValidateCollectionCmd())
 	return cmd
 }
 
@@ -44,11 +39,6 @@ func newValidateFilenamesCmd() *cobra.Command {
 }
 
 func runValidateFilenames(cmd *cobra.Command, _ []string) error {
-	ctx := cmd.Context()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
@@ -58,238 +48,12 @@ func runValidateFilenames(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	pp = paths.ApplyConfig(pp, cfg)
 
-	exists, err := paths.DirExists(pp.Root)
-	if err != nil {
-		return fmt.Errorf("stat project dir: %w", err)
-	}
-	if !exists {
-		return fmt.Errorf("project directory does not exist: %s", pp.Root)
+	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+		return fmt.Errorf("no collections configured")
 	}
 
-	if err := pp.EnsureMetaDirs(); err != nil {
-		return err
-	}
-
-	idx, err := cache.Load(pp)
-	if err != nil {
-		return err
-	}
-
-	resolver, err := project.NewResolver(cfg, pp)
-	if err != nil {
-		return err
-	}
-
-	plans, err := resolver.LoadPlans()
-	if err != nil {
-		return err
-	}
-
-	if len(validateIndexes) > 0 {
-		songRows, ok := plans[project.ClipTypeSong]
-		if !ok || len(songRows) == 0 {
-			return fmt.Errorf("no song plan rows available to filter by index")
-		}
-		filtered, err := filterRowsByIndex(songRows, validateIndexes)
-		if err != nil {
-			return err
-		}
-		plans[project.ClipTypeSong] = filtered
-	}
-
-	timeline, err := resolver.BuildTimeline(plans)
-	if err != nil {
-		return err
-	}
-
-	planClips := make([]project.Clip, 0, len(timeline))
-	for _, clip := range timeline {
-		if clip.SourceKind == project.SourceKindPlan {
-			planClips = append(planClips, clip)
-		}
-	}
-
-	if outputJSON && len(planClips) == 0 {
-		return writeNameValidationJSON(cmd, pp.Root, nil, filenameCheckSummary{})
-	}
-
-	svc, err := newCacheService(ctx, pp, nil, nil)
-	if err != nil {
-		return err
-	}
-
-	results, summary, dirty := collectFilenameChecks(pp, cfg, svc, idx, planClips)
-	if dirty {
-		if err := cache.Save(pp, idx); err != nil {
-			return fmt.Errorf("save cache index: %w", err)
-		}
-	}
-
-	if outputJSON {
-		if err := writeNameValidationJSON(cmd, pp.Root, results, summary); err != nil {
-			return err
-		}
-	} else {
-		writeNameValidationTable(cmd, pp.Root, results, summary)
-	}
-
-	issues := summary.Mismatched + summary.Missing + summary.Errors
-	if issues > 0 {
-		return fmt.Errorf("filename validation failed for %d row(s)", issues)
-	}
-
-	return nil
-}
-
-func collectFilenameChecks(pp paths.ProjectPaths, cfg config.Config, svc *cache.Service, idx *cache.Index, clips []project.Clip) ([]filenameCheckResult, filenameCheckSummary, bool) {
-	results := make([]filenameCheckResult, 0, len(clips))
-	summary := filenameCheckSummary{}
-	dirty := false
-
-	for _, clip := range clips {
-		row := clip.Row
-		res := filenameCheckResult{
-			ClipType: string(clip.ClipType),
-			Index:    clip.TypeIndex,
-		}
-
-		summary.Total++
-
-		entry, ok, err := resolveEntryForRow(pp, idx, row)
-		if err != nil {
-			res.Status = "error"
-			res.Notes = append(res.Notes, err.Error())
-			summary.Errors++
-			results = append(results, res)
-			continue
-		}
-		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
-			res.Status = "not_cached"
-			summary.NotCached++
-			results = append(results, res)
-			continue
-		}
-
-		expectedBase, err := svc.ExpectedFilenameBase(row, entry)
-		if err != nil {
-			res.Status = "error"
-			res.Notes = append(res.Notes, err.Error())
-			summary.Errors++
-			results = append(results, res)
-			continue
-		}
-		res.Expected = expectedBase
-
-		res.CachedPath = entry.CachedPath
-		res.Source = entry.Source
-		ext := filepath.Ext(entry.CachedPath)
-		actualBase := strings.TrimSuffix(filepath.Base(entry.CachedPath), ext)
-		res.Actual = actualBase
-
-		info, statErr := os.Stat(entry.CachedPath)
-		if statErr != nil {
-			res.Status = "missing_file"
-			res.Notes = append(res.Notes, statErr.Error())
-			summary.Missing++
-			results = append(results, res)
-			continue
-		}
-		if info.IsDir() {
-			res.Status = "missing_file"
-			res.Notes = append(res.Notes, "cached path is a directory")
-			summary.Missing++
-			results = append(results, res)
-			continue
-		}
-
-		if rel, err := filepath.Rel(pp.CacheDir, entry.CachedPath); err == nil && strings.HasPrefix(rel, "..") {
-			res.Notes = append(res.Notes, "cached file stored outside cache dir")
-		}
-
-		expectedPath := filepath.Join(pp.CacheDir, expectedBase+ext)
-		if samePath(entry.CachedPath, expectedPath) {
-			res.Status = "match"
-			summary.Matches++
-			results = append(results, res)
-			continue
-		}
-
-		if _, err := os.Stat(expectedPath); err == nil {
-			res.Status = "error"
-			res.Notes = append(res.Notes, "expected path already exists")
-			summary.Errors++
-			results = append(results, res)
-			continue
-		}
-
-		if err := os.Rename(entry.CachedPath, expectedPath); err != nil {
-			res.Status = "error"
-			res.Notes = append(res.Notes, fmt.Sprintf("rename failed: %v", err))
-			summary.Errors++
-			results = append(results, res)
-			continue
-		}
-
-		entry.CachedPath = expectedPath
-		idx.SetEntry(entry)
-		dirty = true
-
-		res.Status = "renamed"
-		res.Notes = append(res.Notes, fmt.Sprintf("renamed to %s", filepath.Base(expectedPath)))
-		res.CachedPath = expectedPath
-		res.Actual = expectedBase
-		summary.Mismatched++
-		summary.Renamed++
-		results = append(results, res)
-	}
-
-	return results, summary, dirty
-}
-
-func writeNameValidationJSON(cmd *cobra.Command, project string, rows []filenameCheckResult, summary filenameCheckSummary) error {
-	payload := struct {
-		Project string                `json:"project"`
-		Rows    []filenameCheckResult `json:"rows"`
-		Summary filenameCheckSummary  `json:"summary"`
-	}{
-		Project: project,
-		Rows:    rows,
-		Summary: summary,
-	}
-
-	data, err := json.MarshalIndent(payload, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode validation json: %w", err)
-	}
-
-	fmt.Fprintln(cmd.OutOrStdout(), string(data))
-	return nil
-}
-
-func writeNameValidationTable(cmd *cobra.Command, project string, rows []filenameCheckResult, summary filenameCheckSummary) {
-	fmt.Fprintf(cmd.OutOrStdout(), "Project: %s\n", project)
-
-	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
-	fmt.Fprintln(w, "TYPE\tINDEX\tSTATUS\tEXPECTED\tACTUAL\tPATH\tNOTES")
-	for _, row := range rows {
-		note := strings.Join(row.Notes, "; ")
-		fmt.Fprintf(w, "%s\t%03d\t%s\t%s\t%s\t%s\t%s\n",
-			row.ClipType,
-			row.Index,
-			row.Status,
-			row.Expected,
-			row.Actual,
-			row.CachedPath,
-			note,
-		)
-	}
-	w.Flush()
-
-	fmt.Fprintf(cmd.OutOrStdout(), "Matches: %d, Renamed: %d, Mismatched: %d, Missing: %d, Not Cached: %d, Errors: %d\n",
-		summary.Matches, summary.Renamed, summary.Mismatched, summary.Missing, summary.NotCached, summary.Errors,
-	)
+	return fmt.Errorf("validate filenames is not yet supported for collections")
 }
 
 func matchTemplateBase(pattern, actual string) bool {
@@ -377,25 +141,4 @@ func samePath(a, b string) bool {
 	a = filepath.Clean(a)
 	b = filepath.Clean(b)
 	return strings.EqualFold(a, b)
-}
-
-type filenameCheckResult struct {
-	ClipType   string   `json:"clip_type"`
-	Index      int      `json:"index"`
-	Status     string   `json:"status"`
-	Expected   string   `json:"expected_base"`
-	Actual     string   `json:"actual_base,omitempty"`
-	CachedPath string   `json:"cached_path,omitempty"`
-	Source     string   `json:"source,omitempty"`
-	Notes      []string `json:"notes,omitempty"`
-}
-
-type filenameCheckSummary struct {
-	Total      int `json:"total"`
-	Matches    int `json:"matches"`
-	Mismatched int `json:"mismatched"`
-	Missing    int `json:"missing"`
-	NotCached  int `json:"not_cached"`
-	Errors     int `json:"errors"`
-	Renamed    int `json:"renamed"`
 }

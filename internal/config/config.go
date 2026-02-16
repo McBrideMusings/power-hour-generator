@@ -4,13 +4,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-const defaultOverlayProfileName = "default"
+// CollectionConfig defines a collection of clips with configurable CSV headers.
+type CollectionConfig struct {
+	Plan           string `yaml:"plan"`
+	OutputDir      string `yaml:"output_dir"`
+	Profile        string `yaml:"profile"`
+	LinkHeader     string `yaml:"link_header"`
+	StartHeader    string `yaml:"start_header"`
+	DurationHeader string `yaml:"duration_header"`
+}
 
 var allowedVideoPresets = map[string]struct{}{
 	"ultrafast": {},
@@ -27,16 +34,17 @@ var allowedVideoPresets = map[string]struct{}{
 
 // Config captures the rendering and overlay configuration for a project.
 type Config struct {
-	Version   int             `yaml:"version"`
-	Video     VideoConfig     `yaml:"video"`
-	Audio     AudioConfig     `yaml:"audio"`
-	Profiles  ProfilesConfig  `yaml:"profiles"`
-	Clips     ClipsConfig     `yaml:"clips"`
-	Outputs   OutputConfig    `yaml:"outputs"`
-	Plan      PlanConfig      `yaml:"plan"`
-	Files     FileOverrides   `yaml:"files"`
-	Tools     ToolPins        `yaml:"tools"`
-	Downloads DownloadsConfig `yaml:"downloads"`
+	Version         int                        `yaml:"version"`
+	Video           VideoConfig                `yaml:"video"`
+	Audio           AudioConfig                `yaml:"audio"`
+	Profiles        ProfilesConfig             `yaml:"profiles"`
+	Collections     map[string]CollectionConfig `yaml:"collections"`
+	Outputs         OutputConfig               `yaml:"outputs"`
+	Plan            PlanConfig                 `yaml:"plan"`
+	Files           FileOverrides              `yaml:"files"`
+	Tools           ToolPins                   `yaml:"tools"`
+	Downloads       DownloadsConfig            `yaml:"downloads"`
+	SegmentsBaseDir string                     `yaml:"segments_base_dir"`
 }
 
 // ToolPins captures optional version pinning for managed external tools.
@@ -74,86 +82,15 @@ type AudioConfig struct {
 }
 
 // ProfilesConfig captures reusable overlay styling definitions.
-type ProfilesConfig struct {
-	Overlays map[string]OverlayProfile `yaml:"overlays"`
-}
+type ProfilesConfig map[string]OverlayProfile
 
 // OverlayProfile defines a named overlay style composed of segments and defaults.
 type OverlayProfile struct {
-	DefaultStyle TextStyle        `yaml:"default_style"`
-	Segments     []OverlaySegment `yaml:"segments"`
-}
-
-// ClipsConfig orchestrates clip type defaults, profiles, and overrides.
-type ClipsConfig struct {
-	OverlayProfile string         `yaml:"overlay_profile"`
-	Song           ClipTypeConfig `yaml:"song"`
-	Interstitial   ClipTypeConfig `yaml:"interstitial"`
-	Intro          ClipTypeConfig `yaml:"intro"`
-	Outro          ClipTypeConfig `yaml:"outro"`
-	Overrides      []ClipOverride `yaml:"overrides"`
-}
-
-// ClipTypeConfig encapsulates source/render defaults and overlay selection.
-type ClipTypeConfig struct {
-	Source   ClipSourceConfig  `yaml:"source"`
-	Render   ClipRenderConfig  `yaml:"render"`
-	Overlays ClipOverlayConfig `yaml:"overlays"`
-}
-
-// ClipSourceConfig describes where clips of a type originate.
-type ClipSourceConfig struct {
-	Plan               string `yaml:"plan"`
-	Media              string `yaml:"media"`
-	DefaultDurationSec int    `yaml:"default_duration_s"`
-}
-
-// ClipRenderConfig controls fallback render parameters for a clip type.
-type ClipRenderConfig struct {
-	DurationSec *int     `yaml:"duration_s,omitempty"`
-	FadeInSec   *float64 `yaml:"fade_in_s,omitempty"`
-	FadeOutSec  *float64 `yaml:"fade_out_s,omitempty"`
-}
-
-// ClipOverlayConfig selects which overlay profile applies to the clip type.
-type ClipOverlayConfig struct {
-	Profile string `yaml:"profile"`
-}
-
-// ClipOverride applies targeted adjustments to specific clips.
-type ClipOverride struct {
-	Match    ClipMatch           `yaml:"match"`
-	Render   ClipRenderOverride  `yaml:"render"`
-	Overlays ClipOverlayOverride `yaml:"overlays"`
-}
-
-// ClipMatch identifies which clip(s) receive an override.
-type ClipMatch struct {
-	ClipType string `yaml:"clip_type"`
-	Index    *int   `yaml:"index,omitempty"`
-	Name     string `yaml:"name,omitempty"`
-	ID       string `yaml:"id,omitempty"`
-}
-
-// ClipRenderOverride modifies render characteristics for a clip.
-type ClipRenderOverride struct {
-	DurationSec *int     `yaml:"duration_s,omitempty"`
-	FadeInSec   *float64 `yaml:"fade_in_s,omitempty"`
-	FadeOutSec  *float64 `yaml:"fade_out_s,omitempty"`
-}
-
-// ClipOverlayOverride tweaks overlay usage for a clip.
-type ClipOverlayOverride struct {
-	Profile  string                         `yaml:"profile,omitempty"`
-	Segments []ClipOverlaySegmentAdjustment `yaml:"segments,omitempty"`
-}
-
-// ClipOverlaySegmentAdjustment customizes a single overlay segment for a clip.
-type ClipOverlaySegmentAdjustment struct {
-	Name     string     `yaml:"name"`
-	Template *string    `yaml:"template,omitempty"`
-	Disabled *bool      `yaml:"disabled,omitempty"`
-	Style    *TextStyle `yaml:"style,omitempty"`
+	DefaultStyle       TextStyle        `yaml:"default_style"`
+	Segments           []OverlaySegment `yaml:"segments"`
+	DefaultDurationSec *int             `yaml:"default_duration_s,omitempty"`
+	FadeInSec          *float64         `yaml:"fade_in_s,omitempty"`
+	FadeOutSec         *float64         `yaml:"fade_out_s,omitempty"`
 }
 
 // TextStyle captures font and layout styling options for drawtext overlays.
@@ -173,6 +110,7 @@ type OverlaySegment struct {
 	Template  string       `yaml:"template"`
 	Transform string       `yaml:"transform"`
 	Disabled  bool         `yaml:"disabled"`
+	ZIndex    *int         `yaml:"z_index,omitempty"` // Optional: controls draw order (higher = on top)
 	Style     TextStyle    `yaml:"style"`
 	Position  PositionSpec `yaml:"position"`
 	Timing    TimingSpec   `yaml:"timing"`
@@ -278,7 +216,8 @@ type PlanConfig struct {
 
 // Default returns the baseline configuration.
 func Default() Config {
-	defaultStyle := TextStyle{
+	// Song profile - title/artist intro + index badge
+	songStyle := TextStyle{
 		FontFile:     "",
 		FontSize:     intPtr(42),
 		FontColor:    "white",
@@ -287,7 +226,7 @@ func Default() Config {
 		LineSpacing:  intPtr(4),
 	}
 
-	defaultSegments := []OverlaySegment{
+	songSegments := []OverlaySegment{
 		{
 			Name:     "intro-title",
 			Template: "{title}",
@@ -338,25 +277,6 @@ func Default() Config {
 			},
 		},
 		{
-			Name:     "outro-name",
-			Template: "{name}",
-			Position: PositionSpec{
-				Origin:  "bottom-left",
-				OffsetX: 40,
-				OffsetY: 40,
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_end",
-					OffsetSec: 4,
-				},
-				End: TimePointSpec{
-					Type:      "from_end",
-					OffsetSec: 0,
-				},
-			},
-		},
-		{
 			Name:     "index-badge",
 			Template: "{index}",
 			Style: TextStyle{
@@ -366,6 +286,64 @@ func Default() Config {
 				Origin:  "bottom-right",
 				OffsetX: 40,
 				OffsetY: 40,
+			},
+			Timing: TimingSpec{
+				Start: TimePointSpec{
+					Type:      "from_start",
+					OffsetSec: 0,
+				},
+				End: TimePointSpec{
+					Type: "persistent",
+				},
+			},
+		},
+	}
+
+	// Interstitial profile - "Drink!" with yellow text, black outline, yellow drop shadow
+	interstitialStyle := TextStyle{
+		FontFile:     "",
+		FontSize:     intPtr(120),
+		FontColor:    "yellow",
+		OutlineColor: "black",
+		OutlineWidth: intPtr(4),
+		LineSpacing:  intPtr(4),
+	}
+
+	interstitialSegments := []OverlaySegment{
+		{
+			Name:     "drink-shadow",
+			Template: "Drink!",
+			Style: TextStyle{
+				FontSize:     intPtr(120),
+				FontColor:    "yellow@0.6", // Semi-transparent yellow for shadow
+				OutlineColor: "black@0",    // No outline on shadow
+				OutlineWidth: intPtr(0),
+			},
+			Position: PositionSpec{
+				Origin:  "bottom-center",
+				OffsetX: 8,  // Shadow offset right
+				OffsetY: 192, // Shadow offset up (200 - 8)
+			},
+			Timing: TimingSpec{
+				Start: TimePointSpec{
+					Type:      "from_start",
+					OffsetSec: 0,
+				},
+				End: TimePointSpec{
+					Type: "persistent",
+				},
+			},
+		},
+		{
+			Name:     "drink-text",
+			Template: "Drink!",
+			Style: TextStyle{
+				FontSize: intPtr(120),
+			},
+			Position: PositionSpec{
+				Origin:  "bottom-center",
+				OffsetX: 0,
+				OffsetY: 200,
 			},
 			Timing: TimingSpec{
 				Start: TimePointSpec{
@@ -402,41 +380,32 @@ func Default() Config {
 			},
 		},
 		Profiles: ProfilesConfig{
-			Overlays: map[string]OverlayProfile{
-				defaultOverlayProfileName: {
-					DefaultStyle: cloneTextStyle(defaultStyle),
-					Segments:     cloneSegments(defaultSegments),
-				},
+			"song-main": {
+				DefaultStyle: cloneTextStyle(songStyle),
+				Segments:     cloneSegments(songSegments),
+			},
+			"interstitial-drink": {
+				DefaultStyle: cloneTextStyle(interstitialStyle),
+				Segments:     cloneSegments(interstitialSegments),
 			},
 		},
-		Clips: ClipsConfig{
-			OverlayProfile: defaultOverlayProfileName,
-			Song: ClipTypeConfig{
-				Source: ClipSourceConfig{
-					DefaultDurationSec: 60,
-				},
-				Render: ClipRenderConfig{
-					FadeInSec:  floatPtr(0.5),
-					FadeOutSec: floatPtr(0.5),
-				},
-				Overlays: ClipOverlayConfig{
-					Profile: defaultOverlayProfileName,
-				},
+		Collections: map[string]CollectionConfig{
+			"songs": {
+				Plan:           "powerhour.csv",
+				OutputDir:      "songs",
+				Profile:        "song-main",
+				LinkHeader:     "link",
+				StartHeader:    "start_time",
+				DurationHeader: "duration",
 			},
-			Interstitial: ClipTypeConfig{
-				Source: ClipSourceConfig{
-					DefaultDurationSec: 5,
-				},
-				Render: ClipRenderConfig{
-					FadeInSec:  floatPtr(0.3),
-					FadeOutSec: floatPtr(0.3),
-				},
-				Overlays: ClipOverlayConfig{
-					Profile: "",
-				},
+			"interstitials": {
+				Plan:           "interstitials.csv",
+				OutputDir:      "interstitials",
+				Profile:        "interstitial-drink",
+				LinkHeader:     "link",
+				StartHeader:    "start_time",
+				DurationHeader: "duration",
 			},
-			Intro: ClipTypeConfig{},
-			Outro: ClipTypeConfig{},
 		},
 		Files: FileOverrides{},
 		Outputs: OutputConfig{
@@ -445,10 +414,9 @@ func Default() Config {
 		Plan: PlanConfig{
 			DefaultDurationSec: 60,
 		},
-		Tools: ToolPins{},
-		Downloads: DownloadsConfig{
-			FilenameTemplate: "$ID",
-		},
+		Tools:           ToolPins{},
+		Downloads:       DownloadsConfig{FilenameTemplate: "$ID"},
+		SegmentsBaseDir: "segments",
 	}
 }
 
@@ -536,54 +504,34 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Outputs.SegmentTemplate) == "" {
 		c.Outputs.SegmentTemplate = defaults.Outputs.SegmentTemplate
 	}
-	if c.Profiles.Overlays == nil {
-		c.Profiles.Overlays = map[string]OverlayProfile{}
+	if c.Profiles == nil {
+		c.Profiles = map[string]OverlayProfile{}
 	}
-	if len(c.Profiles.Overlays) == 0 {
-		for name, profile := range defaults.Profiles.Overlays {
-			c.Profiles.Overlays[name] = cloneOverlayProfile(profile)
+	if len(c.Profiles) == 0 {
+		for name, profile := range defaults.Profiles {
+			c.Profiles[name] = cloneOverlayProfile(profile)
 		}
 	} else {
-		for name, profile := range c.Profiles.Overlays {
-			if base, ok := defaults.Profiles.Overlays[name]; ok {
+		for name, profile := range c.Profiles {
+			if base, ok := defaults.Profiles[name]; ok {
 				profile.DefaultStyle = mergeTextStyle(base.DefaultStyle, profile.DefaultStyle)
 			} else {
 				profile.DefaultStyle = cloneTextStyle(profile.DefaultStyle)
 			}
 			profile.Segments = cloneSegments(profile.Segments)
-			c.Profiles.Overlays[name] = profile
+			c.Profiles[name] = profile
 		}
 	}
-	if strings.TrimSpace(c.Clips.OverlayProfile) == "" || !profileExists(c.Profiles.Overlays, strings.TrimSpace(c.Clips.OverlayProfile)) {
-		c.Clips.OverlayProfile = pickDefaultProfileName(c.Profiles.Overlays)
-	} else {
-		c.Clips.OverlayProfile = strings.TrimSpace(c.Clips.OverlayProfile)
-	}
-	c.Clips.Song = mergeClipTypeConfig(defaults.Clips.Song, c.Clips.Song)
-	c.Clips.Interstitial = mergeClipTypeConfig(defaults.Clips.Interstitial, c.Clips.Interstitial)
-	c.Clips.Intro = mergeClipTypeConfig(defaults.Clips.Intro, c.Clips.Intro)
-	c.Clips.Outro = mergeClipTypeConfig(defaults.Clips.Outro, c.Clips.Outro)
-	if c.Clips.Song.Source.DefaultDurationSec <= 0 {
-		if c.Plan.DefaultDurationSec > 0 {
-			c.Clips.Song.Source.DefaultDurationSec = c.Plan.DefaultDurationSec
-		} else {
-			c.Clips.Song.Source.DefaultDurationSec = defaults.Clips.Song.Source.DefaultDurationSec
-		}
-	}
-	if c.Clips.Interstitial.Source.DefaultDurationSec <= 0 {
-		c.Clips.Interstitial.Source.DefaultDurationSec = defaults.Clips.Interstitial.Source.DefaultDurationSec
-	}
-	propagateClipOverlayDefaults(&c.Clips, c.Clips.OverlayProfile)
-	normalizeClipOverrides(&c.Clips)
 	if c.Plan.DefaultDurationSec <= 0 {
-		c.Plan.DefaultDurationSec = c.Clips.Song.Source.DefaultDurationSec
-		if c.Plan.DefaultDurationSec <= 0 {
-			c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
-		}
+		c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
 	}
 	if strings.TrimSpace(c.Downloads.FilenameTemplate) == "" {
 		c.Downloads.FilenameTemplate = defaults.Downloads.FilenameTemplate
 	}
+	if strings.TrimSpace(c.SegmentsBaseDir) == "" {
+		c.SegmentsBaseDir = "segments"
+	}
+	c.applyCollectionDefaults()
 }
 
 // ToolVersion returns the pinned version for a given tool name when defined.
@@ -713,126 +661,6 @@ func profileExists(profiles map[string]OverlayProfile, name string) bool {
 	return ok
 }
 
-func pickDefaultProfileName(profiles map[string]OverlayProfile) string {
-	if len(profiles) == 0 {
-		return defaultOverlayProfileName
-	}
-	if _, ok := profiles[defaultOverlayProfileName]; ok {
-		return defaultOverlayProfileName
-	}
-	names := make([]string, 0, len(profiles))
-	for name := range profiles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names[0]
-}
-
-func mergeClipTypeConfig(base, override ClipTypeConfig) ClipTypeConfig {
-	result := ClipTypeConfig{
-		Source:   mergeClipSourceConfig(base.Source, override.Source),
-		Render:   mergeClipRenderConfig(base.Render, override.Render),
-		Overlays: mergeClipOverlayConfig(base.Overlays, override.Overlays),
-	}
-	return result
-}
-
-func mergeClipSourceConfig(base, override ClipSourceConfig) ClipSourceConfig {
-	result := base
-	if plan := strings.TrimSpace(override.Plan); plan != "" {
-		result.Plan = plan
-	}
-	if media := strings.TrimSpace(override.Media); media != "" {
-		result.Media = media
-	}
-	if override.DefaultDurationSec > 0 {
-		result.DefaultDurationSec = override.DefaultDurationSec
-	}
-	return result
-}
-
-func mergeClipRenderConfig(base, override ClipRenderConfig) ClipRenderConfig {
-	result := cloneClipRenderConfig(base)
-	if override.DurationSec != nil {
-		result.DurationSec = intPtr(*override.DurationSec)
-	}
-	if override.FadeInSec != nil {
-		result.FadeInSec = floatPtr(*override.FadeInSec)
-	}
-	if override.FadeOutSec != nil {
-		result.FadeOutSec = floatPtr(*override.FadeOutSec)
-	}
-	return result
-}
-
-func mergeClipOverlayConfig(base, override ClipOverlayConfig) ClipOverlayConfig {
-	result := base
-	if name := strings.TrimSpace(override.Profile); name != "" {
-		result.Profile = name
-	}
-	return result
-}
-
-func cloneClipRenderConfig(cfg ClipRenderConfig) ClipRenderConfig {
-	return ClipRenderConfig{
-		DurationSec: copyIntPtr(cfg.DurationSec),
-		FadeInSec:   copyFloatPtr(cfg.FadeInSec),
-		FadeOutSec:  copyFloatPtr(cfg.FadeOutSec),
-	}
-}
-
-func propagateClipOverlayDefaults(cfg *ClipsConfig, fallback string) {
-	if cfg == nil {
-		return
-	}
-	fallback = strings.TrimSpace(fallback)
-	apply := func(ct *ClipTypeConfig) {
-		if ct == nil {
-			return
-		}
-		if name := strings.TrimSpace(ct.Overlays.Profile); name != "" {
-			ct.Overlays.Profile = name
-			return
-		}
-		ct.Overlays.Profile = fallback
-	}
-	apply(&cfg.Song)
-	apply(&cfg.Interstitial)
-	apply(&cfg.Intro)
-	apply(&cfg.Outro)
-}
-
-func normalizeClipOverrides(cfg *ClipsConfig) {
-	if cfg == nil {
-		return
-	}
-	for i := range cfg.Overrides {
-		override := &cfg.Overrides[i]
-
-		override.Match.ClipType = strings.TrimSpace(strings.ToLower(override.Match.ClipType))
-		if override.Match.Index != nil && *override.Match.Index <= 0 {
-			override.Match.Index = nil
-		}
-		override.Match.Name = strings.TrimSpace(override.Match.Name)
-		override.Match.ID = strings.TrimSpace(override.Match.ID)
-
-		override.Overlays.Profile = strings.TrimSpace(override.Overlays.Profile)
-
-		for j := range override.Overlays.Segments {
-			segment := &override.Overlays.Segments[j]
-			segment.Name = strings.TrimSpace(segment.Name)
-			if segment.Template != nil {
-				trimmed := strings.TrimSpace(*segment.Template)
-				segment.Template = stringPtr(trimmed)
-			}
-			if segment.Style != nil {
-				style := cloneTextStyle(*segment.Style)
-				segment.Style = &style
-			}
-		}
-	}
-}
-
 func mergeTextStyle(base, override TextStyle) TextStyle {
 	result := cloneTextStyle(base)
 
@@ -892,8 +720,11 @@ func cloneSegments(segments []OverlaySegment) []OverlaySegment {
 
 func cloneOverlayProfile(profile OverlayProfile) OverlayProfile {
 	return OverlayProfile{
-		DefaultStyle: cloneTextStyle(profile.DefaultStyle),
-		Segments:     cloneSegments(profile.Segments),
+		DefaultStyle:       cloneTextStyle(profile.DefaultStyle),
+		Segments:           cloneSegments(profile.Segments),
+		DefaultDurationSec: copyIntPtr(profile.DefaultDurationSec),
+		FadeInSec:          copyFloatPtr(profile.FadeInSec),
+		FadeOutSec:         copyFloatPtr(profile.FadeOutSec),
 	}
 }
 
@@ -923,10 +754,6 @@ func intPtr(v int) *int {
 	return &v
 }
 
-func stringPtr(v string) *string {
-	return &v
-}
-
 func normalizePlanHeaderKey(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -945,4 +772,88 @@ func normalizePlanHeaderKey(value string) string {
 		value = strings.ReplaceAll(value, "__", "_")
 	}
 	return value
+}
+
+func normalizeHeaderName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return strings.ToLower(value)
+}
+
+func (c *Config) applyCollectionDefaults() {
+	if c.Collections == nil {
+		return
+	}
+
+	for name, collection := range c.Collections {
+		// Apply default header names
+		if normalizeHeaderName(collection.LinkHeader) == "" {
+			collection.LinkHeader = "link"
+		} else {
+			collection.LinkHeader = normalizeHeaderName(collection.LinkHeader)
+		}
+
+		if normalizeHeaderName(collection.StartHeader) == "" {
+			collection.StartHeader = "start_time"
+		} else {
+			collection.StartHeader = normalizeHeaderName(collection.StartHeader)
+		}
+
+		if collection.DurationHeader != "" {
+			collection.DurationHeader = normalizeHeaderName(collection.DurationHeader)
+		} else {
+			collection.DurationHeader = "duration"
+		}
+
+		// Apply default output directory
+		if strings.TrimSpace(collection.OutputDir) == "" {
+			collection.OutputDir = name
+		}
+
+		// Normalize profile name
+		collection.Profile = strings.TrimSpace(collection.Profile)
+
+		c.Collections[name] = collection
+	}
+}
+
+// ValidateCollections validates collection configurations and returns errors.
+func (c Config) ValidateCollections() error {
+	if c.Collections == nil {
+		return nil
+	}
+
+	protectedHeaders := map[string]bool{
+		"index": true,
+		"id":    true,
+	}
+
+	for name, collection := range c.Collections {
+		// Check for protected header names
+		if protectedHeaders[normalizeHeaderName(collection.LinkHeader)] {
+			return fmt.Errorf("collection %q: link_header cannot be %q (protected name)", name, collection.LinkHeader)
+		}
+		if protectedHeaders[normalizeHeaderName(collection.StartHeader)] {
+			return fmt.Errorf("collection %q: start_header cannot be %q (protected name)", name, collection.StartHeader)
+		}
+		if collection.DurationHeader != "" && protectedHeaders[normalizeHeaderName(collection.DurationHeader)] {
+			return fmt.Errorf("collection %q: duration_header cannot be %q (protected name)", name, collection.DurationHeader)
+		}
+
+		// Validate profile exists if specified
+		if collection.Profile != "" {
+			if !profileExists(c.Profiles, collection.Profile) {
+				return fmt.Errorf("collection %q: profile %q does not exist", name, collection.Profile)
+			}
+		}
+
+		// Validate plan file is specified
+		if strings.TrimSpace(collection.Plan) == "" {
+			return fmt.Errorf("collection %q: plan file path is required", name)
+		}
+	}
+
+	return nil
 }

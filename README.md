@@ -42,6 +42,11 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 
+### Dev
+To run the tool without building and installing it on your PATH use relative paths that look like this
+`go run ./cmd/powerhour`
+This command assumes you are at the root of the repo
+
 ### Known issues
 
 - The interactive render progress table currently prints an initial “starting” snapshot followed by the live table. The second snapshot contains the accurate state, but the redundant first table will be removed in an upcoming fix; use `--no-progress` as a temporary workaround if you prefer the legacy per-line output.
@@ -130,38 +135,6 @@ profiles:
               offset_s: 4
             fade_in_s: 0.5
             fade_out_s: 0.5
-        - name: intro-artist
-          template: '{artist}'
-          transform: uppercase
-          style:
-            font_size: 32
-          position:
-            origin: bottom-left
-            offset_x: 40
-            offset_y: 160
-          timing:
-            start:
-              type: from_start
-              offset_s: 0
-            end:
-              type: from_start
-              offset_s: 4
-            fade_in_s: 0.5
-            fade_out_s: 0.5
-        - name: index-badge
-          template: '{index}'
-          style:
-            font_size: 140
-          position:
-            origin: bottom-right
-            offset_x: 40
-            offset_y: 40
-          timing:
-            start:
-              type: from_start
-              offset_s: 0
-            end:
-              type: persistent
 clips:
   overlay_profile: song-main
   song:
@@ -227,6 +200,120 @@ Combine tokens to suit your workflow; for example, `$INDEX_$ID` recreates the pr
 To refresh cached binaries after tightening a minimum, run `powerhour tools install all --project <project_dir> --force`. Drop `--force` if you only need to install binaries that are currently below the configured threshold.
 
 All fields are optional; missing values fall back to built-in defaults. Templates use brace-delimited tokens that resolve against the clip metadata.
+
+## Collections
+
+Collections provide a flexible way to organize multiple types of clips (songs, interstitials, bumpers, outros, etc.) with customizable CSV headers and independent output directories. When you define `collections` in your config, the tool processes all collections instead of using the legacy `clips.song` configuration.
+
+### Basic collections setup
+
+```yaml
+segments_base_dir: segments  # Base directory for all collection outputs (default: segments)
+
+collections:
+  songs:
+    plan: powerhour.csv
+    output_dir: songs  # Relative to segments_base_dir → segments/songs/
+    profile: song-main
+    # Uses default headers: link_header="link", start_header="start_time", duration_header="duration"
+
+  interstitials:
+    plan: bumpers.csv
+    output_dir: interstitials
+    profile: bumper-overlay
+    link_header: video_url       # Custom header name for video links
+    start_header: timestamp       # Custom header name for start time
+    duration_header: length       # Custom header name for duration
+```
+
+### Collection configuration fields
+
+Each collection supports:
+
+- **`plan`** (required): Path to the CSV/TSV file (relative to project root or absolute)
+- **`output_dir`** (optional): Output directory relative to `segments_base_dir` (defaults to collection name)
+- **`profile`** (optional): Overlay profile name; omit to skip overlay rendering
+- **`link_header`** (optional): CSV column name for video link (default: `"link"`)
+- **`start_header`** (optional): CSV column name for start time (default: `"start_time"`)
+- **`duration_header`** (optional): CSV column name for duration (default: `"duration"`)
+
+### Dynamic field support
+
+All CSV columns automatically become available as template tokens:
+
+- In **segment filenames**: `$COLUMN_NAME` and `$SAFE_COLUMN_NAME`
+- In **overlay templates**: `{column_name}` (case-insensitive)
+
+Example CSV with custom fields:
+
+```csv
+link,timestamp,length,song_name,performer,dedication
+https://youtu.be/abc123,1:30,60,Chambea,Bad Bunny,For Sarah
+```
+
+Use custom fields in your config:
+
+```yaml
+outputs:
+  segment_template: "$INDEX_PAD3_$SAFE_SONG_NAME_$SAFE_PERFORMER"
+
+profiles:
+  overlays:
+    song-main:
+      segments:
+        - name: title
+          template: "{song_name}"
+        - name: artist
+          template: "{performer}"
+        - name: dedication
+          template: "Dedicated to: {dedication}"
+```
+
+### Protected header names
+
+The following header names are reserved and cannot be used in your CSV:
+
+- `index` – Auto-generated 1-based row number
+- `id` – Auto-generated cache identifier
+
+### CLI usage with collections
+
+When collections are configured, commands automatically process all collections:
+
+```bash
+# Fetch all collections
+powerhour fetch --project myproject
+
+# Fetch specific collection only
+powerhour fetch --project myproject --collection songs
+
+# Render all collections
+powerhour render --project myproject
+
+# Render specific collection
+powerhour render --project myproject --collection interstitials
+
+# Filter by index within a collection
+powerhour fetch --project myproject --collection songs --index 1-5
+```
+
+### Project layout with collections
+
+```
+project-root/
+  powerhour.csv           # Songs plan
+  bumpers.csv             # Interstitials plan
+  powerhour.yaml          # Configuration
+  cache/                  # Shared cache for all collections
+  segments/
+    songs/                # Song outputs
+    interstitials/        # Interstitial outputs
+  logs/                   # Per-clip render logs
+  .powerhour/
+    index.json            # Shared metadata
+```
+
+All collections share the same `cache/` directory to prevent re-downloading identical videos across different collections.
 
 ## External tools
 

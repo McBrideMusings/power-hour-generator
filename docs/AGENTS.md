@@ -147,3 +147,70 @@ Timing supports `from_start`, `from_end`, `absolute`, and `persistent` anchors. 
 - `powerhour fetch --index` accepts single values or ranges (e.g. `5` or `2-4`).
 - `powerhour render --index` mirrors fetch, allowing targeted renders without editing the plan.
 - Set `GOCACHE=$(mktemp -d)` if tests need an isolated cache in constrained environments.
+
+## Collections Architecture
+
+The collections system provides a flexible alternative to the legacy `clips.song` configuration. When `collections` is defined in the config, the tool processes all collections instead of using clip types.
+
+### Key Concepts
+
+1. **Multiple clip sources**: Each collection has its own plan file, output directory, and overlay profile
+2. **Configurable CSV headers**: Collections can map custom CSV column names to required fields (link, start_time, duration)
+3. **Dynamic field support**: Any CSV column automatically becomes available in templates
+4. **Shared cache**: All collections use the same `cache/` directory to prevent re-downloading identical videos
+
+### Configuration Structure
+
+```yaml
+segments_base_dir: segments  # Base output directory (default: segments)
+
+collections:
+  songs:
+    plan: powerhour.csv                 # Required: path to CSV/TSV
+    output_dir: songs                   # Optional: output dir relative to segments_base_dir
+    profile: song-main                  # Optional: overlay profile (omit for no overlays)
+    link_header: link                   # Optional: CSV column for video link (default: link)
+    start_header: start_time            # Optional: CSV column for start time (default: start_time)
+    duration_header: duration           # Optional: CSV column for duration (default: duration)
+
+  interstitials:
+    plan: bumpers.csv
+    output_dir: interstitials
+    profile: bumper-overlay
+    link_header: video_url              # Example: custom header mapping
+    start_header: timestamp
+```
+
+### Implementation Details
+
+**Protected Headers**: `index` and `id` are reserved and cannot be used as CSV column names.
+
+**Path Resolution**:
+- Collection `output_dir` is relative to `segments_base_dir`
+- Plan paths are relative to project root (or absolute)
+- All collections share `cache/` directory
+
+**Template Tokens**:
+- CSV columns become `$COLUMN_NAME` and `$SAFE_COLUMN_NAME` in segment filenames
+- CSV columns become `{column_name}` in overlay templates (case-insensitive)
+
+**Code Organization**:
+- `internal/config/config.go` – CollectionConfig struct and validation
+- `pkg/csvplan/collection.go` – Collection-specific CSV loader with configurable headers
+- `internal/project/collections.go` – CollectionResolver for loading/managing collections
+- `internal/cli/collections_fetch.go` – Collection-aware fetch implementation
+
+**Backward Compatibility**: Collections and legacy clip types are mutually exclusive. When collections are configured, the CLI automatically routes to collection-aware handlers.
+
+### CLI Usage
+
+```bash
+# Fetch all collections
+powerhour fetch --project myproject
+
+# Fetch specific collection
+powerhour fetch --project myproject --collection songs
+
+# Filter by index within a collection
+powerhour fetch --project myproject --collection songs --index 1-5
+```

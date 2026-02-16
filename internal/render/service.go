@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
@@ -43,6 +44,7 @@ type Segment struct {
 	SourcePath string
 	CachedPath string
 	Entry      cache.Entry
+	OutputPath string // Optional: if set, overrides default path calculation
 }
 
 // Result captures the outcome of a render attempt.
@@ -167,6 +169,12 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 		return result
 	}
 
+	// Validate start time and duration against source video duration
+	if err := s.validateSegmentTiming(ctx, seg, source); err != nil {
+		result.Err = err
+		return result
+	}
+
 	outputPath, logPath := s.segmentPaths(seg)
 	result.OutputPath = outputPath
 
@@ -228,6 +236,14 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 }
 
 func (s *Service) segmentPaths(seg Segment) (string, string) {
+	// Use explicit OutputPath if provided (e.g., for collections with subdirectories)
+	if seg.OutputPath != "" {
+		base := strings.TrimSuffix(filepath.Base(seg.OutputPath), filepath.Ext(seg.OutputPath))
+		log := filepath.Join(s.Paths.LogsDir, base+".log")
+		return seg.OutputPath, log
+	}
+
+	// Otherwise compute path from template
 	template := s.Config.SegmentFilenameTemplate()
 	if template == "" {
 		template = config.Default().SegmentFilenameTemplate()
@@ -288,4 +304,177 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// validateSegmentTiming checks if the requested start time and duration are valid
+// for the source video file.
+func (s *Service) validateSegmentTiming(ctx context.Context, seg Segment, sourcePath string) error {
+	clip := seg.Clip
+	row := clip.Row
+
+	// Get video duration from cache entry probe data if available
+	var videoDuration float64
+	if seg.Entry.Probe != nil && seg.Entry.Probe.DurationSeconds > 0 {
+		videoDuration = seg.Entry.Probe.DurationSeconds
+	} else {
+		// Probe the video file directly
+		duration, err := s.probeVideoDuration(ctx, sourcePath)
+		if err != nil {
+			// If we can't probe, log a warning but don't fail - ffmpeg will handle it
+			s.printf("warning: could not probe video duration for %s: %v\n", sourcePath, err)
+			return nil
+		}
+		videoDuration = duration
+	}
+
+	if videoDuration <= 0 {
+		// No duration available, can't validate
+		return nil
+	}
+
+	// Convert start time to seconds
+	startSeconds := row.Start.Seconds()
+
+	// Check if start time is beyond video duration
+	if startSeconds >= videoDuration {
+		return fmt.Errorf("start time %s (%.2fs) is beyond video duration (%.2fs)",
+			formatDuration(row.Start), startSeconds, videoDuration)
+	}
+
+	// Check if start + duration exceeds video duration
+	requestedDuration := float64(row.DurationSeconds)
+	endTime := startSeconds + requestedDuration
+	if endTime > videoDuration {
+		return fmt.Errorf("start time %s (%.2fs) + duration %ds (%.2fs total) exceeds video duration (%.2fs)",
+			formatDuration(row.Start), startSeconds, row.DurationSeconds, endTime, videoDuration)
+	}
+
+	return nil
+}
+
+// probeVideoDuration uses ffprobe to get the duration of a video file in seconds.
+func (s *Service) probeVideoDuration(ctx context.Context, videoPath string) (float64, error) {
+	// Get ffprobe from tools (comes with ffmpeg)
+	ffprobeStatus, err := tools.Ensure(ctx, "ffmpeg")
+	if err != nil {
+		return 0, fmt.Errorf("ensure ffprobe: %w", err)
+	}
+
+	// ffprobe should be in the Paths map
+	ffprobePath := ffprobeStatus.Paths["ffprobe"]
+	if ffprobePath == "" {
+		// Fallback to using "ffprobe" and let the system find it
+		ffprobePath = "ffprobe"
+	}
+
+	args := []string{
+		"-v", "error",
+		"-show_entries", "format=duration",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		videoPath,
+	}
+
+	result, err := s.Runner.Run(ctx, ffprobePath, args, cache.RunOptions{})
+	if err != nil {
+		stderr := strings.TrimSpace(string(result.Stderr))
+		if stderr != "" {
+			return 0, fmt.Errorf("ffprobe failed: %w (stderr: %s)", err, stderr)
+		}
+		return 0, fmt.Errorf("ffprobe failed: %w", err)
+	}
+
+	var duration float64
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(result.Stdout)), "%f", &duration); err != nil {
+		return 0, fmt.Errorf("parse duration: %w", err)
+	}
+
+	return duration, nil
+}
+
+// formatDuration formats a time.Duration as MM:SS or HH:MM:SS
+func formatDuration(d time.Duration) string {
+	totalSeconds := int(d.Seconds())
+	hours := totalSeconds / 3600
+	minutes := (totalSeconds % 3600) / 60
+	seconds := totalSeconds % 60
+
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+	}
+	return fmt.Sprintf("%d:%02d", minutes, seconds)
+}
+
+// RenderSample extracts a single frame at the specified time as a PNG image.
+// This is useful for testing overlay configurations without rendering full videos.
+func (s *Service) RenderSample(ctx context.Context, seg Segment, sampleTime float64, outputPath string) error {
+	if s == nil {
+		return errors.New("render service is nil")
+	}
+
+	source := strings.TrimSpace(seg.SourcePath)
+	if source == "" {
+		source = strings.TrimSpace(seg.CachedPath)
+	}
+	if source == "" {
+		return fmt.Errorf("segment missing source path")
+	}
+
+	// Build the filter graph with all overlays
+	filterGraph, err := BuildFilterGraph(seg, s.Config)
+	if err != nil {
+		return fmt.Errorf("build filter graph: %w", err)
+	}
+
+	// Calculate the absolute time in the source video
+	absoluteTime := sampleTime
+	if seg.Clip.SourceKind == project.SourceKindPlan {
+		absoluteTime += seg.Clip.Row.Start.Seconds()
+	}
+
+	// Build ffmpeg command to extract a single frame
+	args := []string{
+		"-hide_banner",
+		"-y",
+		"-ss", fmt.Sprintf("%.3f", absoluteTime),
+		"-i", source,
+		"-vf", filterGraph,
+		"-frames:v", "1",
+		"-q:v", "2", // High quality JPEG encoding (for PNG this sets compression)
+		outputPath,
+	}
+
+	// Create a log file for debugging
+	logPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".log"
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		s.printf("warning: could not create log file: %v\n", err)
+		logFile = nil
+	}
+	if logFile != nil {
+		defer logFile.Close()
+	}
+
+	s.printf("Extracting frame at %.2fs (absolute: %.2fs) from %s\n", sampleTime, absoluteTime, filepath.Base(source))
+	s.printf("Filter graph: %s\n", filterGraph)
+
+	runOpts := cache.RunOptions{
+		Dir: s.Paths.Root,
+	}
+	if logFile != nil {
+		runOpts.Stderr = logFile
+		if s.stderr != nil {
+			runOpts.Stderr = io.MultiWriter(logFile, s.stderr)
+		}
+	} else if s.stderr != nil {
+		runOpts.Stderr = s.stderr
+	}
+
+	if _, err := s.Runner.Run(ctx, s.ffmpegPath, args, runOpts); err != nil {
+		if logFile != nil {
+			return fmt.Errorf("ffmpeg failed: %w (see %s)", err, logPath)
+		}
+		return fmt.Errorf("ffmpeg failed: %w", err)
+	}
+
+	return nil
 }
