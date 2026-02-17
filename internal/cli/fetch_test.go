@@ -2,11 +2,8 @@ package cli
 
 import (
 	"bytes"
-	"reflect"
 	"strings"
 	"testing"
-
-	"powerhour/pkg/csvplan"
 )
 
 func TestWriteFetchJSON(t *testing.T) {
@@ -98,52 +95,4 @@ func TestWriteFetchFailures(t *testing.T) {
 	}
 }
 
-func TestFilterRowsByIndex(t *testing.T) {
-	rows := []csvplan.Row{
-		{Index: 1, Title: "One"},
-		{Index: 2, Title: "Two"},
-		{Index: 3, Title: "Three"},
-	}
-
-	filtered, err := filterRowsByIndex(rows, []int{2})
-	if err != nil {
-		t.Fatalf("filterRowsByIndex: %v", err)
-	}
-	if len(filtered) != 1 || filtered[0].Index != 2 {
-		t.Fatalf("unexpected filtered rows: %+v", filtered)
-	}
-}
-
-func TestFilterRowsByIndexMissing(t *testing.T) {
-	rows := []csvplan.Row{
-		{Index: 1, Title: "One"},
-	}
-
-	_, err := filterRowsByIndex(rows, []int{2})
-	if err == nil {
-		t.Fatal("expected error for missing index")
-	}
-}
-
-func TestParseIndexArgs(t *testing.T) {
-	indexes, err := parseIndexArgs([]string{"2", "5-7", " 9 "})
-	if err != nil {
-		t.Fatalf("parseIndexArgs: %v", err)
-	}
-	expected := []int{2, 5, 6, 7, 9}
-	if !reflect.DeepEqual(expected, indexes) {
-		t.Fatalf("unexpected indexes: %v", indexes)
-	}
-}
-
-func TestParseIndexArgsInvalid(t *testing.T) {
-	if _, err := parseIndexArgs([]string{"foo"}); err == nil {
-		t.Fatal("expected error for invalid token")
-	}
-	if _, err := parseIndexArgs([]string{"5-3"}); err == nil {
-		t.Fatal("expected error for reversed range")
-	}
-	if _, err := parseIndexArgs([]string{"0"}); err == nil {
-		t.Fatal("expected error for zero index")
-	}
-}
+// Index filter tests moved to index_filter_test.go

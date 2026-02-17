@@ -87,6 +87,10 @@ cd docs && npm run docs:build  # production build
 
 Sections: guide, architecture, development, roadmap.
 
+## Agent Behavior
+
+- **No plan files in the repo.** Do not create `docs/plans/` or save plan documents as files in the repository. Use Claude Code's own plan file location if needed, or just discuss plans in conversation.
+
 ## Workflow
 
 **Source of truth**: [GitHub Issues](https://github.com/McBrideMusings/power-hour-generator/issues) with milestones for each phase. Legacy ticket files in `docs/tickets/` are archived — do not update them.
