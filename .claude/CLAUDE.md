@@ -104,8 +104,9 @@ Sections: guide, architecture, development, roadmap.
 
 **Commits**: Conventional commits referencing the issue (e.g., `feat(timeline): add config structs #8`). Use the issue number, not the PH- prefix.
 
+**No PRs.** This is a solo project. Do not create pull requests. Merge branches directly to main.
+
 **Session workflow**:
 1. Pick an issue from the current milestone
 2. Create a branch, implement, test
-3. PR back to main referencing the issue
-4. Update issue labels (`status:in-progress` → `status:done`) and close when merged
+3. Merge to main, push, close the issue
