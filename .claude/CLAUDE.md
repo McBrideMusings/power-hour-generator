@@ -38,7 +38,7 @@ go vet ./...
 
 **CLI layer** (`internal/cli/`): Cobra-based commands. Each file corresponds to a command (`init.go`, `fetch.go`, `render.go`, `validate.go`, etc.). Collection-aware variants live in `collections_fetch.go` and `collections_render.go`. Global flags: `--project`, `--json`, `--index n|n-m`, `--collection <name>`.
 
-**Config** (`internal/config/`): YAML config parsed into strongly-typed structs with defaults. Profiles define reusable overlay collections. Collections and legacy `clips.song` are mutually exclusive.
+**Config** (`internal/config/`): YAML config parsed into strongly-typed structs with defaults. Profiles define reusable overlay collections. Collections and legacy `clips.song` are mutually exclusive. `validation.go` provides `ValidateStrict()` for structured config validation (profile refs, plan paths, template tokens, orphaned profiles).
 
 **Cache** (`internal/cache/`): Index-based caching with `.powerhour/index.json` tracking source identifiers, cached file paths, and ffprobe metadata. Source resolution uses yt-dlp for URLs, direct reference for local files. `runner.go` abstracts command execution for testability.
 
@@ -74,6 +74,7 @@ go vet ./...
 - `test_helpers_test.go` in render package for shared test utilities.
 - `newCacheService` var in `fetch.go` is typed for testability; `newCacheServiceWithStatus` adds status callback support.
 - Known pre-existing failures in `internal/cli/status_test.go` (`TestStatusCommandTableOutput`, `TestStatusCommandJSONOutput`) — unrelated to TUI/tools work.
+- `config` cannot import `render` (import cycle via `project`). When config validation needs render-owned data (e.g. valid template tokens), pass it as a parameter from the CLI layer.
 
 ## Documentation Site
 
@@ -85,3 +86,22 @@ cd docs && npm run docs:build  # production build
 ```
 
 Sections: guide, architecture, development, roadmap.
+
+## Workflow
+
+**Source of truth**: [GitHub Issues](https://github.com/McBrideMusings/power-hour-generator/issues) with milestones for each phase. Legacy ticket files in `docs/tickets/` are archived — do not update them.
+
+**Labels**:
+- Status: `status:todo`, `status:in-progress`, `status:blocked`, `status:done`
+- Type: `type:feature`, `type:bug`, `type:chore`, `type:docs`, `type:spec`
+- Priority: `priority:high`, `priority:medium`, `priority:low`
+
+**Branch naming**: `<type>/<issue>-<short-desc>` (e.g., `feat/ph-8-timeline-config`, `fix/33-render-progress`).
+
+**Commits**: Conventional commits referencing the issue (e.g., `feat(timeline): add config structs #8`). Use the issue number, not the PH- prefix.
+
+**Session workflow**:
+1. Pick an issue from the current milestone
+2. Create a branch, implement, test
+3. PR back to main referencing the issue
+4. Update issue labels (`status:in-progress` → `status:done`) and close when merged
