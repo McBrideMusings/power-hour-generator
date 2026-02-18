@@ -426,6 +426,17 @@ func Default() Config {
 				DurationHeader: "duration",
 			},
 		},
+		Timeline: TimelineConfig{
+			Sequence: []SequenceEntry{
+				{
+					Collection: "songs",
+					Interleave: &InterleaveConfig{
+						Collection: "interstitials",
+						Every:      1,
+					},
+				},
+			},
+		},
 		Files: FileOverrides{},
 		Outputs: OutputConfig{
 			SegmentTemplate: "$INDEX_PAD3_$SAFE_TITLE",
