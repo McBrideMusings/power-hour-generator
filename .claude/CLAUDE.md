@@ -38,7 +38,7 @@ go vet ./...
 
 **CLI layer** (`internal/cli/`): Cobra-based commands. Each file corresponds to a command (`init.go`, `fetch.go`, `render.go`, `validate.go`, etc.). Collection-aware variants live in `collections_fetch.go` and `collections_render.go`. Global flags: `--project`, `--json`, `--index n|n-m`, `--collection <name>`.
 
-**Config** (`internal/config/`): YAML config parsed into strongly-typed structs with defaults. Profiles define reusable overlay collections. Collections and legacy `clips.song` are mutually exclusive. `validation.go` provides `ValidateStrict()` for structured config validation (profile refs, plan paths, template tokens, orphaned profiles).
+**Config** (`internal/config/`): YAML config parsed into strongly-typed structs with defaults. Profiles define reusable overlay collections. Collections and legacy `clips.song` are mutually exclusive. `validation.go` provides `ValidateStrict()` for structured config validation (profile refs, plan paths, template tokens, orphaned profiles, timeline sequence). The `timeline` section defines the playback sequence via `TimelineConfig` → `[]SequenceEntry` → optional `InterleaveConfig`.
 
 **Cache** (`internal/cache/`): Index-based caching with `.powerhour/index.json` tracking source identifiers, cached file paths, and ffprobe metadata. Source resolution uses yt-dlp for URLs, direct reference for local files. `runner.go` abstracts command execution for testability.
 
@@ -73,7 +73,7 @@ go vet ./...
 - Mock command runners in cache tests (`runner.go` abstraction).
 - `test_helpers_test.go` in render package for shared test utilities.
 - `newCacheService` var in `fetch.go` is typed for testability; `newCacheServiceWithStatus` adds status callback support.
-- Known pre-existing failures in `internal/cli/status_test.go` (`TestStatusCommandTableOutput`, `TestStatusCommandJSONOutput`) — unrelated to TUI/tools work.
+- Known pre-existing failure: `TestBuildFilterGraphIncludesOverlays` in `internal/render/filters_test.go` — unrelated to config/timeline work.
 - `config` cannot import `render` (import cycle via `project`). When config validation needs render-owned data (e.g. valid template tokens), pass it as a parameter from the CLI layer.
 
 ## Documentation Site

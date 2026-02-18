@@ -19,6 +19,24 @@ type CollectionConfig struct {
 	DurationHeader string `yaml:"duration_header"`
 }
 
+// TimelineConfig defines the playback sequence for the power hour.
+type TimelineConfig struct {
+	Sequence []SequenceEntry `yaml:"sequence"`
+}
+
+// SequenceEntry defines how a single collection appears in the timeline.
+type SequenceEntry struct {
+	Collection string            `yaml:"collection"`
+	Count      int               `yaml:"count,omitempty"` // 0 = play all
+	Interleave *InterleaveConfig `yaml:"interleave,omitempty"`
+}
+
+// InterleaveConfig describes how to splice a second collection into a sequence entry.
+type InterleaveConfig struct {
+	Collection string `yaml:"collection"`
+	Every      int    `yaml:"every"`
+}
+
 var allowedVideoPresets = map[string]struct{}{
 	"ultrafast": {},
 	"superfast": {},
@@ -39,6 +57,7 @@ type Config struct {
 	Audio           AudioConfig                `yaml:"audio"`
 	Profiles        ProfilesConfig             `yaml:"profiles"`
 	Collections     map[string]CollectionConfig `yaml:"collections"`
+	Timeline        TimelineConfig              `yaml:"timeline"`
 	Outputs         OutputConfig               `yaml:"outputs"`
 	Plan            PlanConfig                 `yaml:"plan"`
 	Files           FileOverrides              `yaml:"files"`
