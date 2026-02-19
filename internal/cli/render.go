@@ -80,6 +80,7 @@ func runRender(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
+	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
 
 	if cfg.Collections == nil || len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")

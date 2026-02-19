@@ -79,6 +79,7 @@ type ToolPin struct {
 // DownloadsConfig controls caching/downloading behaviour.
 type DownloadsConfig struct {
 	FilenameTemplate string `yaml:"filename_template"`
+	GlobalCache      *bool  `yaml:"global_cache,omitempty"` // nil = true (default on)
 }
 
 // VideoConfig contains video sizing and framerate information.
@@ -595,6 +596,15 @@ func (c Config) ToolProxy(tool string) string {
 		return strings.TrimSpace(pin.Proxy)
 	}
 	return ""
+}
+
+// GlobalCacheEnabled returns true when the global cache should be used.
+// Defaults to true when the field is nil (not set in config).
+func (c Config) GlobalCacheEnabled() bool {
+	if c.Downloads.GlobalCache == nil {
+		return true
+	}
+	return *c.Downloads.GlobalCache
 }
 
 // DownloadFilenameTemplate returns the configured filename template for downloads.

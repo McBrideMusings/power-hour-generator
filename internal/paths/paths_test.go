@@ -59,6 +59,76 @@ func TestApplyConfigAbsolute(t *testing.T) {
 	}
 }
 
+func TestApplyGlobalCacheEnabled(t *testing.T) {
+	pp := ProjectPaths{
+		CacheDir:        "/project/cache",
+		IndexFile:       "/project/.powerhour/index.json",
+		GlobalCacheDir:  "/home/user/.powerhour/cache",
+		GlobalIndexFile: "/home/user/.powerhour/index.json",
+	}
+
+	result := ApplyGlobalCache(pp, true)
+	if result.CacheDir != pp.GlobalCacheDir {
+		t.Fatalf("expected CacheDir=%s, got %s", pp.GlobalCacheDir, result.CacheDir)
+	}
+	if result.IndexFile != pp.GlobalIndexFile {
+		t.Fatalf("expected IndexFile=%s, got %s", pp.GlobalIndexFile, result.IndexFile)
+	}
+}
+
+func TestApplyGlobalCacheDisabled(t *testing.T) {
+	pp := ProjectPaths{
+		CacheDir:        "/project/cache",
+		IndexFile:       "/project/.powerhour/index.json",
+		GlobalCacheDir:  "/home/user/.powerhour/cache",
+		GlobalIndexFile: "/home/user/.powerhour/index.json",
+	}
+
+	result := ApplyGlobalCache(pp, false)
+	if result.CacheDir != "/project/cache" {
+		t.Fatalf("expected CacheDir unchanged, got %s", result.CacheDir)
+	}
+	if result.IndexFile != "/project/.powerhour/index.json" {
+		t.Fatalf("expected IndexFile unchanged, got %s", result.IndexFile)
+	}
+}
+
+func TestApplyGlobalCacheEmptyGlobalPaths(t *testing.T) {
+	pp := ProjectPaths{
+		CacheDir:  "/project/cache",
+		IndexFile: "/project/.powerhour/index.json",
+		// GlobalCacheDir and GlobalIndexFile are empty
+	}
+
+	result := ApplyGlobalCache(pp, true)
+	if result.CacheDir != "/project/cache" {
+		t.Fatalf("expected CacheDir unchanged when global paths empty, got %s", result.CacheDir)
+	}
+}
+
+func TestGlobalCacheDirCreatesDir(t *testing.T) {
+	dir, err := GlobalCacheDir()
+	if err != nil {
+		t.Fatalf("GlobalCacheDir: %v", err)
+	}
+	if !filepath.IsAbs(dir) {
+		t.Fatalf("expected absolute path, got %s", dir)
+	}
+	if filepath.Base(dir) != "cache" {
+		t.Fatalf("expected dir named 'cache', got %s", filepath.Base(dir))
+	}
+}
+
+func TestGlobalIndexFile(t *testing.T) {
+	path, err := GlobalIndexFile()
+	if err != nil {
+		t.Fatalf("GlobalIndexFile: %v", err)
+	}
+	if filepath.Base(path) != "index.json" {
+		t.Fatalf("expected file named 'index.json', got %s", filepath.Base(path))
+	}
+}
+
 func TestApplyConfigNoOverrides(t *testing.T) {
 	root := t.TempDir()
 	pp := ProjectPaths{

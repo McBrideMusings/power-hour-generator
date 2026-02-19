@@ -59,10 +59,10 @@ type ProbeMetadata struct {
 	Raw             json.RawMessage `json:"raw,omitempty"`
 }
 
-// Load reads the index.json file from the provided project paths, returning an
-// empty structure when the file is missing.
-func Load(pp paths.ProjectPaths) (*Index, error) {
-	data, err := os.ReadFile(pp.IndexFile)
+// LoadFromPath reads an index from the given file path, returning an empty
+// structure when the file is missing.
+func LoadFromPath(indexPath string) (*Index, error) {
+	data, err := os.ReadFile(indexPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return newIndex(), nil
@@ -79,10 +79,10 @@ func Load(pp paths.ProjectPaths) (*Index, error) {
 	return &idx, nil
 }
 
-// Save writes the index.json file to disk, creating the containing directory if
-// needed. The write is performed atomically.
-func Save(pp paths.ProjectPaths, idx *Index) error {
-	if err := os.MkdirAll(filepath.Dir(pp.IndexFile), 0o755); err != nil {
+// SaveToPath writes an index to the given file path, creating the containing
+// directory if needed. The write is performed atomically.
+func SaveToPath(indexPath string, idx *Index) error {
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
 		return fmt.Errorf("ensure index dir: %w", err)
 	}
 
@@ -96,16 +96,28 @@ func Save(pp paths.ProjectPaths, idx *Index) error {
 		return fmt.Errorf("encode index: %w", err)
 	}
 
-	tmp := pp.IndexFile + ".tmp"
+	tmp := indexPath + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return fmt.Errorf("write temp index: %w", err)
 	}
 
-	if err := os.Rename(tmp, pp.IndexFile); err != nil {
+	if err := os.Rename(tmp, indexPath); err != nil {
 		return fmt.Errorf("replace index: %w", err)
 	}
 
 	return nil
+}
+
+// Load reads the index.json file from the provided project paths, returning an
+// empty structure when the file is missing.
+func Load(pp paths.ProjectPaths) (*Index, error) {
+	return LoadFromPath(pp.IndexFile)
+}
+
+// Save writes the index.json file to disk, creating the containing directory if
+// needed. The write is performed atomically.
+func Save(pp paths.ProjectPaths, idx *Index) error {
+	return SaveToPath(pp.IndexFile, idx)
 }
 
 // GetByIdentifier returns an entry for the provided canonical identifier when present.

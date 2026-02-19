@@ -11,15 +11,17 @@ import (
 
 // ProjectPaths captures canonical locations for a powerhour project.
 type ProjectPaths struct {
-	Root        string
-	ConfigFile  string
-	CSVFile     string
-	CookiesFile string
-	MetaDir     string
-	CacheDir    string
-	SegmentsDir string
-	LogsDir     string
-	IndexFile   string
+	Root            string
+	ConfigFile      string
+	CSVFile         string
+	CookiesFile     string
+	MetaDir         string
+	CacheDir        string
+	SegmentsDir     string
+	LogsDir         string
+	IndexFile       string
+	GlobalCacheDir  string // ~/.powerhour/cache/
+	GlobalIndexFile string // ~/.powerhour/index.json
 }
 
 // Resolve determines the project root using the optional --project flag or the
@@ -39,7 +41,17 @@ func Resolve(projectFlag string) (ProjectPaths, error) {
 		return ProjectPaths{}, fmt.Errorf("resolve project root: %w", err)
 	}
 
-	return newProjectPaths(root), nil
+	pp := newProjectPaths(root)
+
+	// Best-effort global cache paths (non-fatal if home dir unavailable)
+	if gCache, err := GlobalCacheDir(); err == nil {
+		pp.GlobalCacheDir = gCache
+	}
+	if gIndex, err := GlobalIndexFile(); err == nil {
+		pp.GlobalIndexFile = gIndex
+	}
+
+	return pp, nil
 }
 
 func newProjectPaths(root string) ProjectPaths {
@@ -145,6 +157,41 @@ func GlobalDir() (string, error) {
 		return "", fmt.Errorf("create global dir: %w", err)
 	}
 	return dir, nil
+}
+
+// GlobalCacheDir returns the global cache directory (~/.powerhour/cache/).
+// It creates the directory if it does not exist.
+func GlobalCacheDir() (string, error) {
+	global, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(global, "cache")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create global cache dir: %w", err)
+	}
+	return dir, nil
+}
+
+// GlobalIndexFile returns the path to the global index file (~/.powerhour/index.json).
+// It does not create the file.
+func GlobalIndexFile() (string, error) {
+	global, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(global, "index.json"), nil
+}
+
+// ApplyGlobalCache swaps CacheDir and IndexFile to their global equivalents
+// when global cache is enabled and the global paths are available.
+func ApplyGlobalCache(pp ProjectPaths, globalEnabled bool) ProjectPaths {
+	if !globalEnabled || pp.GlobalCacheDir == "" || pp.GlobalIndexFile == "" {
+		return pp
+	}
+	pp.CacheDir = pp.GlobalCacheDir
+	pp.IndexFile = pp.GlobalIndexFile
+	return pp
 }
 
 // GlobalLogsDir returns the global logs directory (~/.powerhour/logs).

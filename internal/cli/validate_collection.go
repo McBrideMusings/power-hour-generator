@@ -52,6 +52,7 @@ func runValidateCollection(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
+	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
 
 	// Ensure collections are configured
 	if cfg.Collections == nil || len(cfg.Collections) == 0 {

@@ -126,6 +126,7 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 		return nil, err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
+	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
 	ctx = tools.WithMinimums(ctx, cfg.ToolMinimums())
 
 	cookiesPath := ""
