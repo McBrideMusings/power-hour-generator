@@ -101,9 +101,9 @@ Sections: guide, architecture, development, roadmap.
 - Type: `type:feature`, `type:bug`, `type:chore`, `type:docs`, `type:spec`
 - Priority: `priority:high`, `priority:medium`, `priority:low`
 
-**Branch naming**: `<type>/<issue>-<short-desc>` (e.g., `feat/ph-8-timeline-config`, `fix/33-render-progress`).
+**Branch naming**: `<issue>-<short-desc>` (e.g., `ph-8-timeline-config`, `33-render-progress`).
 
-**Commits**: Conventional commits referencing the issue (e.g., `feat(timeline): add config structs #8`). Use the issue number, not the PH- prefix.
+**Commits**: Plain, descriptive messages referencing the issue (e.g., `Add config structs #8`). No conventional commit prefixes. Use the issue number, not the PH- prefix.
 
 **No PRs.** This is a solo project. Do not create pull requests. Merge branches directly to main.
 
