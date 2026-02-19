@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
@@ -102,18 +104,62 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 		Validations: validations,
 	}
 
-	var data []byte
 	if outputJSON {
-		data, err = json.MarshalIndent(payload, "", "  ")
-	} else {
-		data, err = json.Marshal(payload)
-	}
-	if err != nil {
-		return fmt.Errorf("encode json: %w", err)
+		data, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode json: %w", err)
+		}
+		cmd.Println(string(data))
+		return nil
 	}
 
-	cmd.Println(string(data))
+	printCheckResult(cmd, payload.Project, payload.Tools)
 	return nil
+}
+
+func printCheckResult(cmd *cobra.Command, project string, statuses []tools.Status) {
+	bold := lipgloss.NewStyle().Bold(true)
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	faint := lipgloss.NewStyle().Faint(true)
+
+	cmd.Println(bold.Render("Project:") + " " + project)
+	cmd.Println()
+
+	sorted := make([]tools.Status, len(statuses))
+	copy(sorted, statuses)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Tool < sorted[j].Tool
+	})
+
+	for _, st := range sorted {
+		if st.Satisfied {
+			headline := green.Render("✓") + " " + bold.Render(st.Tool)
+			if st.Version != "" {
+				headline += " v" + st.Version
+			}
+			if st.Minimum != "" {
+				headline += faint.Render(" (minimum: "+st.Minimum+")")
+			}
+			cmd.Println(headline)
+
+			detail := string(st.Source)
+			if detail == "" {
+				detail = "unknown"
+			}
+			if st.Path != "" {
+				detail += " · " + st.Path
+			}
+			cmd.Println(faint.Render("  " + detail))
+		} else {
+			headline := red.Render("✗") + " " + bold.Render(st.Tool)
+			if st.Error != "" {
+				headline += red.Render(" ("+st.Error+")")
+			}
+			cmd.Println(headline)
+		}
+		cmd.Println()
+	}
 }
 
 func ensureStrict(statuses []tools.Status) error {
