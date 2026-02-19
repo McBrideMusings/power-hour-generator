@@ -90,6 +90,7 @@ Sections: guide, architecture, development, roadmap.
 ## Agent Behavior
 
 - **No plan files in the repo.** Do not create `docs/plans/` or save plan documents as files in the repository. Use Claude Code's own plan file location if needed, or just discuss plans in conversation.
+- **No Claude attribution.** Do not add "Co-authored-by: Claude" or any Claude/AI attribution to commit messages or pull requests.
 
 ## Workflow
 
