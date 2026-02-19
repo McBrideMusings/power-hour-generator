@@ -84,14 +84,17 @@ outputs:
 
 See [Templates](/guide/templates) for the full list of available tokens.
 
-## Download Templates
+## Download Settings
 
 ```yaml
 downloads:
   filename_template: "$INDEX_$ID"
+  global_cache: true
 ```
 
-Control how cached source files are named. See [Templates](/guide/templates) for available tokens.
+`filename_template` controls how cached source files are named. See [Templates](/guide/templates) for available tokens.
+
+`global_cache` enables a shared cache at `~/.powerhour/cache/` so multiple projects can reuse the same downloaded media. Defaults to `true`. Set to `false` to keep downloads in the project-local `cache/` directory. Use `powerhour migrate` to move existing local cache files into the global cache.
 
 ## Tool Requirements
 
@@ -179,6 +182,7 @@ files:
   cookies: cookies.txt
 downloads:
   filename_template: "$INDEX_$ID"
+  global_cache: true
 plan:
   default_duration_s: 60
 tools:

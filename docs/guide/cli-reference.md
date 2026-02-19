@@ -101,6 +101,22 @@ Reconcile rendered segment filenames/logs with the configured template, renaming
 powerhour validate segments --project <dir> [--index <n>] [--json]
 ```
 
+## Cache Management
+
+### `powerhour migrate`
+
+Move project-local cache files into the global cache (`~/.powerhour/cache/`).
+
+```bash
+powerhour migrate --project <dir> [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Print what would be moved without moving files |
+
+Files are moved (not copied) and the global index is updated. Entries already present in the global cache with a live file are skipped. After migration, the project will use the global cache automatically.
+
 ## Tool Management
 
 ### `powerhour tools list`

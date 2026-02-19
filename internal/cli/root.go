@@ -37,7 +37,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newValidateCmd())
 	cmd.AddCommand(newFetchCmd())
 	cmd.AddCommand(newRenderCmd())
-	cmd.AddCommand(newCacheCmd())
+	cmd.AddCommand(newMigrateCmd())
 
 	return cmd
 }

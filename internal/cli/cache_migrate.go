@@ -16,7 +16,7 @@ import (
 
 var migrateDryRun bool
 
-func newCacheMigrateCmd() *cobra.Command {
+func newMigrateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Move project cache files into the global cache",
@@ -31,6 +31,8 @@ type migrateStats struct {
 	Moved          int
 	AlreadyGlobal  int
 	Skipped        int
+	Recovered      int
+	Orphans        int
 	GlobalWins     int
 	LinksMerged    int
 	EntriesCleaned int
@@ -99,12 +101,23 @@ func runCacheMigrate(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 
-		// Check if file exists
+		// Check if file exists at indexed path
 		info, err := os.Stat(cachedPath)
 		if err != nil {
-			fmt.Fprintf(out, "skip %s: file not found at %s\n", id, cachedPath)
-			stats.Skipped++
-			continue
+			// Stale path recovery: check local cache dir for same basename
+			base := filepath.Base(cachedPath)
+			recovered := filepath.Join(localCacheDir, base)
+			if rInfo, rErr := os.Stat(recovered); rErr == nil && rInfo.Mode().IsRegular() {
+				fmt.Fprintf(out, "recovered %s: %s -> %s\n", id, cachedPath, recovered)
+				cachedPath = recovered
+				info = rInfo
+				entry.CachedPath = recovered
+				stats.Recovered++
+			} else {
+				fmt.Fprintf(out, "skip %s: file not found at %s\n", id, cachedPath)
+				stats.Skipped++
+				continue
+			}
 		}
 
 		base := filepath.Base(cachedPath)
@@ -160,6 +173,40 @@ func runCacheMigrate(cmd *cobra.Command, _ []string) error {
 		stats.EntriesCleaned++
 	}
 
+	// Move orphaned files (in cache dir but not in any index entry)
+	indexedBasenames := make(map[string]bool)
+	for _, entry := range globalIdx.Entries {
+		if p := strings.TrimSpace(entry.CachedPath); p != "" {
+			indexedBasenames[filepath.Base(p)] = true
+		}
+	}
+	if dirEntries, err := os.ReadDir(localCacheDir); err == nil {
+		for _, de := range dirEntries {
+			if de.IsDir() {
+				continue
+			}
+			name := de.Name()
+			if indexedBasenames[name] {
+				continue
+			}
+			src := filepath.Join(localCacheDir, name)
+			dest := filepath.Join(globalCacheDir, name)
+			if _, err := os.Stat(dest); err == nil {
+				continue // already exists in global
+			}
+			if migrateDryRun {
+				fmt.Fprintf(out, "would move orphan %s -> %s\n", src, dest)
+			} else {
+				if err := moveFile(src, dest); err != nil {
+					fmt.Fprintf(out, "error moving orphan %s: %v\n", name, err)
+					continue
+				}
+				fmt.Fprintf(out, "moved orphan %s -> %s\n", src, dest)
+			}
+			stats.Orphans++
+		}
+	}
+
 	// Merge links from local into global
 	for link, identifier := range localIdx.Links {
 		if _, ok := globalIdx.LookupLink(link); !ok {
@@ -179,6 +226,12 @@ func runCacheMigrate(cmd *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(out, "\nMigration %s: %d moved, %d already global, %d skipped",
 		dryRunLabel(migrateDryRun), stats.Moved, stats.AlreadyGlobal, stats.Skipped)
+	if stats.Recovered > 0 {
+		fmt.Fprintf(out, ", %d recovered", stats.Recovered)
+	}
+	if stats.Orphans > 0 {
+		fmt.Fprintf(out, ", %d orphans", stats.Orphans)
+	}
 	if stats.GlobalWins > 0 {
 		fmt.Fprintf(out, ", %d global wins", stats.GlobalWins)
 	}

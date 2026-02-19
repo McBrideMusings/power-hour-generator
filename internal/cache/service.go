@@ -253,6 +253,23 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		entry.Probe = existing.Probe
 	}
 
+	// Stale path recovery: if the index has an entry but the file moved (e.g.
+	// project directory was relocated), check the current cache dir for a file
+	// with the same basename before falling through to re-download.
+	if !cached && !opts.Force && ok && existing.CachedPath != "" {
+		if recovered, info := s.recoverStaleEntry(existing.CachedPath); recovered != "" {
+			entry.CachedPath = recovered
+			entry.SizeBytes = info.Size()
+			entry.RetrievedAt = existing.RetrievedAt
+			entry.LastProbeAt = existing.LastProbeAt
+			entry.Probe = existing.Probe
+			entry.Notes = appendUnique(existing.Notes, "recovered stale cached_path")
+			result.Status = ResolveStatusCached
+			result.Updated = true
+			cached = true
+		}
+	}
+
 	if !cached && !opts.Force {
 		if expectedBase, err := s.ExpectedFilenameBase(row, entry); err == nil {
 			if matchPath, matchInfo := s.locateCachedFile(expectedBase); matchPath != "" {
@@ -666,6 +683,26 @@ func (s *Service) locateCachedFile(base string) (string, os.FileInfo) {
 			if info.Mode().IsRegular() {
 				return match, info
 			}
+		}
+	}
+	return "", nil
+}
+
+// recoverStaleEntry checks the current cache directory for a file matching the
+// basename of a stale cached_path. This handles cases where the project was
+// moved or the cache directory changed.
+func (s *Service) recoverStaleEntry(stalePath string) (string, os.FileInfo) {
+	if s == nil || stalePath == "" {
+		return "", nil
+	}
+	base := filepath.Base(stalePath)
+	for _, dir := range s.candidateCacheDirs() {
+		candidate := filepath.Join(dir, base)
+		if candidate == stalePath {
+			continue // same path, already failed
+		}
+		if info, err := os.Stat(candidate); err == nil && info.Mode().IsRegular() {
+			return candidate, info
 		}
 	}
 	return "", nil
