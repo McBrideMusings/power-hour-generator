@@ -20,7 +20,7 @@ Verify configuration and external tool availability.
 powerhour check --project <dir> [--strict]
 ```
 
-`--strict` fails on missing or outdated tools.
+`--strict` fails on missing or outdated tools, and also validates configuration: profile references, plan file existence, segment template tokens, and orphaned profiles (warnings).
 
 ### `powerhour status`
 

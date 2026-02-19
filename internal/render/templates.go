@@ -196,6 +196,25 @@ func applySegmentTemplate(template string, values map[string]string) string {
 	return builder.String()
 }
 
+// ValidSegmentTokens returns the list of statically-known $TOKEN names
+// available in segment templates. Dynamic tokens from CSV CustomFields
+// are not included since they vary per plan file.
+func ValidSegmentTokens() []string {
+	return []string{
+		"INDEX", "INDEX_PAD2", "INDEX_PAD3", "INDEX_PAD4", "INDEX_RAW", "ROW_ID",
+		"TITLE", "ARTIST", "NAME", "START", "DURATION",
+		"SAFE_TITLE", "SAFE_ARTIST", "SAFE_NAME",
+		"PLAN_TITLE", "PLAN_ARTIST", "PLAN_NAME", "PLAN_START", "PLAN_DURATION",
+		"CLIP_TYPE", "CLIP_INDEX", "CLIP_INDEX_RAW",
+		"SEQUENCE", "SEQUENCE_RAW",
+		"SOURCE_KIND", "SOURCE_PATH", "SAFE_SOURCE_PATH",
+		"ID", "SAFE_ID",
+		"SOURCE",
+		"SOURCE_BASENAME", "SAFE_SOURCE_BASENAME",
+		"CACHE_BASENAME", "SAFE_CACHE_BASENAME",
+	}
+}
+
 func sanitizeSegment(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {

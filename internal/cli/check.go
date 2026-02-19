@@ -11,6 +11,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/render"
 	"powerhour/internal/tools"
 )
 
@@ -69,18 +70,36 @@ func runCheck(cmd *cobra.Command, _ []string) error {
 		logger.Printf("tool %s: source=%s version=%s satisfied=%v error=%s", st.Tool, st.Source, st.Version, st.Satisfied, st.Error)
 	}
 
+	var validations []config.ValidationResult
 	if checkStrict {
 		if err := ensureStrict(statuses); err != nil {
 			return err
 		}
+		validations = cfg.ValidateStrict(pp.Root, render.ValidSegmentTokens())
+		for _, v := range validations {
+			if v.Level == "warning" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", v.Message)
+			}
+		}
+		var errs []string
+		for _, v := range validations {
+			if v.Level == "error" {
+				errs = append(errs, v.Message)
+			}
+		}
+		if len(errs) > 0 {
+			return errors.New("config validation failed: " + strings.Join(errs, "; "))
+		}
 	}
 
 	payload := struct {
-		Project string         `json:"project"`
-		Tools   []tools.Status `json:"tools"`
+		Project     string                    `json:"project"`
+		Tools       []tools.Status            `json:"tools"`
+		Validations []config.ValidationResult `json:"validations,omitempty"`
 	}{
-		Project: pp.Root,
-		Tools:   statuses,
+		Project:     pp.Root,
+		Tools:       statuses,
+		Validations: validations,
 	}
 
 	var data []byte
