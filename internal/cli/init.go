@@ -19,16 +19,55 @@ const (
 
 func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "init",
+		Use:   "init [directory]",
 		Short: "Initialize a powerhour project",
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runInit,
 	}
 
 	return cmd
 }
 
-func runInit(cmd *cobra.Command, _ []string) error {
-	pp, err := paths.Resolve(projectDir)
+func resolveInitDir(projectFlag string, args []string) (string, error) {
+	if projectFlag != "" {
+		return projectFlag, nil
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("get working directory: %w", err)
+	}
+
+	if len(args) > 0 {
+		if args[0] == "." {
+			return cwd, nil
+		}
+		return filepath.Join(cwd, args[0]), nil
+	}
+
+	return nextAvailableDir(cwd)
+}
+
+func nextAvailableDir(base string) (string, error) {
+	for i := 1; ; i++ {
+		candidate := filepath.Join(base, fmt.Sprintf("powerhour-%d", i))
+		exists, err := paths.DirExists(candidate)
+		if err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+}
+
+func runInit(cmd *cobra.Command, args []string) error {
+	dir, err := resolveInitDir(projectDir, args)
+	if err != nil {
+		return err
+	}
+
+	pp, err := paths.Resolve(dir)
 	if err != nil {
 		return err
 	}
