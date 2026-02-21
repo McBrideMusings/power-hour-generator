@@ -52,6 +52,16 @@ The service runs multiple FFmpeg processes concurrently, limited by `--concurren
 - Executes and captures stderr to `logs/`
 - Reports success or failure
 
+## Concatenation (`concat.go`)
+
+After segments are rendered, `concat.go` handles assembling them into a final output video:
+
+1. **Timeline resolution** — walks the timeline config to determine segment order, respecting interleave rules. Interleave clips cycle when exhausted (e.g., a single interstitial repeats between every song). Falls back to sorted glob of `*.mp4` when no timeline is configured.
+2. **Concat list** — writes an ffmpeg concat demuxer file, verifying each segment exists.
+3. **Execution** — tries stream copy first (fast, lossless when all segments share codecs). If stream copy fails, falls back to re-encoding using the resolved encoding settings (video codec, bitrate, audio codec, sample rate, channels, preset).
+
+The re-encode path passes `-ar` (sample rate) and `-ac` (channels) alongside codec and bitrate flags to ffmpeg.
+
 ## Test Helpers
 
 `test_helpers_test.go` provides shared utilities for render package tests, supporting the table-driven test pattern used throughout the codebase.
