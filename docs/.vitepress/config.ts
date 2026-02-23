@@ -8,9 +8,9 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'CLI', link: '/cli' },
       { text: 'Architecture', link: '/architecture/overview' },
       { text: 'Development', link: '/development/setup' },
-      { text: 'Board', link: '/board' },
     ],
 
     sidebar: {
@@ -19,7 +19,6 @@ export default defineConfig({
           text: 'Guide',
           items: [
             { text: 'Getting Started', link: '/guide/getting-started' },
-            { text: 'CLI Reference', link: '/guide/cli-reference' },
             { text: 'Configuration', link: '/guide/configuration' },
             { text: 'Overlays', link: '/guide/overlays' },
             { text: 'Collections', link: '/guide/collections' },
@@ -36,6 +35,7 @@ export default defineConfig({
             { text: 'Config System', link: '/architecture/config' },
             { text: 'Cache System', link: '/architecture/cache' },
             { text: 'Render Pipeline', link: '/architecture/render' },
+            { text: 'Smart Re-rendering', link: '/architecture/smart-rerender' },
             { text: 'CSV Loading', link: '/architecture/csv-loading' },
             { text: 'Tool Management', link: '/architecture/tools' },
             { text: 'TUI System', link: '/architecture/tui' },

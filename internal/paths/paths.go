@@ -20,6 +20,7 @@ type ProjectPaths struct {
 	SegmentsDir     string
 	LogsDir         string
 	IndexFile       string
+	ConcatListFile  string // .powerhour/concat.txt
 	GlobalCacheDir  string // ~/.powerhour/cache/
 	GlobalIndexFile string // ~/.powerhour/index.json
 }
@@ -57,15 +58,16 @@ func Resolve(projectFlag string) (ProjectPaths, error) {
 func newProjectPaths(root string) ProjectPaths {
 	metaDir := filepath.Join(root, ".powerhour")
 	return ProjectPaths{
-		Root:        root,
-		ConfigFile:  filepath.Join(root, "powerhour.yaml"),
-		CSVFile:     filepath.Join(root, "powerhour.csv"),
-		CookiesFile: filepath.Join(root, "cookies.txt"),
-		MetaDir:     metaDir,
-		CacheDir:    filepath.Join(root, "cache"),
-		SegmentsDir: filepath.Join(root, "segments"),
-		LogsDir:     filepath.Join(root, "logs"),
-		IndexFile:   filepath.Join(metaDir, "index.json"),
+		Root:           root,
+		ConfigFile:     filepath.Join(root, "powerhour.yaml"),
+		CSVFile:        filepath.Join(root, "powerhour.csv"),
+		CookiesFile:    filepath.Join(root, "cookies.txt"),
+		MetaDir:        metaDir,
+		CacheDir:       filepath.Join(root, "cache"),
+		SegmentsDir:    filepath.Join(root, "segments"),
+		LogsDir:        filepath.Join(root, "logs"),
+		IndexFile:      filepath.Join(metaDir, "index.json"),
+		ConcatListFile: filepath.Join(metaDir, "concat.txt"),
 	}
 }
 
@@ -133,10 +135,12 @@ func (p ProjectPaths) EnsureRoot() error {
 	return nil
 }
 
-// EnsureMetaDirs creates the standard cache/logs/segments hierarchy alongside
-// the hidden .powerhour metadata directory.
+// EnsureMetaDirs creates the standard logs/segments hierarchy alongside
+// the hidden .powerhour metadata directory. It does not create the cache
+// directory — that is deferred to cache.NewService so the correct path
+// (global or project-local) is known first.
 func (p ProjectPaths) EnsureMetaDirs() error {
-	dirs := []string{p.MetaDir, p.CacheDir, p.SegmentsDir, p.LogsDir}
+	dirs := []string{p.MetaDir, p.SegmentsDir, p.LogsDir}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
@@ -206,6 +210,26 @@ func GlobalLogsDir() (string, error) {
 		return "", fmt.Errorf("create global logs dir: %w", err)
 	}
 	return dir, nil
+}
+
+// GlobalEncodingProfileFile returns the path to the cached encoding profile
+// (~/.powerhour/encoding_profile.json). It does not create the file.
+func GlobalEncodingProfileFile() (string, error) {
+	global, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(global, "encoding_profile.json"), nil
+}
+
+// GlobalEncodingDefaultsFile returns the path to the global encoding defaults
+// (~/.powerhour/encoding.yaml). It does not create the file.
+func GlobalEncodingDefaultsFile() (string, error) {
+	global, err := GlobalDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(global, "encoding.yaml"), nil
 }
 
 // FileExists reports whether a path exists and is a regular file.

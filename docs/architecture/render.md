@@ -62,6 +62,10 @@ After segments are rendered, `concat.go` handles assembling them into a final ou
 
 The re-encode path passes `-ar` (sample rate) and `-ac` (channels) alongside codec and bitrate flags to ffmpeg.
 
+## Smart Re-rendering
+
+The render pipeline supports incremental builds through the [smart re-rendering](./smart-rerender.md) system. It hashes all render inputs per segment and compares against stored state to skip unchanged segments. See the dedicated page for details.
+
 ## Test Helpers
 
 `test_helpers_test.go` provides shared utilities for render package tests, supporting the table-driven test pattern used throughout the codebase.

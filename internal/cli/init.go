@@ -13,8 +13,19 @@ import (
 )
 
 const (
-	csvHeader              = "title,artist,start_time,duration,name,link\n"
-	interstitialsCsvHeader = "link,start_time,duration\n"
+	songsPlanYAML = `# Add your songs here. Each entry needs a link and a start_time.
+# - title: Song Title
+#   artist: Artist Name
+#   start_time: "1:30"
+#   link: https://youtube.com/watch?v=...
+#   name: Person Name
+#   duration: 60
+`
+	interstitialsPlanYAML = `# Add interstitial clips here.
+# - link: path/to/clip.mp4
+#   start_time: "0:00"
+#   duration: 7
+`
 )
 
 func newInitCmd() *cobra.Command {
@@ -88,11 +99,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	created := make([]string, 0, 4)
 
-	if err := ensureCSV(pp, &created, logger); err != nil {
+	if err := ensureSongsPlan(pp, &created, logger); err != nil {
 		return err
 	}
 
-	if err := ensureInterstitialsCSV(pp, &created, logger); err != nil {
+	if err := ensureInterstitialsPlan(pp, &created, logger); err != nil {
 		return err
 	}
 
@@ -113,40 +124,41 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func ensureCSV(pp paths.ProjectPaths, created *[]string, logger Logger) error {
-	exists, err := paths.FileExists(pp.CSVFile)
+func ensureSongsPlan(pp paths.ProjectPaths, created *[]string, logger Logger) error {
+	planPath := filepath.Join(pp.Root, "songs.yaml")
+	exists, err := paths.FileExists(planPath)
 	if err != nil {
-		return fmt.Errorf("check csv: %w", err)
+		return fmt.Errorf("check songs plan: %w", err)
 	}
 	if exists {
-		logger.Printf("csv exists: %s", pp.CSVFile)
+		logger.Printf("songs plan exists: %s", planPath)
 		return nil
 	}
 
-	if err := os.WriteFile(pp.CSVFile, []byte(csvHeader), 0o644); err != nil {
-		return fmt.Errorf("write csv: %w", err)
+	if err := os.WriteFile(planPath, []byte(songsPlanYAML), 0o644); err != nil {
+		return fmt.Errorf("write songs plan: %w", err)
 	}
-	logger.Printf("created csv: %s", pp.CSVFile)
-	*created = append(*created, "powerhour.csv")
+	logger.Printf("created songs plan: %s", planPath)
+	*created = append(*created, "songs.yaml")
 	return nil
 }
 
-func ensureInterstitialsCSV(pp paths.ProjectPaths, created *[]string, logger Logger) error {
-	interstitialsPath := filepath.Join(pp.Root, "interstitials.csv")
-	exists, err := paths.FileExists(interstitialsPath)
+func ensureInterstitialsPlan(pp paths.ProjectPaths, created *[]string, logger Logger) error {
+	planPath := filepath.Join(pp.Root, "interstitials.yaml")
+	exists, err := paths.FileExists(planPath)
 	if err != nil {
-		return fmt.Errorf("check interstitials csv: %w", err)
+		return fmt.Errorf("check interstitials plan: %w", err)
 	}
 	if exists {
-		logger.Printf("interstitials csv exists: %s", interstitialsPath)
+		logger.Printf("interstitials plan exists: %s", planPath)
 		return nil
 	}
 
-	if err := os.WriteFile(interstitialsPath, []byte(interstitialsCsvHeader), 0o644); err != nil {
-		return fmt.Errorf("write interstitials csv: %w", err)
+	if err := os.WriteFile(planPath, []byte(interstitialsPlanYAML), 0o644); err != nil {
+		return fmt.Errorf("write interstitials plan: %w", err)
 	}
-	logger.Printf("created interstitials csv: %s", interstitialsPath)
-	*created = append(*created, "interstitials.csv")
+	logger.Printf("created interstitials plan: %s", planPath)
+	*created = append(*created, "interstitials.yaml")
 	return nil
 }
 

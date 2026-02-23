@@ -50,20 +50,48 @@ var allowedVideoPresets = map[string]struct{}{
 	"placebo":   {},
 }
 
+// EncodingConfig captures concat encoding settings for a project.
+// All fields are optional; the concat command merges project overrides >
+// global defaults > built-in fallback. Mirrors tools.EncodingDefaults.
+type EncodingConfig struct {
+	// Video
+	VideoCodec   string `yaml:"video_codec,omitempty"`
+	Width        int    `yaml:"width,omitempty"`
+	Height       int    `yaml:"height,omitempty"`
+	FPS          int    `yaml:"fps,omitempty"`
+	CRF          int    `yaml:"crf,omitempty"`
+	Preset       string `yaml:"preset,omitempty"`
+	VideoBitrate string `yaml:"video_bitrate,omitempty"`
+	Container    string `yaml:"container,omitempty"`
+
+	// Audio
+	AudioCodec   string `yaml:"audio_codec,omitempty"`
+	AudioBitrate string `yaml:"audio_bitrate,omitempty"`
+	SampleRate   int    `yaml:"sample_rate,omitempty"`
+	Channels     int    `yaml:"channels,omitempty"`
+
+	// Loudness normalization
+	LoudnormEnabled  *bool    `yaml:"loudnorm_enabled,omitempty"`
+	LoudnormLUFS     *float64 `yaml:"loudnorm_lufs,omitempty"`
+	LoudnormTruePeak *float64 `yaml:"loudnorm_true_peak_db,omitempty"`
+	LoudnormLRA      *float64 `yaml:"loudnorm_lra_db,omitempty"`
+}
+
 // Config captures the rendering and overlay configuration for a project.
 type Config struct {
-	Version         int                        `yaml:"version"`
-	Video           VideoConfig                `yaml:"video"`
-	Audio           AudioConfig                `yaml:"audio"`
-	Profiles        ProfilesConfig             `yaml:"profiles"`
+	Version         int                         `yaml:"version"`
+	Video           VideoConfig                 `yaml:"video"`
+	Audio           AudioConfig                 `yaml:"audio"`
+	Profiles        ProfilesConfig              `yaml:"profiles"`
 	Collections     map[string]CollectionConfig `yaml:"collections"`
 	Timeline        TimelineConfig              `yaml:"timeline"`
-	Outputs         OutputConfig               `yaml:"outputs"`
-	Plan            PlanConfig                 `yaml:"plan"`
-	Files           FileOverrides              `yaml:"files"`
-	Tools           ToolPins                   `yaml:"tools"`
-	Downloads       DownloadsConfig            `yaml:"downloads"`
-	SegmentsBaseDir string                     `yaml:"segments_base_dir"`
+	Outputs         OutputConfig                `yaml:"outputs"`
+	Plan            PlanConfig                  `yaml:"plan"`
+	Files           FileOverrides               `yaml:"files"`
+	Tools           ToolPins                    `yaml:"tools"`
+	Downloads       DownloadsConfig             `yaml:"downloads"`
+	SegmentsBaseDir string                      `yaml:"segments_base_dir"`
+	Encoding        EncodingConfig              `yaml:"encoding,omitempty"`
 }
 
 // ToolPins captures optional version pinning for managed external tools.
@@ -411,7 +439,7 @@ func Default() Config {
 		},
 		Collections: map[string]CollectionConfig{
 			"songs": {
-				Plan:           "powerhour.csv",
+				Plan:           "songs.yaml",
 				OutputDir:      "songs",
 				Profile:        "song-main",
 				LinkHeader:     "link",
@@ -419,7 +447,7 @@ func Default() Config {
 				DurationHeader: "duration",
 			},
 			"interstitials": {
-				Plan:           "interstitials.csv",
+				Plan:           "interstitials.yaml",
 				OutputDir:      "interstitials",
 				Profile:        "interstitial-drink",
 				LinkHeader:     "link",

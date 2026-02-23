@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
 
+	xterm "github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/tools"
+	"powerhour/internal/tui"
 )
 
 var (
@@ -29,6 +32,7 @@ func newToolsCmd() *cobra.Command {
 
 	cmd.AddCommand(newToolsListCmd())
 	cmd.AddCommand(newToolsInstallCmd())
+	cmd.AddCommand(newToolsEncodingCmd())
 
 	return cmd
 }
@@ -139,6 +143,106 @@ func runToolsInstall(cmd *cobra.Command, args []string) error {
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+func newToolsEncodingCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "encoding",
+		Short: "Configure encoding defaults",
+		RunE:  runToolsEncoding,
+	}
+}
+
+func runToolsEncoding(cmd *cobra.Command, _ []string) error {
+	pp, err := paths.Resolve(projectDir)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.Load(pp.ConfigFile)
+	if err != nil {
+		return err
+	}
+
+	ffmpegPath, ffmpegErr := tools.Lookup("ffmpeg")
+	if ffmpegErr != nil {
+		cmd.Println("ffmpeg not found; run `powerhour check` or `powerhour tools install` first.")
+		return nil
+	}
+
+	global := tools.LoadEncodingDefaults()
+
+	isTTY := xterm.IsTerminal(os.Stdout.Fd())
+	if isTTY {
+		// Probing happens inside the TUI; terminal is grayed out until ready.
+		result, err := tui.RunEncodingSetup(cmd.OutOrStdout(), ffmpegPath, global)
+		if err != nil {
+			return fmt.Errorf("encoding setup: %w", err)
+		}
+		if result.Cancelled {
+			return nil
+		}
+		global.VideoCodec = result.VideoCodec
+		global.Width = result.Width
+		global.Height = result.Height
+		global.FPS = result.FPS
+		global.CRF = result.CRF
+		global.Preset = result.Preset
+		global.VideoBitrate = result.VideoBitrate
+		global.Container = result.Container
+		global.AudioCodec = result.AudioCodec
+		global.AudioBitrate = result.AudioBitrate
+		global.SampleRate = result.SampleRate
+		global.Channels = result.Channels
+		loudnorm := result.LoudnormEnabled
+		global.LoudnormEnabled = &loudnorm
+		if err := tools.SaveEncodingDefaults(global); err != nil {
+			return fmt.Errorf("save encoding defaults: %w", err)
+		}
+	} else {
+		// Non-TTY: probe directly and auto-save best defaults.
+		ctx := tools.WithMinimums(cmd.Context(), cfg.ToolMinimums())
+		p, err := tools.ProbeEncoders(ctx, ffmpegPath)
+		if err != nil {
+			return fmt.Errorf("probe encoders: %w", err)
+		}
+		_ = tools.SaveEncodingProfile(p)
+		if global.VideoCodec == "" {
+			global.VideoCodec = p.SelectedCodec
+		}
+		if global.VideoBitrate == "" {
+			global.VideoBitrate = "8M"
+		}
+		if global.Container == "" {
+			global.Container = "mp4"
+		}
+		if global.AudioCodec == "" {
+			global.AudioCodec = "aac"
+		}
+		if global.AudioBitrate == "" {
+			global.AudioBitrate = "192k"
+		}
+		_ = tools.SaveEncodingDefaults(global)
+	}
+
+	// If the project has encoding overrides in its YAML, note that they take precedence.
+	enc := cfg.Encoding
+	if enc.VideoCodec != "" || enc.Container != "" || enc.VideoBitrate != "" ||
+		enc.AudioCodec != "" || enc.AudioBitrate != "" || enc.Preset != "" ||
+		enc.Width > 0 || enc.Height > 0 || enc.FPS > 0 || enc.CRF > 0 ||
+		enc.SampleRate > 0 || enc.Channels > 0 || enc.LoudnormEnabled != nil {
+		cmd.Println()
+		cmd.Println("Note: this project has encoding overrides in powerhour.yaml that take")
+		cmd.Println("precedence over global defaults. Edit that file to change them.")
+	}
+
+	return nil
+}
+
+func printEncodingField(cmd *cobra.Command, name, value string) {
+	if value == "" {
+		value = "(not set)"
+	}
+	cmd.Printf("  %-14s %s\n", name+":", value)
 }
 
 func printStatusTable(cmd *cobra.Command, statuses []tools.Status) {

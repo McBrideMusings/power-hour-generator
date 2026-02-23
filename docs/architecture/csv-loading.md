@@ -42,6 +42,14 @@ collections:
 
 All CSV columns — standard or custom — are captured in a `CustomFields` map on each row. These fields become available as dynamic template tokens in both filename templates and overlay text.
 
+## YAML Plan Loader (`yaml_plan.go`)
+
+Loads plan files in YAML format as an alternative to CSV/TSV. Each entry is a map with normalized field names. Required fields (`link`, `start_time`, `duration`) are validated, and all additional fields are captured as custom fields for template tokens.
+
+## Permissive Import (`permissive_import.go`)
+
+A heuristic-based CSV/TSV importer that auto-detects delimiters, header presence, and column roles (link, start_time, duration). Supports mixed delimiters and optional column header overrides. Used by the `convert` command to import loosely-structured plan files.
+
 ## Protected Headers
 
 `index` and `id` are reserved and cannot be used as CSV column names. These are auto-generated: `index` is the 1-based row number, `id` is derived from the cache identifier.

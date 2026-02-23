@@ -15,7 +15,9 @@ The project is in active development. This document describes the planned capabi
 - Overlay system built from reusable segments that can each define text, transforms, timing, and positioning (defaults cover title + artist on entry, optional outro name, and a persistent index badge).
 - Configurable video/audio encoding parameters and overlay styling via optional YAML.
 - Normalized output: H.264 video at CRF 20 (`veryfast`) with AAC audio (192 kbps, 48 kHz) by default.
-- One MP4 per source row; concatenation workflows will be addressed in a later release.
+- Multi-codec support: H.264, H.265 (HEVC), VP9, and AV1 families with automatic hardware encoder detection (VideoToolbox, NVENC, AMF).
+- Concatenation: assembles rendered segments into a final video following the project timeline, with stream-copy or re-encode fallback.
+- Global encoding defaults stored per-user and configurable via an interactive TUI carousel (`powerhour tools encoding`).
 
 ## Workflow overview
 
@@ -38,7 +40,10 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour validate segments --project <dir> [--index <n>] [--json]` – reconcile rendered segment filenames/logs with the configured template, renaming legacy outputs when possible.
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
+- `powerhour tools encoding` – interactively configure global encoding defaults (video codec, resolution, FPS, CRF, preset, bitrate, container, audio codec/bitrate, sample rate, channels, loudnorm) via a TUI carousel. Probes available hardware encoders on each invocation.
 - `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
+- `powerhour concat --project <dir> [--output <path>] [--dry-run]` – concatenate rendered segments into a final video following the timeline sequence. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
+- `powerhour convert --project <dir> [--output <path>] [--dry-run]` – convert a CSV/TSV plan file to YAML format with permissive column detection.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 

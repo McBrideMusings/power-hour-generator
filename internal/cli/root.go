@@ -37,7 +37,17 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newValidateCmd())
 	cmd.AddCommand(newFetchCmd())
 	cmd.AddCommand(newRenderCmd())
+	cmd.AddCommand(newConcatCmd())
 	cmd.AddCommand(newMigrateCmd())
+
+	convertCmd := newConvertCmd()
+	cmd.AddCommand(convertCmd)
+	// convert operates on a standalone file path; project/json flags don't apply.
+	for _, name := range []string{"project", "json"} {
+		if f := convertCmd.InheritedFlags().Lookup(name); f != nil {
+			f.Hidden = true
+		}
+	}
 
 	return cmd
 }

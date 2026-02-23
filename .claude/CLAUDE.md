@@ -42,7 +42,7 @@ go vet ./...
 
 **Cache** (`internal/cache/`): Index-based caching with `.powerhour/index.json` tracking source identifiers, cached file paths, and ffprobe metadata. Source resolution uses yt-dlp for URLs, direct reference for local files. `runner.go` abstracts command execution for testability.
 
-**Render** (`internal/render/`): Builds FFmpeg filter graphs (scale, pad, fade, drawtext overlays, loudnorm). `filters.go` constructs the filter chains. `templates.go` handles `$TOKEN`-based filename expansion. `service.go` orchestrates parallel ffmpeg workers. `concat.go` resolves timeline segment order (with cycling interleave clips), writes ffmpeg concat lists, and runs concatenation (stream copy with re-encode fallback).
+**Render** (`internal/render/`): Builds FFmpeg filter graphs (scale, pad, fade, drawtext overlays, loudnorm). `filters.go` constructs the filter chains. `templates.go` handles `$TOKEN`-based filename expansion. `service.go` orchestrates parallel ffmpeg workers. `concat.go` resolves timeline segment order (with cycling interleave clips), writes ffmpeg concat lists, and runs concatenation (stream copy with re-encode fallback). `state/` sub-package handles smart re-rendering: deterministic input hashing (`hash.go`), persistent render state in `.powerhour/render-state.json` (`store.go`), and change detection logic (`detect.go`).
 
 **Project resolver** (`internal/project/`): Resolves config + CSV into an executable clip timeline. `resolver.go` for legacy clips, `collections.go` for collection-based projects.
 
@@ -68,6 +68,7 @@ go vet ./...
 - **Encoding data model harmony**: `config.EncodingConfig` and `tools.EncodingDefaults` have the same fields (video codec, width, height, fps, crf, preset, video bitrate, container, audio codec, audio bitrate, sample rate, channels, loudnorm). Resolution chain: built-in defaults → global `~/.powerhour/encoding.yaml` → project `powerhour.yaml` `encoding:` block. Use `encodingConfigToDefaults()` in CLI layer to convert between the types.
 - **Codec families**: H.264, HEVC, VP9, AV1. Each family lists hardware then software encoder candidates. `av1_videotoolbox` does not exist in ffmpeg — AV1 software encoders are `libsvtav1`, `librav1e`, `libaom-av1`.
 - **Interleave cycling**: When interleave clips are exhausted during timeline resolution, they cycle from the beginning (modulo). A single interstitial clip repeats between every song. Empty interleave collections are gracefully skipped.
+- **Smart re-rendering**: Two hash levels — `GlobalConfigHash` (video/audio/encoding config) and `SegmentInputHash` (CSV row fields, overlay profile, fade, filename template). Hashes use canonical JSON → SHA256 (`"sha256:<hex>"`). State stored in `.powerhour/render-state.json` with atomic writes. Source identifier (URL/path) is hashed, not file content. `--dry-run` shows what would change without executing FFmpeg. `--force` bypasses change detection.
 
 ## Testing Patterns
 

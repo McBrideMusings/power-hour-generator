@@ -10,8 +10,8 @@ hero:
       text: Get Started
       link: /guide/getting-started
     - theme: alt
-      text: Project Board
-      link: /board
+      text: CLI
+      link: /cli
 
 features:
   - title: CSV-Driven Workflow

@@ -2,6 +2,7 @@ package project
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"powerhour/internal/config"
@@ -82,7 +83,16 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			DefaultDuration: 60, // TODO: Make this configurable?
 		}
 
-		rows, err := csvplan.LoadCollection(planPath, opts)
+		var (
+			rows []csvplan.CollectionRow
+			err  error
+		)
+		ext := strings.ToLower(filepath.Ext(planPath))
+		if ext == ".yaml" || ext == ".yml" {
+			rows, err = csvplan.LoadCollectionYAML(planPath, opts)
+		} else {
+			rows, err = csvplan.LoadCollection(planPath, opts)
+		}
 		var planErrs csvplan.ValidationErrors
 		if err != nil {
 			if ve, ok := err.(csvplan.ValidationErrors); ok {

@@ -56,6 +56,22 @@ powerhour render --project my-power-hour
 
 Each row produces an MP4 in `segments/` with scaling, fades, overlays, and audio normalization applied.
 
+### 6. Configure encoding (optional)
+
+```bash
+powerhour tools encoding
+```
+
+An interactive carousel lets you pick video codec (with hardware acceleration detection), resolution, FPS, CRF, preset, container format, audio codec, bitrate, sample rate, channels, and loudness normalization. These defaults apply globally and can be overridden per-project in `powerhour.yaml`.
+
+### 7. Concatenate segments
+
+```bash
+powerhour concat --project my-power-hour
+```
+
+Assembles all rendered segments into a single output video following the timeline sequence. Uses stream copy when possible, falling back to re-encoding with your configured encoding defaults.
+
 ## Project Layout
 
 ```
@@ -71,7 +87,7 @@ my-power-hour/
 
 ## What's Next
 
-- [CLI Reference](/guide/cli-reference) — all available commands and flags
+- [CLI](/cli) — all available commands and flags
 - [Configuration](/guide/configuration) — customize video, audio, and overlay settings
 - [Overlays](/guide/overlays) — configure text overlays with profiles
 - [Collections](/guide/collections) — organize multiple clip types

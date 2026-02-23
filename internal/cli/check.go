@@ -160,6 +160,37 @@ func printCheckResult(cmd *cobra.Command, project string, statuses []tools.Statu
 		}
 		cmd.Println()
 	}
+
+	printEncodingStatus(cmd, bold, green, red, faint)
+}
+
+func printEncodingStatus(cmd *cobra.Command, bold, green, red, faint lipgloss.Style) {
+	profile := tools.LoadEncodingProfile()
+	if profile == nil {
+		cmd.Println(red.Render("–") + " " + bold.Render("encoding"))
+		cmd.Println(faint.Render("  not configured — run `powerhour tools encoding`"))
+		cmd.Println()
+		return
+	}
+
+	global := tools.LoadEncodingDefaults()
+	codec := global.VideoCodec
+	if codec == "" {
+		codec = profile.SelectedCodec
+	}
+	container := global.Container
+	if container == "" {
+		container = "mp4"
+	}
+	bitrate := global.VideoBitrate
+	if bitrate == "" {
+		bitrate = "8M"
+	}
+
+	cmd.Println(green.Render("✓") + " " + bold.Render("encoding"))
+	cmd.Println(faint.Render(fmt.Sprintf("  %s · %s · %s", codec, container, bitrate)))
+	cmd.Println(faint.Render(fmt.Sprintf("  probed %s", profile.ProbedAt.Format("2006-01-02"))))
+	cmd.Println()
 }
 
 func ensureStrict(statuses []tools.Status) error {

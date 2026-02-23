@@ -127,6 +127,9 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 	}
 	pp = paths.ApplyConfig(pp, cfg)
 	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
+	if err := os.MkdirAll(pp.CacheDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create cache dir: %w", err)
+	}
 	ctx = tools.WithMinimums(ctx, cfg.ToolMinimums())
 
 	cookiesPath := ""

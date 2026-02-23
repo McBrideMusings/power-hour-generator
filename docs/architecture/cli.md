@@ -15,6 +15,10 @@ Each file in `internal/cli/` corresponds to a command or command group:
 | `init.go` | `powerhour init` |
 | `fetch.go` | `powerhour fetch` |
 | `render.go` | `powerhour render` |
+| `concat.go` | `powerhour concat` |
+| `convert_cmd.go` | `powerhour convert` |
+| `tools.go` | `powerhour tools list/install/encoding` |
+| `check.go` | `powerhour check` |
 | `validate.go` | `powerhour validate filenames/segments` |
 | `collections_fetch.go` | Collection-aware fetch variant |
 | `collections_render.go` | Collection-aware render variant |
