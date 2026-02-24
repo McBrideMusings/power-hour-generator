@@ -84,11 +84,16 @@ go run ./cmd/powerhour render --project <dir> [flags]
 | Flag | Description |
 |------|-------------|
 | `--concurrency N` | Limit parallel ffmpeg processes |
-| `--force` | Overwrite existing segment files |
+| `--force` | Overwrite existing segment files (bypasses change detection) |
+| `--dry-run` | Show what would be rendered or skipped without executing FFmpeg |
 | `--no-progress` | Disable interactive progress table |
 | `--index <n\|n-m>` | Limit to specific plan rows (repeatable) |
 | `--collection <name>` | Target a specific collection |
+| `--sample-time <time>` | Extract a single frame at specified time for testing overlays |
+| `--sample-output <path>` | Output path for the sample frame |
 | `--json` | Structured output |
+
+Render tracks input hashes in `.powerhour/render-state.json` and automatically skips unchanged segments on subsequent runs. Use `--force` to bypass change detection, or `--dry-run` to preview what would happen.
 
 ### `powerhour concat`
 
