@@ -21,6 +21,7 @@ type ProjectPaths struct {
 	LogsDir         string
 	IndexFile       string
 	ConcatListFile  string // .powerhour/concat.txt
+	RenderStateFile string // .powerhour/render-state.json
 	GlobalCacheDir  string // ~/.powerhour/cache/
 	GlobalIndexFile string // ~/.powerhour/index.json
 }
@@ -58,16 +59,17 @@ func Resolve(projectFlag string) (ProjectPaths, error) {
 func newProjectPaths(root string) ProjectPaths {
 	metaDir := filepath.Join(root, ".powerhour")
 	return ProjectPaths{
-		Root:           root,
-		ConfigFile:     filepath.Join(root, "powerhour.yaml"),
-		CSVFile:        filepath.Join(root, "powerhour.csv"),
-		CookiesFile:    filepath.Join(root, "cookies.txt"),
-		MetaDir:        metaDir,
-		CacheDir:       filepath.Join(root, "cache"),
-		SegmentsDir:    filepath.Join(root, "segments"),
-		LogsDir:        filepath.Join(root, "logs"),
-		IndexFile:      filepath.Join(metaDir, "index.json"),
-		ConcatListFile: filepath.Join(metaDir, "concat.txt"),
+		Root:            root,
+		ConfigFile:      filepath.Join(root, "powerhour.yaml"),
+		CSVFile:         filepath.Join(root, "powerhour.csv"),
+		CookiesFile:     filepath.Join(root, "cookies.txt"),
+		MetaDir:         metaDir,
+		CacheDir:        filepath.Join(root, "cache"),
+		SegmentsDir:     filepath.Join(root, "segments"),
+		LogsDir:         filepath.Join(root, "logs"),
+		IndexFile:       filepath.Join(metaDir, "index.json"),
+		ConcatListFile:  filepath.Join(metaDir, "concat.txt"),
+		RenderStateFile: filepath.Join(metaDir, "render-state.json"),
 	}
 }
 

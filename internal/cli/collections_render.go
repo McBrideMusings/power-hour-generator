@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -19,6 +20,7 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/state"
 	"powerhour/internal/tui"
 	"powerhour/pkg/csvplan"
 )
@@ -160,6 +162,40 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		validSegments = append(validSegments, segments[idx])
 	}
 
+	// --- Smart re-rendering: change detection ---
+	rs, err := state.Load(pp.RenderStateFile)
+	if err != nil {
+		return fmt.Errorf("load render state: %w", err)
+	}
+
+	filenameTemplate := cfg.SegmentFilenameTemplate()
+	actions := state.DetectChanges(rs, validSegments, cfg, filenameTemplate, renderForce)
+
+	if renderDryRun {
+		printDryRun(cmd, actions, outputJSON)
+		return nil
+	}
+
+	// Split into segments to render vs skip
+	var toRender []render.Segment
+	skipResults := make(map[string]render.Result) // keyed by output path
+	for i, a := range actions {
+		seg := validSegments[i]
+		if a.Action == state.ActionSkip {
+			skipResults[seg.OutputPath] = render.Result{
+				Index:      seg.Clip.Sequence,
+				ClipType:   seg.Clip.ClipType,
+				TypeIndex:  seg.Clip.TypeIndex,
+				Title:      clipDisplayTitle(seg.Clip),
+				OutputPath: seg.OutputPath,
+				Skipped:    true,
+				Reason:     a.Reason,
+			}
+		} else {
+			toRender = append(toRender, seg)
+		}
+	}
+
 	var fullResults []render.Result
 
 	if mode == tui.ModeTUI {
@@ -180,6 +216,18 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 					send(tui.RowUpdateMsg{
 						Key:    collectionRenderKey(collectionClips[i]),
 						Fields: collectionRenderResultFields(pp.Root, collectionClips[i], segments[i], preflight[i]),
+					})
+				}
+			}
+
+			// Send skip results from change detection
+			for _, clipIdx := range renderOrder {
+				cc := collectionClips[clipIdx]
+				seg := segments[clipIdx]
+				if sr, ok := skipResults[seg.OutputPath]; ok {
+					send(tui.RowUpdateMsg{
+						Key:    collectionRenderKey(cc),
+						Fields: collectionRenderResultFields(pp.Root, cc, seg, sr),
 					})
 				}
 			}
@@ -220,13 +268,16 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 				},
 			)
 
-			results := svc.Render(ctx, validSegments, render.Options{
-				Concurrency: renderConcurrency,
-				Force:       renderForce,
-				Reporter:    reporter,
-			})
+			var renderResults []render.Result
+			if len(toRender) > 0 {
+				renderResults = svc.Render(ctx, toRender, render.Options{
+					Concurrency: renderConcurrency,
+					Force:       renderForce,
+					Reporter:    reporter,
+				})
+			}
 
-			fullResults = mergeCollectionRenderResults(collectionClips, preflight, shouldRender, results)
+			fullResults = mergeCollectionRenderResultsWithSkips(collectionClips, preflight, shouldRender, renderResults, skipResults)
 		})
 		if err != nil {
 			return err
@@ -234,18 +285,54 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 
 		printCollectionRenderSummary(outWriter, fullResults)
 	} else {
-		results := svc.Render(ctx, validSegments, render.Options{
-			Concurrency: renderConcurrency,
-			Force:       renderForce,
-		})
+		var renderResults []render.Result
+		if len(toRender) > 0 {
+			renderResults = svc.Render(ctx, toRender, render.Options{
+				Concurrency: renderConcurrency,
+				Force:       renderForce,
+			})
+		}
 
-		fullResults = mergeCollectionRenderResults(collectionClips, preflight, shouldRender, results)
+		fullResults = mergeCollectionRenderResultsWithSkips(collectionClips, preflight, shouldRender, renderResults, skipResults)
 
 		if mode == tui.ModeJSON {
 			return writeCollectionRenderJSON(cmd, pp.Root, collectionClips, fullResults)
 		}
 
 		writeCollectionRenderTable(cmd, pp.Root, collectionClips, segments, fullResults)
+	}
+
+	// --- Update render state ---
+	rs.GlobalConfigHash = state.GlobalConfigHash(cfg)
+
+	// Build segment lookup by output path for state updates
+	segByPath := make(map[string]render.Segment, len(validSegments))
+	for _, seg := range validSegments {
+		segByPath[seg.OutputPath] = seg
+	}
+
+	for _, res := range fullResults {
+		if !res.Skipped && res.Err == nil && res.OutputPath != "" {
+			if seg, ok := segByPath[res.OutputPath]; ok {
+				rs.Segments[res.OutputPath] = state.SegmentState{
+					InputHash:  state.SegmentInputHash(seg, filenameTemplate),
+					RenderedAt: time.Now(),
+					SourcePath: seg.CachedPath,
+					DurationS:  float64(seg.Clip.DurationSeconds),
+				}
+			}
+		}
+	}
+
+	// Prune entries for segments no longer in the plan
+	currentKeys := make(map[string]bool, len(validSegments))
+	for _, seg := range validSegments {
+		currentKeys[seg.OutputPath] = true
+	}
+	state.Prune(rs, currentKeys)
+
+	if err := rs.Save(pp.RenderStateFile); err != nil {
+		return fmt.Errorf("save render state: %w", err)
 	}
 
 	return nil
@@ -529,6 +616,85 @@ func mergeCollectionRenderResults(clips []project.CollectionClip, preflight []re
 		}
 	}
 	return fullResults
+}
+
+// mergeCollectionRenderResultsWithSkips merges preflight errors, change-detection
+// skips, and actual render results into a unified results slice.
+func mergeCollectionRenderResultsWithSkips(clips []project.CollectionClip, preflight []render.Result, shouldRender []bool, renderResults []render.Result, skipResults map[string]render.Result) []render.Result {
+	fullResults := make([]render.Result, len(clips))
+	renderIdx := 0
+	for i := range clips {
+		if !shouldRender[i] {
+			// Preflight error (e.g. missing cached source)
+			fullResults[i] = preflight[i]
+			continue
+		}
+		// Check if this segment was skipped by change detection
+		outputPath := preflight[i].OutputPath // may be empty
+		if outputPath == "" && i < len(clips) {
+			// Try to find it from render or skip results
+			for path, sr := range skipResults {
+				if sr.Index == clips[i].Clip.Sequence {
+					outputPath = path
+					break
+				}
+			}
+		}
+		if sr, ok := skipResults[outputPath]; ok {
+			fullResults[i] = sr
+			continue
+		}
+		// Actual render result
+		if renderIdx < len(renderResults) {
+			fullResults[i] = renderResults[renderIdx]
+			renderIdx++
+		}
+	}
+	return fullResults
+}
+
+func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput bool) {
+	if jsonOutput {
+		type jsonAction struct {
+			Index  int    `json:"index"`
+			Title  string `json:"title"`
+			Action string `json:"action"`
+			Reason string `json:"reason"`
+			Output string `json:"output"`
+		}
+		var out []jsonAction
+		for _, a := range actions {
+			out = append(out, jsonAction{
+				Index:  a.Segment.Clip.Sequence,
+				Title:  clipDisplayTitle(a.Segment.Clip),
+				Action: a.Action,
+				Reason: a.Reason,
+				Output: a.Segment.OutputPath,
+			})
+		}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Fprintln(cmd.OutOrStdout(), string(data))
+		return
+	}
+
+	var renderCount, skipCount int
+	for _, a := range actions {
+		if a.Action == state.ActionRender {
+			renderCount++
+		} else {
+			skipCount++
+		}
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "DRY RUN: %d segments would be rendered, %d would be skipped\n\n", renderCount, skipCount)
+	for _, a := range actions {
+		tag := "SKIP  "
+		if a.Action == state.ActionRender {
+			tag = "RENDER"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s  %03d  %-20s  (%s)\n",
+			tag, a.Segment.Clip.Sequence, clipDisplayTitle(a.Segment.Clip), a.Reason)
+	}
 }
 
 func collectionRenderKey(cc project.CollectionClip) string {

@@ -93,7 +93,7 @@ Sections: guide, architecture, development, roadmap.
 
 ## Agent Behavior
 
-- **No plan files in the repo.** Do not create `docs/plans/` or save plan documents as files in the repository. Use Claude Code's own plan file location if needed, or just discuss plans in conversation.
+- **No plan files in the repo.** Never create `docs/plans/`, plan markdown files, or design documents as files in the repository — even if a skill or plugin tells you to. The `docs/` folder is for the VitePress documentation site only. Discuss plans in conversation or use Claude Code's own plan file location.
 - **No Claude attribution.** Do not add "Co-authored-by: Claude" or any Claude/AI attribution to commit messages or pull requests.
 
 ## Workflow

@@ -56,6 +56,7 @@ type Result struct {
 	OutputPath string
 	LogPath    string
 	Skipped    bool
+	Reason     string // Why the segment was rendered or skipped (from state.Reason* constants)
 	Err        error
 }
 

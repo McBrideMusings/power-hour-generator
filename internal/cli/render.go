@@ -21,6 +21,7 @@ import (
 var (
 	renderConcurrency  int
 	renderForce        bool
+	renderDryRun       bool
 	renderIndexArg     []string
 	renderNoProgress   bool
 	renderSampleTime   string
@@ -55,6 +56,7 @@ func newRenderCmd() *cobra.Command {
 
 	cmd.Flags().IntVar(&renderConcurrency, "concurrency", defaultConcurrency, "Concurrent ffmpeg processes")
 	cmd.Flags().BoolVar(&renderForce, "force", false, "Re-render even if segment output already exists")
+	cmd.Flags().BoolVar(&renderDryRun, "dry-run", false, "Show what would change without rendering")
 	cmd.Flags().BoolVar(&renderNoProgress, "no-progress", false, "Disable interactive progress output")
 	cmd.Flags().StringSliceVar(&renderIndexArg, "index", nil, "Limit render to specific 1-based row index or range like 5-10 (repeat flag for multiple)")
 	cmd.Flags().StringVar(&renderSampleTime, "sample-time", "", "Extract a single frame at the specified time (e.g., '5s', '1m30s', '0:30') for testing overlays")
