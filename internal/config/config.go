@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -82,6 +83,8 @@ type Config struct {
 	Version         int                         `yaml:"version"`
 	Video           VideoConfig                 `yaml:"video"`
 	Audio           AudioConfig                 `yaml:"audio"`
+	ProfileFiles    []string                    `yaml:"profile_files,omitempty"`
+	CollectionFiles []string                    `yaml:"collection_files,omitempty"`
 	Profiles        ProfilesConfig              `yaml:"profiles"`
 	Collections     map[string]CollectionConfig `yaml:"collections"`
 	Timeline        TimelineConfig              `yaml:"timeline"`
@@ -496,6 +499,15 @@ func Load(path string) (Config, error) {
 	if err := yaml.Unmarshal(contents, &cfg); err != nil {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
+
+	projectRoot := filepath.Dir(path)
+	if err := cfg.loadProfileFiles(projectRoot); err != nil {
+		return Config{}, err
+	}
+	if err := cfg.loadCollectionFiles(projectRoot); err != nil {
+		return Config{}, err
+	}
+
 	cfg.ApplyDefaults()
 	return cfg, nil
 }

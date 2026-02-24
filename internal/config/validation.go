@@ -19,11 +19,41 @@ type ValidationResult struct {
 // $TOKEN names for segment templates (pass render.ValidSegmentTokens()).
 func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) []ValidationResult {
 	var results []ValidationResult
+	results = append(results, c.validateExternalFiles(projectRoot)...)
 	results = append(results, c.validateProfileRefs()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
 	results = append(results, c.validateOrphanedProfiles()...)
 	results = append(results, c.validateTimeline()...)
+	return results
+}
+
+func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {
+	var results []ValidationResult
+	for _, path := range c.ProfileFiles {
+		resolved := path
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(projectRoot, resolved)
+		}
+		if _, err := os.Stat(resolved); err != nil {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("profile file %q not found", path),
+			})
+		}
+	}
+	for _, path := range c.CollectionFiles {
+		resolved := path
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(projectRoot, resolved)
+		}
+		if _, err := os.Stat(resolved); err != nil {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("collection file %q not found", path),
+			})
+		}
+	}
 	return results
 }
 

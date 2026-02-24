@@ -341,6 +341,55 @@ func TestValidateTimeline_EmptyCollectionName(t *testing.T) {
 	}
 }
 
+func TestValidateExternalFiles_MissingProfileFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		ProfileFiles: []string{"missing.yaml"},
+	}
+	results := cfg.validateExternalFiles(dir)
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateExternalFiles_MissingCollectionFile(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		CollectionFiles: []string{"missing.yaml"},
+	}
+	results := cfg.validateExternalFiles(dir)
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateExternalFiles_AllPresent(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "profiles.yaml"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(dir, "colls.yaml"), []byte("{}"), 0644)
+
+	cfg := Config{
+		ProfileFiles:    []string{"profiles.yaml"},
+		CollectionFiles: []string{"colls.yaml"},
+	}
+	results := cfg.validateExternalFiles(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected no errors, got %v", results)
+	}
+}
+
 func TestExtractTemplateTokens(t *testing.T) {
 	tests := []struct {
 		template string
