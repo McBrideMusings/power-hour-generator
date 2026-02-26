@@ -11,15 +11,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
+	"powerhour/internal/render"
+	"powerhour/internal/render/state"
 )
 
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show resolved timeline for the project",
+		Short: "Show project status with per-row cache and render state",
 		RunE:  runStatus,
 	}
 	return cmd
@@ -31,6 +34,27 @@ type timelineEntryOutput struct {
 	Collection  string `json:"collection"`
 	Index       int    `json:"index"`
 	SegmentPath string `json:"segment_path"`
+}
+
+// rowStatus captures per-row cache and render status.
+type rowStatus struct {
+	Collection   string `json:"collection"`
+	Index        int    `json:"index"`
+	Title        string `json:"title"`
+	CacheStatus  string `json:"cache_status"`
+	RenderStatus string `json:"render_status"`
+	RenderReason string `json:"render_reason,omitempty"`
+}
+
+// collectionSummary aggregates row statuses for a collection.
+type collectionSummary struct {
+	Name         string `json:"name"`
+	Total        int    `json:"total"`
+	Cached       int    `json:"cached"`
+	CacheMissing int    `json:"cache_missing"`
+	Rendered     int    `json:"rendered"`
+	Stale        int    `json:"stale"`
+	Missing      int    `json:"missing"`
 }
 
 // collectionPalette maps sorted collection index to a terminal color.
@@ -77,6 +101,15 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Load cache index and render state
+	idx, _ := cache.Load(pp)
+	rs, _ := state.Load(pp.RenderStateFile)
+
+	// Build per-row statuses
+	tmpl := cfg.SegmentFilenameTemplate()
+	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, resolver, collections, tmpl)
+
+	// Resolve timeline
 	var timelineEntries []timelineEntryOutput
 	hasTimeline := len(cfg.Timeline.Sequence) > 0
 
@@ -98,10 +131,14 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 
 	payload := struct {
 		Project     string                `json:"project"`
+		Summaries   []collectionSummary   `json:"summaries"`
+		Rows        []rowStatus           `json:"rows"`
 		HasTimeline bool                  `json:"has_timeline"`
 		Timeline    []timelineEntryOutput `json:"timeline,omitempty"`
 	}{
 		Project:     pp.Root,
+		Summaries:   summaries,
+		Rows:        rows,
 		HasTimeline: hasTimeline,
 		Timeline:    timelineEntries,
 	}
@@ -115,8 +152,154 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	printStatusResult(pp.Root, collections, timelineEntries)
+	printStatusResult(pp.Root, collections, summaries, rows, timelineEntries)
 	return nil
+}
+
+func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *state.RenderState, resolver *project.CollectionResolver, collections map[string]project.Collection, tmpl string) ([]rowStatus, []collectionSummary) {
+	// Sort collection names for deterministic output
+	sortedNames := make([]string, 0, len(collections))
+	for name := range collections {
+		sortedNames = append(sortedNames, name)
+	}
+	sort.Strings(sortedNames)
+
+	var allRows []rowStatus
+	var summaries []collectionSummary
+
+	globalHash := state.GlobalConfigHash(cfg)
+	configChanged := globalHash != rs.GlobalConfigHash
+
+	for _, collName := range sortedNames {
+		coll := collections[collName]
+		summary := collectionSummary{Name: collName, Total: len(coll.Rows)}
+
+		for _, collRow := range coll.Rows {
+			r := collRow.ToRow()
+
+			// Cache status
+			cacheStatus := "missing"
+			link := strings.TrimSpace(r.Link)
+			isURL := strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu")
+
+			if isURL {
+				_, ok, err := resolveEntryForRow(pp, idx, r)
+				if err == nil && ok {
+					cacheStatus = "cached"
+				}
+			} else {
+				// Local file — check if it exists
+				localPath := link
+				if !filepath.IsAbs(localPath) {
+					localPath = filepath.Join(pp.Root, strings.Trim(localPath, "'\""))
+				}
+				if _, err := os.Stat(localPath); err == nil {
+					cacheStatus = "cached"
+				}
+			}
+
+			// Build segment for render status
+			clip := project.Clip{
+				Sequence:        r.Index,
+				ClipType:        project.ClipType(collName),
+				TypeIndex:       r.Index,
+				Row:             r,
+				SourceKind:      project.SourceKindPlan,
+				DurationSeconds: r.DurationSeconds,
+				OverlayProfile:  coll.Profile,
+			}
+			if coll.Profile != "" {
+				if prof, ok := resolver.Profile(coll.Profile); ok {
+					if prof.FadeInSec != nil {
+						clip.FadeInSeconds = *prof.FadeInSec
+					}
+					if prof.FadeOutSec != nil {
+						clip.FadeOutSeconds = *prof.FadeOutSec
+					}
+				}
+			}
+
+			clip.Row.DurationSeconds = clip.DurationSeconds
+			if clip.Row.Index <= 0 {
+				clip.Row.Index = clip.TypeIndex
+			}
+
+			var prof project.ResolvedProfile
+			var segs []config.OverlaySegment
+			if clip.OverlayProfile != "" {
+				if p, ok := resolver.Profile(clip.OverlayProfile); ok {
+					prof = p
+					segs = p.ResolveSegments()
+				}
+			}
+
+			seg := render.Segment{
+				Clip:     clip,
+				Profile:  prof,
+				Segments: segs,
+			}
+
+			outputDir := coll.OutputDir
+			if !filepath.IsAbs(outputDir) {
+				outputDir = filepath.Join(pp.SegmentsDir, outputDir)
+			}
+			seg.OutputPath = filepath.Join(outputDir, render.SegmentBaseName(tmpl, seg)+".mp4")
+
+			// Render status
+			renderStatus := "missing"
+			renderReason := ""
+			if prior, exists := rs.Segments[seg.OutputPath]; exists {
+				if configChanged {
+					renderStatus = "stale"
+					renderReason = "config changed"
+				} else {
+					currentHash := state.SegmentInputHash(seg, tmpl)
+					if currentHash != prior.InputHash {
+						renderStatus = "stale"
+						renderReason = "input changed"
+					} else if _, err := os.Stat(seg.OutputPath); os.IsNotExist(err) {
+						renderStatus = "stale"
+						renderReason = "output missing"
+					} else {
+						renderStatus = "rendered"
+					}
+				}
+			}
+
+			// Update summary
+			if cacheStatus == "cached" {
+				summary.Cached++
+			} else {
+				summary.CacheMissing++
+			}
+			switch renderStatus {
+			case "rendered":
+				summary.Rendered++
+			case "stale":
+				summary.Stale++
+			default:
+				summary.Missing++
+			}
+
+			title := sanitizeField(r.CustomFields["title"])
+			if title == "" {
+				title = sanitizeField(r.Title)
+			}
+
+			allRows = append(allRows, rowStatus{
+				Collection:   collName,
+				Index:        r.Index,
+				Title:        title,
+				CacheStatus:  cacheStatus,
+				RenderStatus: renderStatus,
+				RenderReason: renderReason,
+			})
+		}
+
+		summaries = append(summaries, summary)
+	}
+
+	return allRows, summaries
 }
 
 func timelineEntryLabel(e timelineEntryOutput, collections map[string]project.Collection) string {
@@ -152,12 +335,13 @@ func sanitizeField(s string) string {
 	return strings.TrimSpace(s)
 }
 
-func printStatusResult(projectPath string, collections map[string]project.Collection, timeline []timelineEntryOutput) {
+func printStatusResult(projectPath string, collections map[string]project.Collection, summaries []collectionSummary, rows []rowStatus, timeline []timelineEntryOutput) {
 	bold := lipgloss.NewStyle().Bold(true).Inline(true)
 	faint := lipgloss.NewStyle().Faint(true).Inline(true)
 	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Inline(true)
+	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Inline(true)
 
-	// Sort collection names once; used for consistent color assignment and display.
+	// Sort collection names for consistent color assignment
 	sortedNames := make([]string, 0, len(collections))
 	for name := range collections {
 		sortedNames = append(sortedNames, name)
@@ -168,16 +352,74 @@ func printStatusResult(projectPath string, collections map[string]project.Collec
 	fmt.Println(bold.Render("Project:") + " " + projectPath)
 	fmt.Println()
 
-	if len(collections) > 0 {
+	// Collection summaries
+	if len(summaries) > 0 {
 		fmt.Println(bold.Render("Collections:"))
-		for _, name := range sortedNames {
-			c := collections[name]
-			n := len(c.Rows)
-			unit := "rows"
-			if n == 1 {
-				unit = "row"
+		for _, s := range summaries {
+			style := collStyles[s.Name]
+			cachePart := fmt.Sprintf("%d cached", s.Cached)
+			if s.CacheMissing > 0 {
+				cachePart += fmt.Sprintf(", %d missing", s.CacheMissing)
 			}
-			fmt.Printf("  %s  %d %s\n", collStyles[name].Width(20).Render(name), n, unit)
+
+			renderPart := fmt.Sprintf("%d rendered", s.Rendered)
+			if s.Stale > 0 {
+				renderPart += fmt.Sprintf(", %d stale", s.Stale)
+			}
+			if s.Missing > 0 {
+				renderPart += fmt.Sprintf(", %d missing", s.Missing)
+			}
+
+			fmt.Printf("  %s  %d rows   %s   %s\n",
+				style.Width(14).Render(s.Name),
+				s.Total,
+				cachePart,
+				renderPart,
+			)
+		}
+		fmt.Println()
+	}
+
+	// Per-row table
+	if len(rows) > 0 {
+		fmt.Printf("  %4s  %-14s %-30s %-10s %s\n",
+			bold.Render("#"),
+			bold.Render("COLLECTION"),
+			bold.Render("TITLE"),
+			bold.Render("CACHE"),
+			bold.Render("RENDER"),
+		)
+
+		for _, r := range rows {
+			style := collStyles[r.Collection]
+			title := r.Title
+			if len(title) > 28 {
+				title = title[:25] + "..."
+			}
+
+			cacheLabel := faint.Render(r.CacheStatus)
+			if r.CacheStatus == "cached" {
+				cacheLabel = green.Render("cached")
+			}
+
+			renderLabel := faint.Render(r.RenderStatus)
+			if r.RenderStatus == "rendered" {
+				renderLabel = green.Render("rendered")
+			} else if r.RenderStatus == "stale" {
+				reason := ""
+				if r.RenderReason != "" {
+					reason = " (" + r.RenderReason + ")"
+				}
+				renderLabel = yellow.Render("stale") + faint.Render(reason)
+			}
+
+			fmt.Printf("  %4d  %s %-30s %-10s %s\n",
+				r.Index,
+				style.Width(14).Render(r.Collection),
+				title,
+				cacheLabel,
+				renderLabel,
+			)
 		}
 		fmt.Println()
 	}
