@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	concatOut     string
-	concatDryRun  bool
+	concatOut    string
+	concatDryRun bool
 )
 
 func newConcatCmd() *cobra.Command {

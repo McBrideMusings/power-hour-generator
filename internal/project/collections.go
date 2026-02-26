@@ -12,13 +12,13 @@ import (
 
 // Collection represents a resolved collection with its plan and configuration.
 type Collection struct {
-	Name        string
-	Plan        string // Resolved plan file path
-	OutputDir   string // Resolved output directory path
-	Profile     string // Overlay profile name (may be empty)
-	Config      config.CollectionConfig
-	Rows        []csvplan.CollectionRow
-	PlanErrors  csvplan.ValidationErrors
+	Name       string
+	Plan       string // Resolved plan file path
+	OutputDir  string // Resolved output directory path
+	Profile    string // Overlay profile name (may be empty)
+	Config     config.CollectionConfig
+	Rows       []csvplan.CollectionRow
+	PlanErrors csvplan.ValidationErrors
 }
 
 // CollectionResolver loads and resolves collections from configuration.
@@ -160,10 +160,10 @@ func FlattenCollections(collections map[string]Collection) []CollectionPlanRow {
 
 // CollectionClip represents a clip from a collection for rendering.
 type CollectionClip struct {
-	CollectionName   string
-	Clip             Clip
-	OutputDir        string
-	DefaultDuration  int
+	CollectionName  string
+	Clip            Clip
+	OutputDir       string
+	DefaultDuration int
 }
 
 // BuildCollectionClips creates render-ready clips from all collections.

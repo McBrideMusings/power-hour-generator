@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -59,32 +60,33 @@ func TestApplyConfigAbsolute(t *testing.T) {
 	}
 }
 
-func TestApplyGlobalCacheEnabled(t *testing.T) {
+func TestApplyLibraryShared(t *testing.T) {
+	tmp := t.TempDir()
 	pp := ProjectPaths{
-		CacheDir:        "/project/cache",
-		IndexFile:       "/project/.powerhour/index.json",
-		GlobalCacheDir:  "/home/user/.powerhour/cache",
-		GlobalIndexFile: "/home/user/.powerhour/index.json",
+		CacheDir:          "/project/cache",
+		IndexFile:         "/project/.powerhour/index.json",
+		LibrarySourcesDir: filepath.Join(tmp, "library", "sources"),
+		LibraryIndexFile:  filepath.Join(tmp, "library", "index.json"),
 	}
 
-	result := ApplyGlobalCache(pp, true)
-	if result.CacheDir != pp.GlobalCacheDir {
-		t.Fatalf("expected CacheDir=%s, got %s", pp.GlobalCacheDir, result.CacheDir)
+	result := ApplyLibrary(pp, true, "")
+	if result.CacheDir != result.LibrarySourcesDir {
+		t.Fatalf("expected CacheDir=%s, got %s", result.LibrarySourcesDir, result.CacheDir)
 	}
-	if result.IndexFile != pp.GlobalIndexFile {
-		t.Fatalf("expected IndexFile=%s, got %s", pp.GlobalIndexFile, result.IndexFile)
+	if result.IndexFile != result.LibraryIndexFile {
+		t.Fatalf("expected IndexFile=%s, got %s", result.LibraryIndexFile, result.IndexFile)
 	}
 }
 
-func TestApplyGlobalCacheDisabled(t *testing.T) {
+func TestApplyLibraryLocal(t *testing.T) {
 	pp := ProjectPaths{
-		CacheDir:        "/project/cache",
-		IndexFile:       "/project/.powerhour/index.json",
-		GlobalCacheDir:  "/home/user/.powerhour/cache",
-		GlobalIndexFile: "/home/user/.powerhour/index.json",
+		CacheDir:          "/project/cache",
+		IndexFile:         "/project/.powerhour/index.json",
+		LibrarySourcesDir: "/home/user/.powerhour/library/sources",
+		LibraryIndexFile:  "/home/user/.powerhour/library/index.json",
 	}
 
-	result := ApplyGlobalCache(pp, false)
+	result := ApplyLibrary(pp, false, "")
 	if result.CacheDir != "/project/cache" {
 		t.Fatalf("expected CacheDir unchanged, got %s", result.CacheDir)
 	}
@@ -93,39 +95,87 @@ func TestApplyGlobalCacheDisabled(t *testing.T) {
 	}
 }
 
-func TestApplyGlobalCacheEmptyGlobalPaths(t *testing.T) {
+func TestApplyLibraryConfigPath(t *testing.T) {
+	tmp := t.TempDir()
+	customLib := filepath.Join(tmp, "custom-lib")
+
 	pp := ProjectPaths{
 		CacheDir:  "/project/cache",
 		IndexFile: "/project/.powerhour/index.json",
-		// GlobalCacheDir and GlobalIndexFile are empty
 	}
 
-	result := ApplyGlobalCache(pp, true)
-	if result.CacheDir != "/project/cache" {
-		t.Fatalf("expected CacheDir unchanged when global paths empty, got %s", result.CacheDir)
+	result := ApplyLibrary(pp, true, customLib)
+	expectedSources := filepath.Join(customLib, "sources")
+	expectedIndex := filepath.Join(customLib, "index.json")
+	if result.CacheDir != expectedSources {
+		t.Fatalf("expected CacheDir=%s, got %s", expectedSources, result.CacheDir)
+	}
+	if result.IndexFile != expectedIndex {
+		t.Fatalf("expected IndexFile=%s, got %s", expectedIndex, result.IndexFile)
 	}
 }
 
-func TestGlobalCacheDirCreatesDir(t *testing.T) {
-	dir, err := GlobalCacheDir()
+func TestApplyLibraryEnvVar(t *testing.T) {
+	tmp := t.TempDir()
+	envLib := filepath.Join(tmp, "env-lib")
+
+	t.Setenv("POWERHOUR_LIBRARY", envLib)
+
+	pp := ProjectPaths{
+		CacheDir:  "/project/cache",
+		IndexFile: "/project/.powerhour/index.json",
+	}
+
+	result := ApplyLibrary(pp, true, "/config/path/ignored")
+	expectedSources := filepath.Join(envLib, "sources")
+	expectedIndex := filepath.Join(envLib, "index.json")
+	if result.CacheDir != expectedSources {
+		t.Fatalf("expected CacheDir=%s, got %s", expectedSources, result.CacheDir)
+	}
+	if result.IndexFile != expectedIndex {
+		t.Fatalf("expected IndexFile=%s, got %s", expectedIndex, result.IndexFile)
+	}
+}
+
+func TestDefaultLibrarySourcesDir(t *testing.T) {
+	dir, err := DefaultLibrarySourcesDir()
 	if err != nil {
-		t.Fatalf("GlobalCacheDir: %v", err)
+		t.Fatalf("DefaultLibrarySourcesDir: %v", err)
 	}
 	if !filepath.IsAbs(dir) {
 		t.Fatalf("expected absolute path, got %s", dir)
 	}
-	if filepath.Base(dir) != "cache" {
-		t.Fatalf("expected dir named 'cache', got %s", filepath.Base(dir))
+	if filepath.Base(dir) != "sources" {
+		t.Fatalf("expected dir named 'sources', got %s", filepath.Base(dir))
 	}
 }
 
-func TestGlobalIndexFile(t *testing.T) {
-	path, err := GlobalIndexFile()
+func TestDefaultLibraryIndexFile(t *testing.T) {
+	path, err := DefaultLibraryIndexFile()
 	if err != nil {
-		t.Fatalf("GlobalIndexFile: %v", err)
+		t.Fatalf("DefaultLibraryIndexFile: %v", err)
 	}
 	if filepath.Base(path) != "index.json" {
 		t.Fatalf("expected file named 'index.json', got %s", filepath.Base(path))
+	}
+}
+
+func TestLibraryDirEnvOverride(t *testing.T) {
+	tmp := t.TempDir()
+	envDir := filepath.Join(tmp, "my-library")
+
+	t.Setenv("POWERHOUR_LIBRARY", envDir)
+
+	dir, err := LibraryDir("")
+	if err != nil {
+		t.Fatalf("LibraryDir: %v", err)
+	}
+	if dir != envDir {
+		t.Fatalf("expected %s, got %s", envDir, dir)
+	}
+	// Verify it was created
+	if _, err := os.Stat(envDir); err != nil {
+		t.Fatalf("expected directory to be created: %v", err)
 	}
 }
 

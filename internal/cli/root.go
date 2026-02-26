@@ -38,7 +38,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newFetchCmd())
 	cmd.AddCommand(newRenderCmd())
 	cmd.AddCommand(newConcatCmd())
-	cmd.AddCommand(newMigrateCmd())
+	cmd.AddCommand(newLibraryCmd())
 
 	convertCmd := newConvertCmd()
 	cmd.AddCommand(convertCmd)

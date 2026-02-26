@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	encodingProfileFile = "encoding_profile.json"
+	encodingProfileFile  = "encoding_profile.json"
 	encodingDefaultsFile = "encoding.yaml"
-	encodingProfileTTL  = 24 * time.Hour
+	encodingProfileTTL   = 24 * time.Hour
 )
 
 // CodecFamily groups related encoders by technology.

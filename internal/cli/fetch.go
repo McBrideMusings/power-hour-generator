@@ -80,7 +80,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
-	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
+	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 	glogf("config loaded")
 
 	exists, err := paths.DirExists(pp.Root)

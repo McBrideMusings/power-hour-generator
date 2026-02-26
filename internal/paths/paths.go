@@ -11,19 +11,19 @@ import (
 
 // ProjectPaths captures canonical locations for a powerhour project.
 type ProjectPaths struct {
-	Root            string
-	ConfigFile      string
-	CSVFile         string
-	CookiesFile     string
-	MetaDir         string
-	CacheDir        string
-	SegmentsDir     string
-	LogsDir         string
-	IndexFile       string
-	ConcatListFile  string // .powerhour/concat.txt
-	RenderStateFile string // .powerhour/render-state.json
-	GlobalCacheDir  string // ~/.powerhour/cache/
-	GlobalIndexFile string // ~/.powerhour/index.json
+	Root              string
+	ConfigFile        string
+	CSVFile           string
+	CookiesFile       string
+	MetaDir           string
+	CacheDir          string
+	SegmentsDir       string
+	LogsDir           string
+	IndexFile         string
+	ConcatListFile    string // .powerhour/concat.txt
+	RenderStateFile   string // .powerhour/render-state.json
+	LibrarySourcesDir string // ~/.powerhour/library/sources/
+	LibraryIndexFile  string // ~/.powerhour/library/index.json
 }
 
 // Resolve determines the project root using the optional --project flag or the
@@ -45,12 +45,12 @@ func Resolve(projectFlag string) (ProjectPaths, error) {
 
 	pp := newProjectPaths(root)
 
-	// Best-effort global cache paths (non-fatal if home dir unavailable)
-	if gCache, err := GlobalCacheDir(); err == nil {
-		pp.GlobalCacheDir = gCache
+	// Best-effort library paths (non-fatal if home dir unavailable)
+	if lSources, err := DefaultLibrarySourcesDir(); err == nil {
+		pp.LibrarySourcesDir = lSources
 	}
-	if gIndex, err := GlobalIndexFile(); err == nil {
-		pp.GlobalIndexFile = gIndex
+	if lIndex, err := DefaultLibraryIndexFile(); err == nil {
+		pp.LibraryIndexFile = lIndex
 	}
 
 	return pp, nil
@@ -165,38 +165,93 @@ func GlobalDir() (string, error) {
 	return dir, nil
 }
 
-// GlobalCacheDir returns the global cache directory (~/.powerhour/cache/).
+// LibraryDir returns the resolved library root directory.
+// Resolution order: POWERHOUR_LIBRARY env var → configPath argument → ~/.powerhour/library/.
 // It creates the directory if it does not exist.
-func GlobalCacheDir() (string, error) {
+func LibraryDir(configPath string) (string, error) {
+	if override, ok := os.LookupEnv("POWERHOUR_LIBRARY"); ok && override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", fmt.Errorf("resolve POWERHOUR_LIBRARY: %w", err)
+		}
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return "", fmt.Errorf("create library dir: %w", err)
+		}
+		return abs, nil
+	}
+	if configPath = strings.TrimSpace(configPath); configPath != "" {
+		abs, err := filepath.Abs(configPath)
+		if err != nil {
+			return "", fmt.Errorf("resolve library.path: %w", err)
+		}
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return "", fmt.Errorf("create library dir: %w", err)
+		}
+		return abs, nil
+	}
+	return defaultLibraryDir()
+}
+
+func defaultLibraryDir() (string, error) {
 	global, err := GlobalDir()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(global, "cache")
+	dir := filepath.Join(global, "library")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("create global cache dir: %w", err)
+		return "", fmt.Errorf("create library dir: %w", err)
 	}
 	return dir, nil
 }
 
-// GlobalIndexFile returns the path to the global index file (~/.powerhour/index.json).
-// It does not create the file.
-func GlobalIndexFile() (string, error) {
-	global, err := GlobalDir()
+// DefaultLibrarySourcesDir returns the default library sources directory
+// (~/.powerhour/library/sources/). It creates the directory if it does not exist.
+func DefaultLibrarySourcesDir() (string, error) {
+	lib, err := defaultLibraryDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(global, "index.json"), nil
+	dir := filepath.Join(lib, "sources")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("create library sources dir: %w", err)
+	}
+	return dir, nil
 }
 
-// ApplyGlobalCache swaps CacheDir and IndexFile to their global equivalents
-// when global cache is enabled and the global paths are available.
-func ApplyGlobalCache(pp ProjectPaths, globalEnabled bool) ProjectPaths {
-	if !globalEnabled || pp.GlobalCacheDir == "" || pp.GlobalIndexFile == "" {
+// DefaultLibraryIndexFile returns the path to the default library index file
+// (~/.powerhour/library/index.json). It does not create the file.
+func DefaultLibraryIndexFile() (string, error) {
+	lib, err := defaultLibraryDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(lib, "index.json"), nil
+}
+
+// ApplyLibrary swaps CacheDir and IndexFile to the library equivalents
+// when shared library is enabled and library paths are available.
+// configPath is the library.path config override (may be empty).
+func ApplyLibrary(pp ProjectPaths, shared bool, configPath string) ProjectPaths {
+	if !shared {
 		return pp
 	}
-	pp.CacheDir = pp.GlobalCacheDir
-	pp.IndexFile = pp.GlobalIndexFile
+
+	// Resolve library root with priority: env var → config → default
+	libDir, err := LibraryDir(configPath)
+	if err != nil {
+		// Fall back to defaults already populated in pp
+		if pp.LibrarySourcesDir == "" || pp.LibraryIndexFile == "" {
+			return pp
+		}
+		pp.CacheDir = pp.LibrarySourcesDir
+		pp.IndexFile = pp.LibraryIndexFile
+		return pp
+	}
+
+	pp.LibrarySourcesDir = filepath.Join(libDir, "sources")
+	pp.LibraryIndexFile = filepath.Join(libDir, "index.json")
+	pp.CacheDir = pp.LibrarySourcesDir
+	pp.IndexFile = pp.LibraryIndexFile
 	return pp
 }
 

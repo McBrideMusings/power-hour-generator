@@ -47,6 +47,15 @@ type Entry struct {
 	Probe       *ProbeMetadata `json:"probe,omitempty"`
 	Notes       []string       `json:"notes,omitempty"`
 	Links       []string       `json:"links,omitempty"`
+
+	// yt-dlp metadata (populated during fetch)
+	Title       string    `json:"title,omitempty"`
+	Artist      string    `json:"artist,omitempty"`
+	Album       string    `json:"album,omitempty"`
+	Track       string    `json:"track,omitempty"`
+	UploadDate  string    `json:"upload_date,omitempty"`
+	Description string    `json:"description,omitempty"`
+	LastUsedAt  time.Time `json:"last_used_at,omitempty"`
 }
 
 // ProbeMetadata includes the ffprobe results for the cached file.

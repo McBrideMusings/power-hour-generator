@@ -38,9 +38,9 @@ func TestProfileExists(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
+		name        string
 		profileName string
-		want       bool
+		want        bool
 	}{
 		{"existing profile", "songs", true},
 		{"another existing", "intros", true},
@@ -59,7 +59,7 @@ func TestProfileExists(t *testing.T) {
 	}
 }
 
-func intPtr(v int) *int         { return &v }
+func intPtr(v int) *int           { return &v }
 func floatPtr(v float64) *float64 { return &v }
 
 func TestCloneProfile(t *testing.T) {

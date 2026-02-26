@@ -16,19 +16,19 @@ import (
 
 // EncodingSetupResult holds the values selected by the user in the carousel.
 type EncodingSetupResult struct {
-	Cancelled    bool
-	VideoCodec   string
-	Width        int
-	Height       int
-	FPS          int
-	CRF          int
-	Preset       string
-	VideoBitrate string
-	Container    string
-	AudioCodec   string
-	AudioBitrate string
-	SampleRate   int
-	Channels     int
+	Cancelled       bool
+	VideoCodec      string
+	Width           int
+	Height          int
+	FPS             int
+	CRF             int
+	Preset          string
+	VideoBitrate    string
+	Container       string
+	AudioCodec      string
+	AudioBitrate    string
+	SampleRate      int
+	Channels        int
 	LoudnormEnabled bool
 }
 

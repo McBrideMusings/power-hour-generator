@@ -14,9 +14,9 @@ import (
 
 // CollectionOptions controls how a collection CSV is loaded with configurable headers.
 type CollectionOptions struct {
-	LinkHeader     string // CSV column name for video link
-	StartHeader    string // CSV column name for start time
-	DurationHeader string // CSV column name for duration (optional)
+	LinkHeader      string // CSV column name for video link
+	StartHeader     string // CSV column name for start time
+	DurationHeader  string // CSV column name for duration (optional)
 	DefaultDuration int    // Fallback duration if not specified
 }
 

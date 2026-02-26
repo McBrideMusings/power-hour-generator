@@ -2,23 +2,37 @@ package config
 
 import "testing"
 
-func TestGlobalCacheEnabledDefault(t *testing.T) {
+func TestLibrarySharedDefault(t *testing.T) {
 	cfg := Config{}
-	if !cfg.GlobalCacheEnabled() {
-		t.Fatal("expected GlobalCacheEnabled() = true when GlobalCache is nil")
+	if !cfg.LibraryShared() {
+		t.Fatal("expected LibraryShared() = true when mode is empty")
 	}
 }
 
-func TestGlobalCacheExplicitTrue(t *testing.T) {
-	cfg := Config{Downloads: DownloadsConfig{GlobalCache: boolPtr(true)}}
-	if !cfg.GlobalCacheEnabled() {
-		t.Fatal("expected GlobalCacheEnabled() = true")
+func TestLibrarySharedExplicit(t *testing.T) {
+	cfg := Config{Library: LibraryConfig{Mode: "shared"}}
+	if !cfg.LibraryShared() {
+		t.Fatal("expected LibraryShared() = true when mode is 'shared'")
 	}
 }
 
-func TestGlobalCacheExplicitFalse(t *testing.T) {
-	cfg := Config{Downloads: DownloadsConfig{GlobalCache: boolPtr(false)}}
-	if cfg.GlobalCacheEnabled() {
-		t.Fatal("expected GlobalCacheEnabled() = false")
+func TestLibraryLocal(t *testing.T) {
+	cfg := Config{Library: LibraryConfig{Mode: "local"}}
+	if cfg.LibraryShared() {
+		t.Fatal("expected LibraryShared() = false when mode is 'local'")
+	}
+}
+
+func TestLibraryPath(t *testing.T) {
+	cfg := Config{Library: LibraryConfig{Path: "/custom/library"}}
+	if cfg.LibraryPath() != "/custom/library" {
+		t.Fatalf("expected LibraryPath() = /custom/library, got %q", cfg.LibraryPath())
+	}
+}
+
+func TestLibraryPathEmpty(t *testing.T) {
+	cfg := Config{}
+	if cfg.LibraryPath() != "" {
+		t.Fatalf("expected LibraryPath() = empty, got %q", cfg.LibraryPath())
 	}
 }

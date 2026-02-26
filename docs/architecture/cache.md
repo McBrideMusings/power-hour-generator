@@ -4,13 +4,18 @@ The cache system in `internal/cache/` manages downloading and indexing source me
 
 ## Global vs Local Cache
 
-By default, media is cached globally at `~/.powerhour/cache/` with an index at `~/.powerhour/index.json`. This enables cross-project deduplication — if two projects reference the same YouTube video, it's only downloaded once.
+By default, media is cached in a shared library at `~/.powerhour/library/sources/` with an index at `~/.powerhour/library/index.json`. This enables cross-project deduplication — if two projects reference the same YouTube video, it's only downloaded once.
 
-Set `downloads.global_cache: false` in `powerhour.yaml` to use a project-local cache at `<project>/cache/` with an index at `<project>/.powerhour/index.json`.
+The library root can be overridden via:
+1. `POWERHOUR_LIBRARY` environment variable (highest priority)
+2. `library.path` in `powerhour.yaml`
+3. Default: `~/.powerhour/library/`
 
-The switching happens via `paths.ApplyGlobalCache()`, which swaps `CacheDir` and `IndexFile` on the `ProjectPaths` struct. All downstream code (fetch, render, validate) is cache-location-agnostic — it operates on whichever paths are resolved.
+Set `library: { mode: local }` in `powerhour.yaml` to use a project-local cache at `<project>/cache/` with an index at `<project>/.powerhour/index.json`.
 
-`powerhour migrate` moves files from a project's local cache into the global cache.
+The switching happens via `paths.ApplyLibrary()`, which swaps `CacheDir` and `IndexFile` on the `ProjectPaths` struct. All downstream code (fetch, render, validate) is cache-location-agnostic — it operates on whichever paths are resolved.
+
+`powerhour library import --project <dir>` moves files from a project's local cache into the shared library.
 
 ## Index
 
