@@ -52,7 +52,7 @@ func runValidateCollection(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
-	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
+	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
 	// Ensure collections are configured
 	if cfg.Collections == nil || len(cfg.Collections) == 0 {
@@ -225,10 +225,10 @@ func formatSegments(segments []config.OverlaySegment) string {
 
 func writeCollectionValidationJSON(cmd *cobra.Command, collectionName string, collection project.Collection, rows []collectionValidationRow) error {
 	payload := struct {
-		Collection string                     `json:"collection"`
-		Plan       string                     `json:"plan"`
-		Profile    string                     `json:"profile,omitempty"`
-		Rows       []collectionValidationRow  `json:"rows"`
+		Collection string                      `json:"collection"`
+		Plan       string                      `json:"plan"`
+		Profile    string                      `json:"profile,omitempty"`
+		Rows       []collectionValidationRow   `json:"rows"`
 		Summary    collectionValidationSummary `json:"summary"`
 	}{
 		Collection: collectionName,

@@ -10,10 +10,10 @@ import (
 // interface. It uses caller-supplied functions to extract keys and fields so the
 // tui package doesn't need to know about specific column layouts.
 type RenderReporter struct {
-	send      func(tea.Msg)
-	keyFromSeg func(render.Segment) string
-	keyFromRes func(render.Result) string
-	startFields func(render.Segment) map[string]string
+	send           func(tea.Msg)
+	keyFromSeg     func(render.Segment) string
+	keyFromRes     func(render.Result) string
+	startFields    func(render.Segment) map[string]string
 	completeFields func(render.Result) map[string]string
 }
 

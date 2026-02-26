@@ -130,4 +130,3 @@ func copyFloatPtr(src *float64) *float64 {
 	value := *src
 	return &value
 }
-

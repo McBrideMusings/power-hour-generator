@@ -93,6 +93,7 @@ type Config struct {
 	Files           FileOverrides               `yaml:"files"`
 	Tools           ToolPins                    `yaml:"tools"`
 	Downloads       DownloadsConfig             `yaml:"downloads"`
+	Library         LibraryConfig               `yaml:"library"`
 	SegmentsBaseDir string                      `yaml:"segments_base_dir"`
 	Encoding        EncodingConfig              `yaml:"encoding,omitempty"`
 }
@@ -110,7 +111,12 @@ type ToolPin struct {
 // DownloadsConfig controls caching/downloading behaviour.
 type DownloadsConfig struct {
 	FilenameTemplate string `yaml:"filename_template"`
-	GlobalCache      *bool  `yaml:"global_cache,omitempty"` // nil = true (default on)
+}
+
+// LibraryConfig controls the shared media library.
+type LibraryConfig struct {
+	Mode string `yaml:"mode,omitempty"` // "shared" (default) or "local"
+	Path string `yaml:"path,omitempty"` // custom library root path override
 }
 
 // VideoConfig contains video sizing and framerate information.
@@ -372,7 +378,7 @@ func Default() Config {
 			},
 			Position: PositionSpec{
 				Origin:  "bottom-center",
-				OffsetX: 8,  // Shadow offset right
+				OffsetX: 8,   // Shadow offset right
 				OffsetY: 192, // Shadow offset up (200 - 8)
 			},
 			Timing: TimingSpec{
@@ -638,13 +644,16 @@ func (c Config) ToolProxy(tool string) string {
 	return ""
 }
 
-// GlobalCacheEnabled returns true when the global cache should be used.
-// Defaults to true when the field is nil (not set in config).
-func (c Config) GlobalCacheEnabled() bool {
-	if c.Downloads.GlobalCache == nil {
-		return true
-	}
-	return *c.Downloads.GlobalCache
+// LibraryShared returns true when the shared media library should be used.
+// Defaults to true when mode is empty or "shared".
+func (c Config) LibraryShared() bool {
+	mode := strings.TrimSpace(strings.ToLower(c.Library.Mode))
+	return mode == "" || mode == "shared"
+}
+
+// LibraryPath returns the configured library path override, if any.
+func (c Config) LibraryPath() string {
+	return strings.TrimSpace(c.Library.Path)
 }
 
 // DownloadFilenameTemplate returns the configured filename template for downloads.

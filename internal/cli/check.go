@@ -139,7 +139,7 @@ func printCheckResult(cmd *cobra.Command, project string, statuses []tools.Statu
 				headline += " v" + st.Version
 			}
 			if st.Minimum != "" {
-				headline += faint.Render(" (minimum: "+st.Minimum+")")
+				headline += faint.Render(" (minimum: " + st.Minimum + ")")
 			}
 			cmd.Println(headline)
 
@@ -154,7 +154,7 @@ func printCheckResult(cmd *cobra.Command, project string, statuses []tools.Statu
 		} else {
 			headline := red.Render("✗") + " " + bold.Render(st.Tool)
 			if st.Error != "" {
-				headline += red.Render(" ("+st.Error+")")
+				headline += red.Render(" (" + st.Error + ")")
 			}
 			cmd.Println(headline)
 		}

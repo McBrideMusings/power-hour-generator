@@ -23,11 +23,11 @@ var (
 )
 
 var (
-	reKeyOnly    = regexp.MustCompile(`^(\s*)([\w\-]+)(\s*:\s*)$`)
-	reKeyValue   = regexp.MustCompile(`^(\s*)([\w\-]+)(\s*:\s*)(.+)$`)
-	reListItem   = regexp.MustCompile(`^(\s*)(-)(\s+)(.*)$`)
-	reNumber     = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
-	reBool       = regexp.MustCompile(`^(true|false|yes|no|on|off)$`)
+	reKeyOnly  = regexp.MustCompile(`^(\s*)([\w\-]+)(\s*:\s*)$`)
+	reKeyValue = regexp.MustCompile(`^(\s*)([\w\-]+)(\s*:\s*)(.+)$`)
+	reListItem = regexp.MustCompile(`^(\s*)(-)(\s+)(.*)$`)
+	reNumber   = regexp.MustCompile(`^-?\d+(\.\d+)?$`)
+	reBool     = regexp.MustCompile(`^(true|false|yes|no|on|off)$`)
 )
 
 func newConfigCmd() *cobra.Command {

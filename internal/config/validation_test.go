@@ -186,10 +186,10 @@ func TestValidateTimeline_Empty(t *testing.T) {
 func TestValidateTimeline_Valid(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{
-			"intro":        {Plan: "intro.csv"},
-			"songs":        {Plan: "songs.csv"},
+			"intro":         {Plan: "intro.csv"},
+			"songs":         {Plan: "songs.csv"},
 			"interstitials": {Plan: "interstitials.csv"},
-			"outro":        {Plan: "outro.csv"},
+			"outro":         {Plan: "outro.csv"},
 		},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
@@ -252,7 +252,7 @@ func TestValidateTimeline_MissingInterleaveCollection(t *testing.T) {
 func TestValidateTimeline_EveryZero(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{
-			"songs":        {Plan: "songs.csv"},
+			"songs":         {Plan: "songs.csv"},
 			"interstitials": {Plan: "interstitials.csv"},
 		},
 		Timeline: TimelineConfig{
@@ -276,7 +276,7 @@ func TestValidateTimeline_EveryZero(t *testing.T) {
 func TestValidateTimeline_EveryNegative(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{
-			"songs":        {Plan: "songs.csv"},
+			"songs":         {Plan: "songs.csv"},
 			"interstitials": {Plan: "interstitials.csv"},
 		},
 		Timeline: TimelineConfig{

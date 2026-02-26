@@ -81,6 +81,16 @@ type sourceInfo struct {
 	LocalPath  string
 	ID         string
 	Extractor  string
+
+	// yt-dlp metadata
+	Title       string
+	Artist      string
+	Album       string
+	Track       string
+	Uploader    string
+	Channel     string
+	UploadDate  string
+	Description string
 }
 
 // LocalSourceMissingError is returned when a local file reference doesn't exist.
@@ -126,7 +136,7 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 		return nil, err
 	}
 	pp = paths.ApplyConfig(pp, cfg)
-	pp = paths.ApplyGlobalCache(pp, cfg.GlobalCacheEnabled())
+	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 	if err := os.MkdirAll(pp.CacheDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create cache dir: %w", err)
 	}
@@ -234,11 +244,29 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 			entry.Extractor = src.Extractor
 		}
 		entry.Links = appendUnique(entry.Links, src.Raw)
+		// Populate yt-dlp metadata (prefer artist over uploader, track over title)
+		if src.Title != "" {
+			entry.Title = src.Title
+		}
+		entry.Artist = resolveArtist(src)
+		if src.Track != "" {
+			entry.Track = src.Track
+		}
+		if src.Album != "" {
+			entry.Album = src.Album
+		}
+		if src.UploadDate != "" {
+			entry.UploadDate = src.UploadDate
+		}
+		if src.Description != "" {
+			entry.Description = src.Description
+		}
 	} else {
 		entry.ID = ""
 		entry.Extractor = ""
 		entry.Links = nil
 	}
+	entry.LastUsedAt = now
 	result.Identifier = entry.Identifier
 	result.ID = entry.ID
 
@@ -489,15 +517,31 @@ func (s *Service) resolveRemoteSource(ctx context.Context, idx *Index, link stri
 
 	identifier := canonicalRemoteIdentifier(link, info.Extractor, info.ID)
 	return sourceInfo{
-		Identifier: identifier,
-		ID:         strings.TrimSpace(info.ID),
-		Extractor:  strings.TrimSpace(info.Extractor),
+		Identifier:  identifier,
+		ID:          strings.TrimSpace(info.ID),
+		Extractor:   strings.TrimSpace(info.Extractor),
+		Title:       info.Title,
+		Artist:      info.Artist,
+		Album:       info.Album,
+		Track:       info.Track,
+		Uploader:    info.Uploader,
+		Channel:     info.Channel,
+		UploadDate:  info.UploadDate,
+		Description: info.Description,
 	}, nil
 }
 
 type remoteIDInfo struct {
-	ID        string
-	Extractor string
+	ID          string
+	Extractor   string
+	Title       string
+	Artist      string
+	Album       string
+	Track       string
+	Uploader    string
+	Channel     string
+	UploadDate  string
+	Description string
 }
 
 func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo, error) {
@@ -539,6 +583,14 @@ func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo,
 		ID           string `json:"id"`
 		Extractor    string `json:"extractor_key"`
 		ExtractorAlt string `json:"extractor"`
+		Title        string `json:"title"`
+		Artist       string `json:"artist"`
+		Track        string `json:"track"`
+		Album        string `json:"album"`
+		Uploader     string `json:"uploader"`
+		Channel      string `json:"channel"`
+		UploadDate   string `json:"upload_date"`
+		Description  string `json:"description"`
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -561,9 +613,22 @@ func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo,
 		extractor = "unknown"
 	}
 
+	desc := strings.TrimSpace(payload.Description)
+	if len(desc) > 500 {
+		desc = desc[:500]
+	}
+
 	return remoteIDInfo{
-		ID:        strings.TrimSpace(payload.ID),
-		Extractor: extractor,
+		ID:          strings.TrimSpace(payload.ID),
+		Extractor:   extractor,
+		Title:       strings.TrimSpace(payload.Title),
+		Artist:      strings.TrimSpace(payload.Artist),
+		Album:       strings.TrimSpace(payload.Album),
+		Track:       strings.TrimSpace(payload.Track),
+		Uploader:    strings.TrimSpace(payload.Uploader),
+		Channel:     strings.TrimSpace(payload.Channel),
+		UploadDate:  strings.TrimSpace(payload.UploadDate),
+		Description: desc,
 	}, nil
 }
 
@@ -611,6 +676,18 @@ func sourceInfoFromEntry(row csvplan.Row, entry Entry, identifier string) source
 		info.LocalPath = path
 	}
 	return info
+}
+
+// resolveArtist picks the best artist value from yt-dlp metadata.
+// Priority: artist → uploader → channel.
+func resolveArtist(src sourceInfo) string {
+	if src.Artist != "" {
+		return src.Artist
+	}
+	if src.Uploader != "" {
+		return src.Uploader
+	}
+	return src.Channel
 }
 
 func sourceDisplayValue(src sourceInfo) string {
