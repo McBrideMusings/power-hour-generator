@@ -109,13 +109,35 @@ func checkTools(cmd *cobra.Command) healthCheck {
 		}
 	}
 
-	if satisfied == total {
+	// Check ffmpeg filters if ffmpeg was found
+	var missingFilters []string
+	for _, st := range statuses {
+		if st.Tool == "ffmpeg" && st.Satisfied {
+			ffmpegPath := st.Path
+			if ffmpegPath == "" {
+				ffmpegPath = st.Paths["ffmpeg"]
+			}
+			if ffmpegPath != "" {
+				_, missingFilters = tools.ProbeFilters(cmd.Context(), ffmpegPath, tools.RequiredFFmpegFilters)
+			}
+			break
+		}
+	}
+
+	if satisfied == total && len(missingFilters) == 0 {
 		return healthCheck{Name: "Tools", Status: "ok", Summary: joinComma(toolInfo)}
+	}
+	if satisfied < total {
+		return healthCheck{
+			Name:    "Tools",
+			Status:  "error",
+			Summary: fmt.Sprintf("%d of %d tools satisfied", satisfied, total),
+		}
 	}
 	return healthCheck{
 		Name:    "Tools",
-		Status:  "error",
-		Summary: fmt.Sprintf("%d of %d tools satisfied", satisfied, total),
+		Status:  "warning",
+		Summary: fmt.Sprintf("%s (missing filters: %s)", joinComma(toolInfo), joinComma(missingFilters)),
 	}
 }
 

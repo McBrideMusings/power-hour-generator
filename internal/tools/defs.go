@@ -42,6 +42,12 @@ func KnownTools() []string {
 	return names
 }
 
+// RequiredFFmpegFilters lists the ffmpeg filters used across the render pipeline.
+var RequiredFFmpegFilters = []string{
+	"scale", "pad", "setsar", "fps", "fade", "drawtext",
+	"loudnorm", "aresample",
+}
+
 // Definition returns the tool definition for the provided name.
 func Definition(name string) (ToolDefinition, bool) {
 	def, ok := toolDefinitions[name]
