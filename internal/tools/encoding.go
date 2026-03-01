@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -194,6 +196,43 @@ func ProbeEncoders(ctx context.Context, ffmpegPath string) (EncodingProfile, err
 	}
 
 	return profile, nil
+}
+
+// ProbeFilters checks which of the required ffmpeg filters are available.
+// It runs `ffmpeg -filters` once and parses the output.
+func ProbeFilters(ctx context.Context, ffmpegPath string, required []string) (available, missing []string) {
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-filters")
+	out, err := cmd.Output()
+	if err != nil {
+		// If the command fails, report all as missing.
+		return nil, append([]string{}, required...)
+	}
+
+	found := make(map[string]bool)
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Filter lines look like: " T.. scale  ..." or " ... drawtext ..."
+		// Skip header lines (start without leading space or are too short).
+		if len(line) < 5 || line[0] != ' ' {
+			continue
+		}
+		// Columns: flags (3 chars), space, filter name, space, description
+		rest := strings.TrimLeft(line[4:], " ")
+		name, _, _ := strings.Cut(rest, " ")
+		if name != "" {
+			found[name] = true
+		}
+	}
+
+	for _, f := range required {
+		if found[f] {
+			available = append(available, f)
+		} else {
+			missing = append(missing, f)
+		}
+	}
+	return available, missing
 }
 
 func testEncoder(ctx context.Context, ffmpegPath, codec string) bool {

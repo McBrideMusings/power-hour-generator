@@ -89,6 +89,10 @@ func NewService(ctx context.Context, pp paths.ProjectPaths, cfg config.Config, r
 		return nil, errors.New("ffmpeg path not resolved")
 	}
 
+	if _, missing := tools.ProbeFilters(ctx, ffmpegPath, tools.RequiredFFmpegFilters); len(missing) > 0 {
+		return nil, fmt.Errorf("ffmpeg is missing required filters: %s\nThese filters may require additional libraries (e.g. libfreetype for drawtext).\nRun 'powerhour doctor' for details.", strings.Join(missing, ", "))
+	}
+
 	return &Service{
 		Paths:      pp,
 		Config:     cfg,
