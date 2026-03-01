@@ -335,7 +335,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		return fmt.Errorf("save render state: %w", err)
 	}
 
-	return nil
+	return printCollectionRenderErrors(cmd.ErrOrStderr(), collectionClips, fullResults)
 }
 
 func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, resolver *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
@@ -699,4 +699,28 @@ func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput b
 
 func collectionRenderKey(cc project.CollectionClip) string {
 	return fmt.Sprintf("%s:%03d", cc.CollectionName, cc.Clip.Row.Index)
+}
+
+// printCollectionRenderErrors prints each render error after the summary table,
+// then returns a non-nil error so the process exits with a failure code.
+func printCollectionRenderErrors(w io.Writer, clips []project.CollectionClip, results []render.Result) error {
+	var errCount int
+	for i, res := range results {
+		if res.Err == nil {
+			continue
+		}
+		if errCount == 0 {
+			fmt.Fprintln(w)
+		}
+		errCount++
+		cc := clips[i]
+		fmt.Fprintf(w, "Error [%s #%03d]: %s\n", cc.CollectionName, cc.Clip.Row.Index, res.Err)
+		if res.LogPath != "" {
+			fmt.Fprintf(w, "  Log: %s\n", res.LogPath)
+		}
+	}
+	if errCount > 0 {
+		return fmt.Errorf("%d segment(s) failed to render", errCount)
+	}
+	return nil
 }

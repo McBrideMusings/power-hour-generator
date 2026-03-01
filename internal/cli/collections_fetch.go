@@ -100,13 +100,15 @@ func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.Projec
 	if err != nil {
 		return err
 	}
-	svc.SetLogOutput(cmd.ErrOrStderr())
 	glogf("tools ready, starting fetch")
 
 	opts := cache.ResolveOptions{Force: fetchForce, Reprobe: fetchReprobe, NoDownload: fetchNoDownload}
 
 	outWriter := cmd.OutOrStdout()
 	mode := tui.DetectMode(outWriter, fetchNoProgress, outputJSON)
+	if mode != tui.ModeTUI {
+		svc.SetLogOutput(cmd.ErrOrStderr())
+	}
 	status.Stop() // Hand off to TUI or plain output
 
 	outcomes := make([]fetchRowResult, 0, len(collectionRows))
