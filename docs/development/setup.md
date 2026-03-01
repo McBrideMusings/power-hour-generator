@@ -15,12 +15,25 @@ External tools (`yt-dlp`, `ffmpeg`, `ffprobe`) are auto-managed by the CLI but u
 git clone https://github.com/McBrideMusings/power-hour-generator.git
 cd power-hour-generator
 
-# Build the CLI binary
+# Build the CLI binary (current directory)
 go build -o powerhour ./cmd/powerhour
+
+# Install to your PATH via GOPATH/bin
+go install ./cmd/powerhour
 
 # Or run directly without building
 go run ./cmd/powerhour
 ```
+
+::: tip
+`go install` places the binary in `$GOPATH/bin` (usually `~/go/bin`). Make sure this directory is in your `PATH`:
+
+```bash
+export PATH="$HOME/go/bin:$PATH"
+```
+
+Add this to your shell config (`~/.zshrc`, `~/.bashrc`, etc.) to make it permanent.
+:::
 
 ## Commands
 
