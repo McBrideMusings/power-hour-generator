@@ -341,16 +341,16 @@ func (s *Service) validateSegmentTiming(ctx context.Context, seg Segment, source
 
 	// Check if start time is beyond video duration
 	if startSeconds >= videoDuration {
-		return fmt.Errorf("start time %s (%.2fs) is beyond video duration (%.2fs)",
-			formatDuration(row.Start), startSeconds, videoDuration)
+		return fmt.Errorf("start_time %s exceeds video length %s",
+			formatDuration(row.Start), formatSeconds(videoDuration))
 	}
 
 	// Check if start + duration exceeds video duration
 	requestedDuration := float64(row.DurationSeconds)
 	endTime := startSeconds + requestedDuration
 	if endTime > videoDuration {
-		return fmt.Errorf("start time %s (%.2fs) + duration %ds (%.2fs total) exceeds video duration (%.2fs)",
-			formatDuration(row.Start), startSeconds, row.DurationSeconds, endTime, videoDuration)
+		return fmt.Errorf("start_time %s + %ds duration exceeds video length %s",
+			formatDuration(row.Start), row.DurationSeconds, formatSeconds(videoDuration))
 	}
 
 	return nil
@@ -395,17 +395,21 @@ func (s *Service) probeVideoDuration(ctx context.Context, videoPath string) (flo
 	return duration, nil
 }
 
-// formatDuration formats a time.Duration as MM:SS or HH:MM:SS
+// formatDuration formats a time.Duration as M:SS or H:MM:SS.
 func formatDuration(d time.Duration) string {
-	totalSeconds := int(d.Seconds())
-	hours := totalSeconds / 3600
-	minutes := (totalSeconds % 3600) / 60
-	seconds := totalSeconds % 60
+	return formatSeconds(d.Seconds())
+}
 
+// formatSeconds formats a float64 seconds value as M:SS or H:MM:SS.
+func formatSeconds(s float64) string {
+	total := int(s)
+	hours := total / 3600
+	minutes := (total % 3600) / 60
+	secs := total % 60
 	if hours > 0 {
-		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, seconds)
+		return fmt.Sprintf("%d:%02d:%02d", hours, minutes, secs)
 	}
-	return fmt.Sprintf("%d:%02d", minutes, seconds)
+	return fmt.Sprintf("%d:%02d", minutes, secs)
 }
 
 // RenderSample extracts a single frame at the specified time as a PNG image.

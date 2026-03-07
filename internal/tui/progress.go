@@ -46,6 +46,10 @@ type ProgressModel struct {
 
 	// Animation state.
 	tick int
+
+	// Viewport scrolling.
+	termHeight int // 0 means unknown (render all rows)
+	scrollTop  int // first visible row index
 }
 
 // NewProgressModel creates a progress model with the given title and columns.
@@ -88,6 +92,10 @@ func (m ProgressModel) Init() tea.Cmd {
 // Update satisfies the tea.Model interface.
 func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.termHeight = msg.Height
+		return m, nil
+
 	case tickMsg:
 		m.tick++
 		if m.done {
@@ -97,6 +105,7 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RowUpdateMsg:
 		m.applyRowUpdate(msg)
+		m.autoScroll(msg.Key)
 		return m, nil
 
 	case WorkDoneMsg:
@@ -132,6 +141,42 @@ func (m *ProgressModel) applyRowUpdate(msg RowUpdateMsg) {
 	}
 }
 
+// visibleRowCount returns how many rows fit in the viewport.
+// Returns len(rows) if the terminal height is unknown or all rows fit.
+func (m ProgressModel) visibleRowCount() int {
+	if m.termHeight <= 0 {
+		return len(m.rows)
+	}
+	// Reserve lines: 1 header + 1 blank + 1 footer + 1 scroll indicator = 4
+	available := m.termHeight - 4
+	if available < 1 {
+		available = 1
+	}
+	if available >= len(m.rows) {
+		return len(m.rows)
+	}
+	return available
+}
+
+// autoScroll adjusts scrollTop so the updated row is visible.
+func (m *ProgressModel) autoScroll(key string) {
+	idx, ok := m.rowIndex[key]
+	if !ok {
+		return
+	}
+	visible := m.visibleRowCount()
+	if visible >= len(m.rows) {
+		m.scrollTop = 0
+		return
+	}
+	// Ensure the updated row is within the visible window.
+	if idx < m.scrollTop {
+		m.scrollTop = idx
+	} else if idx >= m.scrollTop+visible {
+		m.scrollTop = idx - visible + 1
+	}
+}
+
 // View satisfies the tea.Model interface.
 func (m ProgressModel) View() string {
 	if m.done && m.err != nil {
@@ -158,8 +203,20 @@ func (m ProgressModel) View() string {
 	b.WriteString(strings.Join(headerParts, "  "))
 	b.WriteByte('\n')
 
-	// Rows
-	for _, row := range m.rows {
+	// Rows (viewport)
+	visible := m.visibleRowCount()
+	scrollable := visible < len(m.rows) && !m.done
+	end := m.scrollTop + visible
+	if end > len(m.rows) {
+		end = len(m.rows)
+	}
+
+	if scrollable && m.scrollTop > 0 {
+		fmt.Fprintf(&b, "  ↑ %d more above\n", m.scrollTop)
+	}
+
+	for ri := m.scrollTop; ri < end; ri++ {
+		row := m.rows[ri]
 		parts := make([]string, len(m.columns))
 		for i := range m.columns {
 			val := ""
@@ -179,6 +236,10 @@ func (m ProgressModel) View() string {
 		}
 		b.WriteString(strings.Join(parts, "  "))
 		b.WriteByte('\n')
+	}
+
+	if scrollable && end < len(m.rows) {
+		fmt.Fprintf(&b, "  ↓ %d more below\n", len(m.rows)-end)
 	}
 
 	// Footer: spinner + progress counter while work is in progress.

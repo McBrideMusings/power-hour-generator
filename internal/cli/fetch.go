@@ -53,15 +53,8 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		ctx = context.Background()
 	}
 
-	glog, gcloser, _ := logx.NewGlobal("fetch")
-	if gcloser != nil {
-		defer gcloser.Close()
-	}
-	glogf := func(format string, v ...any) {
-		if glog != nil {
-			glog.Printf(format, v...)
-		}
-	}
+	glogf, gcloser := logx.StartCommand("fetch")
+	defer gcloser.Close()
 	glogf("fetch started")
 
 	status := tui.NewStatusWriter(cmd.ErrOrStderr())
@@ -96,7 +89,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 	}
 
 	glogf("routing to collection fetch (%d collections)", len(cfg.Collections))
-	return runCollectionFetch(ctx, cmd, pp, cfg, glog, status)
+	return runCollectionFetch(ctx, cmd, pp, cfg, glogf, status)
 }
 
 func parseIndexArgs(args []string) ([]int, error) {
@@ -243,13 +236,12 @@ type fetchCounts struct {
 }
 
 func writeFetchFailures(cmd *cobra.Command, rows []fetchRowResult) {
-	fmt.Fprintln(cmd.OutOrStdout())
-	fmt.Fprintln(cmd.OutOrStdout(), "Failures:")
+	fmt.Fprintln(cmd.ErrOrStderr())
 	for _, row := range rows {
 		if row.Status != "error" {
 			continue
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "  %s %03d %s (%s): %s\n", row.ClipType, row.Index, row.Title, row.Link, row.Error)
+		fmt.Fprintf(cmd.ErrOrStderr(), "  %03d - %s\n", row.Index, row.Error)
 	}
 }
 

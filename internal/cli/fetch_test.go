@@ -77,7 +77,7 @@ func TestWriteFetchTable(t *testing.T) {
 func TestWriteFetchFailures(t *testing.T) {
 	cmd := newFetchCmd()
 	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
+	cmd.SetErr(buf)
 
 	rows := []fetchRowResult{
 		{Index: 7, Title: "Missing File", Status: "error", Link: "https://example.com/video", Error: "stat local source"},
@@ -87,11 +87,8 @@ func TestWriteFetchFailures(t *testing.T) {
 	writeFetchFailures(cmd, rows)
 
 	got := buf.String()
-	if !strings.Contains(got, "Failures:") {
-		t.Fatalf("expected failures header, got %s", got)
-	}
-	if !strings.Contains(got, "007 Missing File (https://example.com/video): stat local source") {
-		t.Fatalf("expected failure details, got %s", got)
+	if !strings.Contains(got, "007 - stat local source") {
+		t.Fatalf("expected failure line, got %s", got)
 	}
 }
 
