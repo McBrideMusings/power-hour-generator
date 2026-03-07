@@ -15,7 +15,6 @@ type Collection struct {
 	Name       string
 	Plan       string // Resolved plan file path
 	OutputDir  string // Resolved output directory path
-	Profile    string // Overlay profile name (may be empty)
 	Config     config.CollectionConfig
 	Rows       []csvplan.CollectionRow
 	PlanErrors csvplan.ValidationErrors
@@ -23,9 +22,8 @@ type Collection struct {
 
 // CollectionResolver loads and resolves collections from configuration.
 type CollectionResolver struct {
-	cfg      config.Config
-	paths    paths.ProjectPaths
-	profiles map[string]ResolvedProfile
+	cfg   config.Config
+	paths paths.ProjectPaths
 }
 
 // NewCollectionResolver creates a resolver for collections.
@@ -35,17 +33,9 @@ func NewCollectionResolver(cfg config.Config, pp paths.ProjectPaths) (*Collectio
 		return nil, err
 	}
 
-	// Load overlay profiles
-	profiles := make(map[string]ResolvedProfile, len(cfg.Profiles))
-	for name, profile := range cfg.Profiles {
-		clone := cloneProfile(name, profile)
-		profiles[name] = clone
-	}
-
 	return &CollectionResolver{
-		cfg:      cfg,
-		paths:    pp,
-		profiles: profiles,
+		cfg:   cfg,
+		paths: pp,
 	}, nil
 }
 
@@ -68,19 +58,12 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		// Resolve output directory
 		outputDir := r.paths.CollectionOutputDir(r.cfg, name)
 
-		// Validate profile if specified
-		if collCfg.Profile != "" {
-			if !profileExists(r.profiles, collCfg.Profile) {
-				return nil, fmt.Errorf("collection %q: profile %q does not exist", name, collCfg.Profile)
-			}
-		}
-
 		// Load collection plan
 		opts := csvplan.CollectionOptions{
 			LinkHeader:      collCfg.LinkHeader,
 			StartHeader:     collCfg.StartHeader,
 			DurationHeader:  collCfg.DurationHeader,
-			DefaultDuration: 60, // TODO: Make this configurable?
+			DefaultDuration: 60,
 		}
 
 		var (
@@ -95,7 +78,10 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		}
 		var planErrs csvplan.ValidationErrors
 		if err != nil {
-			if ve, ok := err.(csvplan.ValidationErrors); ok {
+			if err.Error() == "no data rows found" {
+				// Empty collection — will be skipped during render/concat
+				rows = nil
+			} else if ve, ok := err.(csvplan.ValidationErrors); ok {
 				planErrs = ve
 			} else {
 				return nil, fmt.Errorf("load collection %q plan: %w", name, err)
@@ -106,7 +92,6 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			Name:       name,
 			Plan:       planPath,
 			OutputDir:  outputDir,
-			Profile:    collCfg.Profile,
 			Config:     collCfg,
 			Rows:       rows,
 			PlanErrors: planErrs,
@@ -116,21 +101,6 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 	}
 
 	return collections, nil
-}
-
-// Profile returns a resolved overlay profile by name.
-func (r *CollectionResolver) Profile(name string) (ResolvedProfile, bool) {
-	profile, ok := r.profiles[strings.TrimSpace(name)]
-	return profile, ok
-}
-
-// Profiles returns all resolved overlay profiles.
-func (r *CollectionResolver) Profiles() map[string]ResolvedProfile {
-	out := make(map[string]ResolvedProfile, len(r.profiles))
-	for name, profile := range r.profiles {
-		out[name] = profile
-	}
-	return out
 }
 
 // CollectionPlanRow represents a row from a collection for fetch/validate operations.
@@ -162,6 +132,7 @@ func FlattenCollections(collections map[string]Collection) []CollectionPlanRow {
 type CollectionClip struct {
 	CollectionName  string
 	Clip            Clip
+	Overlays        []config.OverlayEntry
 	OutputDir       string
 	DefaultDuration int
 }
@@ -176,54 +147,28 @@ func (r *CollectionResolver) BuildCollectionClips(collections map[string]Collect
 	sequence := 0
 
 	for name, coll := range collections {
-		// Validate profile if specified
-		if coll.Profile != "" {
-			_, hasProfile := r.Profile(coll.Profile)
-			if !hasProfile {
-				return nil, fmt.Errorf("collection %q references unknown profile %q", name, coll.Profile)
-			}
-		}
-
-		// Get profile defaults if available
-		var fadeIn, fadeOut float64
-		var defaultDuration int = 60
-		if coll.Profile != "" {
-			if profile, hasProfile := r.Profile(coll.Profile); hasProfile {
-				if profile.FadeInSec != nil {
-					fadeIn = *profile.FadeInSec
-				}
-				if profile.FadeOutSec != nil {
-					fadeOut = *profile.FadeOutSec
-				}
-				if profile.DefaultDurationSec != nil && *profile.DefaultDurationSec > 0 {
-					defaultDuration = *profile.DefaultDurationSec
-				}
-			}
-		}
+		collCfg := coll.Config
 
 		// Build clips from collection rows
 		for _, collRow := range coll.Rows {
 			sequence++
 			row := collRow.ToRow()
 
-			// Build a generic clip
 			clip := Clip{
 				Sequence:        sequence,
-				ClipType:        ClipType(name), // Use collection name as clip type
+				ClipType:        ClipType(name),
 				TypeIndex:       row.Index,
 				Row:             row,
 				SourceKind:      SourceKindPlan,
 				DurationSeconds: row.DurationSeconds,
-				FadeInSeconds:   fadeIn,
-				FadeOutSeconds:  fadeOut,
-				OverlayProfile:  coll.Profile,
 			}
 
 			collClip := CollectionClip{
 				CollectionName:  name,
 				Clip:            clip,
+				Overlays:        collCfg.Overlays,
 				OutputDir:       coll.OutputDir,
-				DefaultDuration: defaultDuration,
+				DefaultDuration: 60,
 			}
 
 			clips = append(clips, collClip)

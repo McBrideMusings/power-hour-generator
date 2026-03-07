@@ -39,8 +39,7 @@ type Options struct {
 // Segment encapsulates the information required to render a clip.
 type Segment struct {
 	Clip       project.Clip
-	Profile    project.ResolvedProfile
-	Segments   []config.OverlaySegment
+	Overlays   []config.OverlayEntry
 	SourcePath string
 	CachedPath string
 	Entry      cache.Entry

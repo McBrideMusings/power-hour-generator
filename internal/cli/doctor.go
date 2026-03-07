@@ -157,9 +157,8 @@ func checkConfig(pp paths.ProjectPaths, cfg config.Config, cfgErr error) healthC
 		}
 	}
 
-	nProfiles := len(cfg.Profiles)
 	nCollections := len(cfg.Collections)
-	summary := fmt.Sprintf("%d profiles, %d collections", nProfiles, nCollections)
+	summary := fmt.Sprintf("%d collections", nCollections)
 
 	if errors > 0 {
 		return healthCheck{Name: "Config", Status: "error", Summary: fmt.Sprintf("%s; %d errors", summary, errors)}
@@ -222,19 +221,9 @@ func checkSegments(pp paths.ProjectPaths, cfg config.Config, resolver *project.C
 			}
 		}
 
-		var prof project.ResolvedProfile
-		var segs []config.OverlaySegment
-		if clip.OverlayProfile != "" {
-			if p, ok := resolver.Profile(clip.OverlayProfile); ok {
-				prof = p
-				segs = p.ResolveSegments()
-			}
-		}
-
 		seg := render.Segment{
 			Clip:     clip,
-			Profile:  prof,
-			Segments: segs,
+			Overlays: collClip.Overlays,
 		}
 
 		outputDir := collClip.OutputDir

@@ -16,10 +16,23 @@ import (
 )
 
 const (
-	encodingProfileFile  = "encoding_profile.json"
-	encodingDefaultsFile = "encoding.yaml"
-	encodingProfileTTL   = 24 * time.Hour
+	encodingProfileFile = "encoding_profile.json"
+	globalConfigFile    = "config.yaml"
+	encodingProfileTTL  = 24 * time.Hour
 )
+
+// GlobalDownloads holds global download/network settings for yt-dlp.
+type GlobalDownloads struct {
+	Proxy         string `yaml:"proxy,omitempty"`
+	SourceAddress string `yaml:"source_address,omitempty"`
+}
+
+// GlobalConfig is the unified global configuration stored at ~/.powerhour/config.yaml.
+// Encoding fields live at the top level for compatibility; downloads is a nested section.
+type GlobalConfig struct {
+	EncodingDefaults `yaml:",inline"`
+	Downloads        GlobalDownloads `yaml:"downloads,omitempty"`
+}
 
 // CodecFamily groups related encoders by technology.
 type CodecFamily struct {
@@ -95,12 +108,12 @@ func encodingProfilePath() (string, error) {
 	return filepath.Join(root, encodingProfileFile), nil
 }
 
-func encodingDefaultsPath() (string, error) {
-	root, err := cacheRoot()
+func globalConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("detect user home: %w", err)
 	}
-	return filepath.Join(root, encodingDefaultsFile), nil
+	return filepath.Join(home, ".powerhour", globalConfigFile), nil
 }
 
 func machineFingerprint() string {
@@ -248,37 +261,49 @@ func testEncoder(ctx context.Context, ffmpegPath, codec string) bool {
 	return cmd.Run() == nil
 }
 
-// LoadEncodingDefaults loads the global encoding.yaml. Returns zero-value if missing.
-func LoadEncodingDefaults() EncodingDefaults {
-	path, err := encodingDefaultsPath()
+// LoadGlobalConfig loads ~/.powerhour/config.yaml. Returns zero-value if missing.
+func LoadGlobalConfig() GlobalConfig {
+	path, err := globalConfigPath()
 	if err != nil {
-		return EncodingDefaults{}
+		return GlobalConfig{}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return EncodingDefaults{}
+		return GlobalConfig{}
 	}
-	var defaults EncodingDefaults
-	if err := yaml.Unmarshal(data, &defaults); err != nil {
-		return EncodingDefaults{}
+	var cfg GlobalConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return GlobalConfig{}
 	}
-	return defaults
+	return cfg
 }
 
-// SaveEncodingDefaults writes the global encoding.yaml to disk.
-func SaveEncodingDefaults(defaults EncodingDefaults) error {
-	path, err := encodingDefaultsPath()
+// SaveGlobalConfig writes ~/.powerhour/config.yaml to disk.
+func SaveGlobalConfig(cfg GlobalConfig) error {
+	path, err := globalConfigPath()
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("prepare encoding defaults dir: %w", err)
+		return fmt.Errorf("prepare global config dir: %w", err)
 	}
-	data, err := yaml.Marshal(&defaults)
+	data, err := yaml.Marshal(&cfg)
 	if err != nil {
-		return fmt.Errorf("marshal encoding defaults: %w", err)
+		return fmt.Errorf("marshal global config: %w", err)
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// LoadEncodingDefaults loads encoding defaults from the global config. Returns zero-value if missing.
+func LoadEncodingDefaults() EncodingDefaults {
+	return LoadGlobalConfig().EncodingDefaults
+}
+
+// SaveEncodingDefaults writes encoding defaults to the global config, preserving other sections.
+func SaveEncodingDefaults(defaults EncodingDefaults) error {
+	cfg := LoadGlobalConfig()
+	cfg.EncodingDefaults = defaults
+	return SaveGlobalConfig(cfg)
 }
 
 // ResolvedEncoding is the fully merged encoding config used by render and concat.

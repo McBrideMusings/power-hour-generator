@@ -10,14 +10,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// OverlayEntry specifies a single overlay preset or raw filter for a collection.
+type OverlayEntry struct {
+	Type    string            `yaml:"type"`
+	Options map[string]string `yaml:",inline"`
+	Filters []string          `yaml:"filters,omitempty"`
+}
+
 // CollectionConfig defines a collection of clips with configurable CSV headers.
 type CollectionConfig struct {
-	Plan           string `yaml:"plan"`
-	OutputDir      string `yaml:"output_dir"`
-	Profile        string `yaml:"profile"`
-	LinkHeader     string `yaml:"link_header"`
-	StartHeader    string `yaml:"start_header"`
-	DurationHeader string `yaml:"duration_header"`
+	Plan           string         `yaml:"plan"`
+	OutputDir      string         `yaml:"output_dir"`
+	Overlays       []OverlayEntry `yaml:"overlays,omitempty"`
+	LinkHeader     string         `yaml:"link_header"`
+	StartHeader    string         `yaml:"start_header"`
+	DurationHeader string         `yaml:"duration_header"`
 }
 
 // TimelineConfig defines the playback sequence for the power hour.
@@ -83,9 +90,7 @@ type Config struct {
 	Version         int                         `yaml:"version"`
 	Video           VideoConfig                 `yaml:"video"`
 	Audio           AudioConfig                 `yaml:"audio"`
-	ProfileFiles    []string                    `yaml:"profile_files,omitempty"`
 	CollectionFiles []string                    `yaml:"collection_files,omitempty"`
-	Profiles        ProfilesConfig              `yaml:"profiles"`
 	Collections     map[string]CollectionConfig `yaml:"collections"`
 	Timeline        TimelineConfig              `yaml:"timeline"`
 	Outputs         OutputConfig                `yaml:"outputs"`
@@ -106,6 +111,7 @@ type ToolPin struct {
 	Version        string `yaml:"version"`
 	MinimumVersion string `yaml:"minimum_version"`
 	Proxy          string `yaml:"proxy"`
+	SourceAddress  string `yaml:"source_address"`
 }
 
 // DownloadsConfig controls caching/downloading behaviour.
@@ -136,64 +142,6 @@ type AudioConfig struct {
 	SampleRate  int            `yaml:"sample_rate"`
 	Channels    int            `yaml:"channels"`
 	Loudnorm    LoudnormConfig `yaml:"loudnorm"`
-}
-
-// ProfilesConfig captures reusable overlay styling definitions.
-type ProfilesConfig map[string]OverlayProfile
-
-// OverlayProfile defines a named overlay style composed of segments and defaults.
-type OverlayProfile struct {
-	DefaultStyle       TextStyle        `yaml:"default_style"`
-	Segments           []OverlaySegment `yaml:"segments"`
-	DefaultDurationSec *int             `yaml:"default_duration_s,omitempty"`
-	FadeInSec          *float64         `yaml:"fade_in_s,omitempty"`
-	FadeOutSec         *float64         `yaml:"fade_out_s,omitempty"`
-}
-
-// TextStyle captures font and layout styling options for drawtext overlays.
-type TextStyle struct {
-	FontFile      string `yaml:"font_file"`
-	FontSize      *int   `yaml:"font_size,omitempty"`
-	FontColor     string `yaml:"font_color"`
-	OutlineColor  string `yaml:"outline_color"`
-	OutlineWidth  *int   `yaml:"outline_width,omitempty"`
-	LineSpacing   *int   `yaml:"line_spacing,omitempty"`
-	LetterSpacing *int   `yaml:"letter_spacing,omitempty"`
-}
-
-// OverlaySegment describes a single text overlay instance.
-type OverlaySegment struct {
-	Name      string       `yaml:"name"`
-	Template  string       `yaml:"template"`
-	Transform string       `yaml:"transform"`
-	Disabled  bool         `yaml:"disabled"`
-	ZIndex    *int         `yaml:"z_index,omitempty"` // Optional: controls draw order (higher = on top)
-	Style     TextStyle    `yaml:"style"`
-	Position  PositionSpec `yaml:"position"`
-	Timing    TimingSpec   `yaml:"timing"`
-}
-
-// PositionSpec describes how to place a text overlay on screen.
-type PositionSpec struct {
-	Origin  string  `yaml:"origin"`
-	OffsetX float64 `yaml:"offset_x"`
-	OffsetY float64 `yaml:"offset_y"`
-	XExpr   string  `yaml:"x"`
-	YExpr   string  `yaml:"y"`
-}
-
-// TimingSpec controls when an overlay is visible.
-type TimingSpec struct {
-	Start   TimePointSpec `yaml:"start"`
-	End     TimePointSpec `yaml:"end"`
-	FadeIn  float64       `yaml:"fade_in_s"`
-	FadeOut float64       `yaml:"fade_out_s"`
-}
-
-// TimePointSpec defines a timing anchor relative to the clip.
-type TimePointSpec struct {
-	Type      string  `yaml:"type"`
-	OffsetSec float64 `yaml:"offset_s"`
 }
 
 // OutputConfig captures naming templates for generated assets.
@@ -273,147 +221,6 @@ type PlanConfig struct {
 
 // Default returns the baseline configuration.
 func Default() Config {
-	// Song profile - title/artist intro + index badge
-	songStyle := TextStyle{
-		FontFile:     "",
-		FontSize:     intPtr(42),
-		FontColor:    "white",
-		OutlineColor: "black",
-		OutlineWidth: intPtr(2),
-		LineSpacing:  intPtr(4),
-	}
-
-	songSegments := []OverlaySegment{
-		{
-			Name:     "intro-title",
-			Template: "{title}",
-			Style: TextStyle{
-				FontSize: intPtr(64),
-			},
-			Position: PositionSpec{
-				Origin:  "bottom-left",
-				OffsetX: 40,
-				OffsetY: 220,
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 0,
-				},
-				End: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 4,
-				},
-				FadeIn:  0.5,
-				FadeOut: 0.5,
-			},
-		},
-		{
-			Name:      "intro-artist",
-			Template:  "{artist}",
-			Transform: "uppercase",
-			Style: TextStyle{
-				FontSize: intPtr(32),
-			},
-			Position: PositionSpec{
-				Origin:  "bottom-left",
-				OffsetX: 40,
-				OffsetY: 160,
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 0,
-				},
-				End: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 4,
-				},
-				FadeIn:  0.5,
-				FadeOut: 0.5,
-			},
-		},
-		{
-			Name:     "index-badge",
-			Template: "{index}",
-			Style: TextStyle{
-				FontSize: intPtr(140),
-			},
-			Position: PositionSpec{
-				Origin:  "bottom-right",
-				OffsetX: 40,
-				OffsetY: 40,
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 0,
-				},
-				End: TimePointSpec{
-					Type: "persistent",
-				},
-			},
-		},
-	}
-
-	// Interstitial profile - "Drink!" with yellow text, black outline, yellow drop shadow
-	interstitialStyle := TextStyle{
-		FontFile:     "",
-		FontSize:     intPtr(120),
-		FontColor:    "yellow",
-		OutlineColor: "black",
-		OutlineWidth: intPtr(4),
-		LineSpacing:  intPtr(4),
-	}
-
-	interstitialSegments := []OverlaySegment{
-		{
-			Name:     "drink-shadow",
-			Template: "Drink!",
-			Style: TextStyle{
-				FontSize:     intPtr(120),
-				FontColor:    "yellow@0.6", // Semi-transparent yellow for shadow
-				OutlineColor: "black@0",    // No outline on shadow
-				OutlineWidth: intPtr(0),
-			},
-			Position: PositionSpec{
-				Origin:  "bottom-center",
-				OffsetX: 8,   // Shadow offset right
-				OffsetY: 192, // Shadow offset up (200 - 8)
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 0,
-				},
-				End: TimePointSpec{
-					Type: "persistent",
-				},
-			},
-		},
-		{
-			Name:     "drink-text",
-			Template: "Drink!",
-			Style: TextStyle{
-				FontSize: intPtr(120),
-			},
-			Position: PositionSpec{
-				Origin:  "bottom-center",
-				OffsetX: 0,
-				OffsetY: 200,
-			},
-			Timing: TimingSpec{
-				Start: TimePointSpec{
-					Type:      "from_start",
-					OffsetSec: 0,
-				},
-				End: TimePointSpec{
-					Type: "persistent",
-				},
-			},
-		},
-	}
-
 	return Config{
 		Version: 1,
 		Video: VideoConfig{
@@ -436,21 +243,11 @@ func Default() Config {
 				LRA:            floatPtr(11.0),
 			},
 		},
-		Profiles: ProfilesConfig{
-			"song-main": {
-				DefaultStyle: cloneTextStyle(songStyle),
-				Segments:     cloneSegments(songSegments),
-			},
-			"interstitial-drink": {
-				DefaultStyle: cloneTextStyle(interstitialStyle),
-				Segments:     cloneSegments(interstitialSegments),
-			},
-		},
 		Collections: map[string]CollectionConfig{
 			"songs": {
 				Plan:           "songs.yaml",
 				OutputDir:      "songs",
-				Profile:        "song-main",
+				Overlays:       []OverlayEntry{{Type: "song-info"}},
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
@@ -458,7 +255,7 @@ func Default() Config {
 			"interstitials": {
 				Plan:           "interstitials.yaml",
 				OutputDir:      "interstitials",
-				Profile:        "interstitial-drink",
+				Overlays:       []OverlayEntry{{Type: "drink"}},
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
@@ -507,9 +304,6 @@ func Load(path string) (Config, error) {
 	}
 
 	projectRoot := filepath.Dir(path)
-	if err := cfg.loadProfileFiles(projectRoot); err != nil {
-		return Config{}, err
-	}
 	if err := cfg.loadCollectionFiles(projectRoot); err != nil {
 		return Config{}, err
 	}
@@ -581,24 +375,6 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Outputs.SegmentTemplate) == "" {
 		c.Outputs.SegmentTemplate = defaults.Outputs.SegmentTemplate
 	}
-	if c.Profiles == nil {
-		c.Profiles = map[string]OverlayProfile{}
-	}
-	if len(c.Profiles) == 0 {
-		for name, profile := range defaults.Profiles {
-			c.Profiles[name] = cloneOverlayProfile(profile)
-		}
-	} else {
-		for name, profile := range c.Profiles {
-			if base, ok := defaults.Profiles[name]; ok {
-				profile.DefaultStyle = mergeTextStyle(base.DefaultStyle, profile.DefaultStyle)
-			} else {
-				profile.DefaultStyle = cloneTextStyle(profile.DefaultStyle)
-			}
-			profile.Segments = cloneSegments(profile.Segments)
-			c.Profiles[name] = profile
-		}
-	}
 	if c.Plan.DefaultDurationSec <= 0 {
 		c.Plan.DefaultDurationSec = defaults.Plan.DefaultDurationSec
 	}
@@ -640,6 +416,17 @@ func (c Config) ToolProxy(tool string) string {
 	}
 	if pin, ok := c.Tools[tool]; ok {
 		return strings.TrimSpace(pin.Proxy)
+	}
+	return ""
+}
+
+// ToolSourceAddress returns the source address override for a given tool name when defined.
+func (c Config) ToolSourceAddress(tool string) string {
+	if c.Tools == nil {
+		return ""
+	}
+	if pin, ok := c.Tools[tool]; ok {
+		return strings.TrimSpace(pin.SourceAddress)
 	}
 	return ""
 }
@@ -742,95 +529,6 @@ func (c Config) Marshal() ([]byte, error) {
 	return buf, nil
 }
 
-func profileExists(profiles map[string]OverlayProfile, name string) bool {
-	if len(profiles) == 0 {
-		return false
-	}
-	_, ok := profiles[strings.TrimSpace(name)]
-	return ok
-}
-
-func mergeTextStyle(base, override TextStyle) TextStyle {
-	result := cloneTextStyle(base)
-
-	if strings.TrimSpace(override.FontFile) != "" {
-		result.FontFile = override.FontFile
-	}
-	if override.FontSize != nil {
-		result.FontSize = intPtr(*override.FontSize)
-	}
-	if strings.TrimSpace(override.FontColor) != "" {
-		result.FontColor = override.FontColor
-	}
-	if strings.TrimSpace(override.OutlineColor) != "" {
-		result.OutlineColor = override.OutlineColor
-	}
-	if override.OutlineWidth != nil {
-		result.OutlineWidth = intPtr(*override.OutlineWidth)
-	}
-	if override.LineSpacing != nil {
-		result.LineSpacing = intPtr(*override.LineSpacing)
-	}
-	if override.LetterSpacing != nil {
-		result.LetterSpacing = intPtr(*override.LetterSpacing)
-	}
-
-	return result
-}
-
-func cloneTextStyle(style TextStyle) TextStyle {
-	clone := style
-	if style.FontSize != nil {
-		clone.FontSize = intPtr(*style.FontSize)
-	}
-	if style.OutlineWidth != nil {
-		clone.OutlineWidth = intPtr(*style.OutlineWidth)
-	}
-	if style.LineSpacing != nil {
-		clone.LineSpacing = intPtr(*style.LineSpacing)
-	}
-	if style.LetterSpacing != nil {
-		clone.LetterSpacing = intPtr(*style.LetterSpacing)
-	}
-	return clone
-}
-
-func cloneSegments(segments []OverlaySegment) []OverlaySegment {
-	if len(segments) == 0 {
-		return nil
-	}
-	clones := make([]OverlaySegment, len(segments))
-	for i, segment := range segments {
-		clones[i] = segment
-		clones[i].Style = cloneTextStyle(segment.Style)
-	}
-	return clones
-}
-
-func cloneOverlayProfile(profile OverlayProfile) OverlayProfile {
-	return OverlayProfile{
-		DefaultStyle:       cloneTextStyle(profile.DefaultStyle),
-		Segments:           cloneSegments(profile.Segments),
-		DefaultDurationSec: copyIntPtr(profile.DefaultDurationSec),
-		FadeInSec:          copyFloatPtr(profile.FadeInSec),
-		FadeOutSec:         copyFloatPtr(profile.FadeOutSec),
-	}
-}
-
-func copyIntPtr(src *int) *int {
-	if src == nil {
-		return nil
-	}
-	return intPtr(*src)
-}
-
-func copyFloatPtr(src *float64) *float64 {
-	if src == nil {
-		return nil
-	}
-	return floatPtr(*src)
-}
-
 func boolPtr(v bool) *bool {
 	return &v
 }
@@ -901,9 +599,6 @@ func (c *Config) applyCollectionDefaults() {
 			collection.OutputDir = name
 		}
 
-		// Normalize profile name
-		collection.Profile = strings.TrimSpace(collection.Profile)
-
 		c.Collections[name] = collection
 	}
 }
@@ -929,13 +624,6 @@ func (c Config) ValidateCollections() error {
 		}
 		if collection.DurationHeader != "" && protectedHeaders[normalizeHeaderName(collection.DurationHeader)] {
 			return fmt.Errorf("collection %q: duration_header cannot be %q (protected name)", name, collection.DurationHeader)
-		}
-
-		// Validate profile exists if specified
-		if collection.Profile != "" {
-			if !profileExists(c.Profiles, collection.Profile) {
-				return fmt.Errorf("collection %q: profile %q does not exist", name, collection.Profile)
-			}
 		}
 
 		// Validate plan file is specified

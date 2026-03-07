@@ -107,7 +107,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 
 	// Build per-row statuses
 	tmpl := cfg.SegmentFilenameTemplate()
-	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, resolver, collections, tmpl)
+	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, collections, tmpl)
 
 	// Resolve timeline
 	var timelineEntries []timelineEntryOutput
@@ -156,7 +156,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *state.RenderState, resolver *project.CollectionResolver, collections map[string]project.Collection, tmpl string) ([]rowStatus, []collectionSummary) {
+func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *state.RenderState, collections map[string]project.Collection, tmpl string) ([]rowStatus, []collectionSummary) {
 	// Sort collection names for deterministic output
 	sortedNames := make([]string, 0, len(collections))
 	for name := range collections {
@@ -199,6 +199,7 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 			}
 
 			// Build segment for render status
+			collCfg := cfg.Collections[collName]
 			clip := project.Clip{
 				Sequence:        r.Index,
 				ClipType:        project.ClipType(collName),
@@ -206,17 +207,6 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 				Row:             r,
 				SourceKind:      project.SourceKindPlan,
 				DurationSeconds: r.DurationSeconds,
-				OverlayProfile:  coll.Profile,
-			}
-			if coll.Profile != "" {
-				if prof, ok := resolver.Profile(coll.Profile); ok {
-					if prof.FadeInSec != nil {
-						clip.FadeInSeconds = *prof.FadeInSec
-					}
-					if prof.FadeOutSec != nil {
-						clip.FadeOutSeconds = *prof.FadeOutSec
-					}
-				}
 			}
 
 			clip.Row.DurationSeconds = clip.DurationSeconds
@@ -224,19 +214,9 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 				clip.Row.Index = clip.TypeIndex
 			}
 
-			var prof project.ResolvedProfile
-			var segs []config.OverlaySegment
-			if clip.OverlayProfile != "" {
-				if p, ok := resolver.Profile(clip.OverlayProfile); ok {
-					prof = p
-					segs = p.ResolveSegments()
-				}
-			}
-
 			seg := render.Segment{
 				Clip:     clip,
-				Profile:  prof,
-				Segments: segs,
+				Overlays: collCfg.Overlays,
 			}
 
 			outputDir := coll.OutputDir

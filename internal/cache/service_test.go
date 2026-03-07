@@ -435,9 +435,42 @@ func TestServiceResolveDownloadWithProxy(t *testing.T) {
 	}
 }
 
+func TestServiceResolveDownloadWithSourceAddress(t *testing.T) {
+	pp := testPaths(t)
+	idx, err := Load(pp)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	addr := "10.73.182.220"
+
+	runner := &fakeRunner{}
+	svc := &Service{
+		Paths:           pp,
+		Logger:          log.New(io.Discard, "", 0),
+		Runner:          runner,
+		ytDLP:           "yt-dlp",
+		ffprobe:         "ffprobe",
+		ytDLPSourceAddr: addr,
+	}
+
+	row := csvplan.Row{Index: 1, Title: "Example", Link: "https://example.com/video"}
+	if _, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{}); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if !containsFlagArg(runner.lastDownloadArgs, "--source-address", addr) {
+		t.Fatalf("expected yt-dlp args to include --source-address, got %v", runner.lastDownloadArgs)
+	}
+}
+
 func containsProxyArg(args []string, proxy string) bool {
+	return containsFlagArg(args, "--proxy", proxy)
+}
+
+func containsFlagArg(args []string, flag, value string) bool {
 	for i := 0; i < len(args)-1; i++ {
-		if args[i] == "--proxy" && args[i+1] == proxy {
+		if args[i] == flag && args[i+1] == value {
 			return true
 		}
 	}

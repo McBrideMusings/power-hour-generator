@@ -16,47 +16,6 @@ func resolveExternalPath(projectRoot, path string) string {
 	return filepath.Join(projectRoot, path)
 }
 
-// loadProfileFiles reads each file in ProfileFiles, unmarshals as map[string]OverlayProfile,
-// and merges into c.Profiles with duplicate detection.
-func (c *Config) loadProfileFiles(projectRoot string) error {
-	if len(c.ProfileFiles) == 0 {
-		return nil
-	}
-
-	if c.Profiles == nil {
-		c.Profiles = ProfilesConfig{}
-	}
-
-	// Track where each profile name was defined for duplicate detection.
-	sources := make(map[string]string, len(c.Profiles))
-	for name := range c.Profiles {
-		sources[name] = "inline config"
-	}
-
-	for _, relPath := range c.ProfileFiles {
-		absPath := resolveExternalPath(projectRoot, relPath)
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return fmt.Errorf("load profile file %q: %w", relPath, err)
-		}
-
-		var profiles map[string]OverlayProfile
-		if err := yaml.Unmarshal(data, &profiles); err != nil {
-			return fmt.Errorf("parse profile file %q: %w", relPath, err)
-		}
-
-		for name, profile := range profiles {
-			if existing, ok := sources[name]; ok {
-				return fmt.Errorf("profile %q defined in both %s and %q", name, existing, relPath)
-			}
-			sources[name] = relPath
-			c.Profiles[name] = profile
-		}
-	}
-
-	return nil
-}
-
 // loadCollectionFiles reads each file in CollectionFiles, unmarshals as map[string]CollectionConfig,
 // and merges into c.Collections with duplicate detection.
 func (c *Config) loadCollectionFiles(projectRoot string) error {

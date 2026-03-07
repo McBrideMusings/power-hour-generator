@@ -341,17 +341,6 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, resolver *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
 	clip := collClip.Clip
 
-	var profile project.ResolvedProfile
-	var segments []config.OverlaySegment
-	if clip.OverlayProfile != "" {
-		var ok bool
-		profile, ok = resolver.Profile(clip.OverlayProfile)
-		if !ok {
-			return render.Segment{}, fmt.Errorf("collection %q references unknown overlay profile %q", collClip.CollectionName, clip.OverlayProfile)
-		}
-		segments = profile.ResolveSegments()
-	}
-
 	clip.Row.DurationSeconds = clip.DurationSeconds
 	if clip.Row.Index <= 0 {
 		clip.Row.Index = clip.TypeIndex
@@ -362,8 +351,7 @@ func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx 
 
 	segment := render.Segment{
 		Clip:     clip,
-		Profile:  profile,
-		Segments: segments,
+		Overlays: collClip.Overlays,
 	}
 
 	outputDir := collClip.OutputDir
