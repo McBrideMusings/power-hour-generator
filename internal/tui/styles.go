@@ -20,7 +20,11 @@ var (
 		"downloading": lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 		"matching":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 		"copying":     lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+		"fetching":    lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
 		"rendering":   lipgloss.NewStyle().Foreground(lipgloss.Color("4")),
+
+		// Transitional
+		"fetched": lipgloss.NewStyle().Foreground(lipgloss.Color("6")),
 
 		// Skipped / warning
 		"skipped": lipgloss.NewStyle().Foreground(lipgloss.Color("3")),

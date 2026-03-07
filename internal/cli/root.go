@@ -22,8 +22,10 @@ func Execute() {
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "powerhour",
-		Short: "Power Hour generator CLI",
+		Use:           "powerhour",
+		Short:         "Power Hour generator CLI",
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	cmd.PersistentFlags().StringVar(&projectDir, "project", "", "Path to project directory")
