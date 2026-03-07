@@ -279,14 +279,14 @@ func GlobalEncodingProfileFile() (string, error) {
 	return filepath.Join(global, "encoding_profile.json"), nil
 }
 
-// GlobalEncodingDefaultsFile returns the path to the global encoding defaults
-// (~/.powerhour/encoding.yaml). It does not create the file.
-func GlobalEncodingDefaultsFile() (string, error) {
+// GlobalConfigFile returns the path to the unified global config
+// (~/.powerhour/config.yaml). It does not create the file.
+func GlobalConfigFile() (string, error) {
 	global, err := GlobalDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(global, "encoding.yaml"), nil
+	return filepath.Join(global, "config.yaml"), nil
 }
 
 // FileExists reports whether a path exists and is a regular file.

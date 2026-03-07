@@ -22,169 +22,6 @@ func TestResolveExternalPath_Absolute(t *testing.T) {
 	}
 }
 
-func TestLoadProfileFiles_Single(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "profiles.yaml"), `
-custom-profile:
-  segments:
-    - name: title
-      template: "{title}"
-`)
-
-	cfg := Config{
-		ProfileFiles: []string{"profiles.yaml"},
-		Profiles:     ProfilesConfig{},
-	}
-	if err := cfg.loadProfileFiles(dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := cfg.Profiles["custom-profile"]; !ok {
-		t.Fatal("expected custom-profile to be loaded")
-	}
-}
-
-func TestLoadProfileFiles_Multiple(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "a.yaml"), `
-profile-a:
-  segments: []
-`)
-	writeFile(t, filepath.Join(dir, "b.yaml"), `
-profile-b:
-  segments: []
-`)
-
-	cfg := Config{
-		ProfileFiles: []string{"a.yaml", "b.yaml"},
-		Profiles:     ProfilesConfig{},
-	}
-	if err := cfg.loadProfileFiles(dir); err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.Profiles) != 2 {
-		t.Fatalf("expected 2 profiles, got %d", len(cfg.Profiles))
-	}
-}
-
-func TestLoadProfileFiles_DuplicateInlineVsFile(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "profiles.yaml"), `
-song-main:
-  segments: []
-`)
-
-	cfg := Config{
-		ProfileFiles: []string{"profiles.yaml"},
-		Profiles: ProfilesConfig{
-			"song-main": {},
-		},
-	}
-	err := cfg.loadProfileFiles(dir)
-	if err == nil {
-		t.Fatal("expected duplicate error")
-	}
-	if !strings.Contains(err.Error(), "song-main") || !strings.Contains(err.Error(), "inline config") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLoadProfileFiles_DuplicateAcrossFiles(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "a.yaml"), `
-shared:
-  segments: []
-`)
-	writeFile(t, filepath.Join(dir, "b.yaml"), `
-shared:
-  segments: []
-`)
-
-	cfg := Config{
-		ProfileFiles: []string{"a.yaml", "b.yaml"},
-		Profiles:     ProfilesConfig{},
-	}
-	err := cfg.loadProfileFiles(dir)
-	if err == nil {
-		t.Fatal("expected duplicate error")
-	}
-	if !strings.Contains(err.Error(), "shared") {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestLoadProfileFiles_MissingFile(t *testing.T) {
-	cfg := Config{
-		ProfileFiles: []string{"nonexistent.yaml"},
-		Profiles:     ProfilesConfig{},
-	}
-	err := cfg.loadProfileFiles(t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-}
-
-func TestLoadProfileFiles_EmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "empty.yaml"), "")
-
-	cfg := Config{
-		ProfileFiles: []string{"empty.yaml"},
-		Profiles: ProfilesConfig{
-			"existing": {},
-		},
-	}
-	if err := cfg.loadProfileFiles(dir); err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.Profiles) != 1 {
-		t.Fatalf("expected 1 profile unchanged, got %d", len(cfg.Profiles))
-	}
-}
-
-func TestLoadProfileFiles_InvalidYAML(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "bad.yaml"), "{{{{not yaml")
-
-	cfg := Config{
-		ProfileFiles: []string{"bad.yaml"},
-		Profiles:     ProfilesConfig{},
-	}
-	err := cfg.loadProfileFiles(dir)
-	if err == nil {
-		t.Fatal("expected error for invalid YAML")
-	}
-}
-
-func TestLoadProfileFiles_NilProfiles(t *testing.T) {
-	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "p.yaml"), `
-new-profile:
-  segments: []
-`)
-
-	cfg := Config{
-		ProfileFiles: []string{"p.yaml"},
-	}
-	if err := cfg.loadProfileFiles(dir); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := cfg.Profiles["new-profile"]; !ok {
-		t.Fatal("expected new-profile to be created from nil map")
-	}
-}
-
-func TestLoadProfileFiles_NoFiles(t *testing.T) {
-	cfg := Config{
-		Profiles: ProfilesConfig{"existing": {}},
-	}
-	if err := cfg.loadProfileFiles(t.TempDir()); err != nil {
-		t.Fatal(err)
-	}
-	if len(cfg.Profiles) != 1 {
-		t.Fatal("profiles should be unchanged with no profile_files")
-	}
-}
-
 // --- Collection file tests ---
 
 func TestLoadCollectionFiles_Single(t *testing.T) {
@@ -333,12 +170,6 @@ func TestLoadCollectionFiles_NoFiles(t *testing.T) {
 func TestLoad_WithExternalFiles(t *testing.T) {
 	dir := t.TempDir()
 
-	writeFile(t, filepath.Join(dir, "profiles", "songs.yaml"), `
-ext-profile:
-  segments:
-    - name: title
-      template: "{title}"
-`)
 	writeFile(t, filepath.Join(dir, "collections", "extras.yaml"), `
 extras:
   plan: extras.csv
@@ -347,8 +178,6 @@ extras:
 
 	writeFile(t, filepath.Join(dir, "powerhour.yaml"), `
 version: 1
-profile_files:
-  - profiles/songs.yaml
 collection_files:
   - collections/extras.yaml
 collections:
@@ -362,9 +191,6 @@ collections:
 		t.Fatal(err)
 	}
 
-	if _, ok := cfg.Profiles["ext-profile"]; !ok {
-		t.Error("expected ext-profile from external file")
-	}
 	if _, ok := cfg.Collections["extras"]; !ok {
 		t.Error("expected extras collection from external file")
 	}
@@ -425,36 +251,8 @@ collections:
 	if _, ok := cfg.Collections["songs"]; !ok {
 		t.Fatal("expected songs collection")
 	}
-	if len(cfg.ProfileFiles) != 0 {
-		t.Error("expected no profile_files")
-	}
 	if len(cfg.CollectionFiles) != 0 {
 		t.Error("expected no collection_files")
-	}
-}
-
-func TestLoad_AbsolutePath(t *testing.T) {
-	dir := t.TempDir()
-	absDir := t.TempDir()
-
-	writeFile(t, filepath.Join(absDir, "profiles.yaml"), `
-abs-profile:
-  segments: []
-`)
-
-	writeFile(t, filepath.Join(dir, "powerhour.yaml"), `
-version: 1
-profile_files:
-  - `+filepath.Join(absDir, "profiles.yaml")+`
-collections: {}
-`)
-
-	cfg, err := Load(filepath.Join(dir, "powerhour.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := cfg.Profiles["abs-profile"]; !ok {
-		t.Error("expected abs-profile from absolute path")
 	}
 }
 

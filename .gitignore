@@ -10,3 +10,6 @@ docs/.vitepress/dist
 docs/node_modules
 sample_project*/*
 powerhour-*/*
+/powerhour
+/admin
+tmp/

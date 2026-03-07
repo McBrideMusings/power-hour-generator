@@ -45,6 +45,7 @@ type Service struct {
 	ffprobe          string
 	CookiesPath      string
 	ytDLPProxy       string
+	ytDLPSourceAddr  string
 	logOutput        io.Writer
 	filenameTemplate string
 }
@@ -147,7 +148,15 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 		cookiesPath = pp.CookiesFile
 		logger.Printf("using cookies file: %s", cookiesPath)
 	}
+	globalCfg := tools.LoadGlobalConfig()
 	ytProxy := cfg.ToolProxy("yt-dlp")
+	if ytProxy == "" {
+		ytProxy = globalCfg.Downloads.Proxy
+	}
+	ytSourceAddr := cfg.ToolSourceAddress("yt-dlp")
+	if ytSourceAddr == "" {
+		ytSourceAddr = globalCfg.Downloads.SourceAddress
+	}
 
 	toolStatuses, err := tools.EnsureAll(ctx, []string{"yt-dlp", "ffmpeg"}, statusFn)
 	if err != nil {
@@ -174,6 +183,7 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 		ffprobe:          ffprobePath,
 		CookiesPath:      cookiesPath,
 		ytDLPProxy:       ytProxy,
+		ytDLPSourceAddr:  ytSourceAddr,
 		filenameTemplate: cfg.DownloadFilenameTemplate(),
 	}
 	return svc, nil
@@ -565,6 +575,9 @@ func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo,
 	}
 	if s.ytDLPProxy != "" {
 		args = append(args, "--proxy", s.ytDLPProxy)
+	}
+	if s.ytDLPSourceAddr != "" {
+		args = append(args, "--source-address", s.ytDLPSourceAddr)
 	}
 
 	args = append(args, link)

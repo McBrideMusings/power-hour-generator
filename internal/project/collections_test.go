@@ -33,35 +33,6 @@ func TestNewCollectionResolver(t *testing.T) {
 		}
 	})
 
-	t.Run("with profiles", func(t *testing.T) {
-		cfg := config.Config{
-			Profiles: config.ProfilesConfig{
-				"songs": {
-					DefaultStyle: config.TextStyle{FontColor: "white"},
-					FadeInSec:    floatPtr(0.5),
-				},
-			},
-			Collections: map[string]config.CollectionConfig{
-				"songs": {Plan: "songs.csv", Profile: "songs"},
-			},
-		}
-		r, err := NewCollectionResolver(cfg, pp)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		profile, ok := r.Profile("songs")
-		if !ok {
-			t.Fatal("expected songs profile to exist")
-		}
-		if profile.Name != "songs" {
-			t.Errorf("profile.Name = %q, want %q", profile.Name, "songs")
-		}
-		if *profile.FadeInSec != 0.5 {
-			t.Errorf("profile.FadeInSec = %v, want 0.5", *profile.FadeInSec)
-		}
-	})
-
 	t.Run("protected header rejected", func(t *testing.T) {
 		cfg := config.Config{
 			Collections: map[string]config.CollectionConfig{
@@ -73,30 +44,6 @@ func TestNewCollectionResolver(t *testing.T) {
 			t.Fatal("expected error for protected header")
 		}
 	})
-}
-
-func TestCollectionResolverProfiles(t *testing.T) {
-	pp := makeProjectPaths(t)
-	cfg := config.Config{
-		Profiles: config.ProfilesConfig{
-			"a": {DefaultStyle: config.TextStyle{FontColor: "red"}},
-			"b": {DefaultStyle: config.TextStyle{FontColor: "blue"}},
-		},
-	}
-	r, err := NewCollectionResolver(cfg, pp)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	profiles := r.Profiles()
-	if len(profiles) != 2 {
-		t.Fatalf("len(profiles) = %d, want 2", len(profiles))
-	}
-
-	_, ok := r.Profile("missing")
-	if ok {
-		t.Error("expected missing profile to return false")
-	}
 }
 
 func writeCSV(t *testing.T, dir, name, content string) string {
@@ -135,18 +82,6 @@ func TestLoadCollections(t *testing.T) {
 		}
 	})
 
-	t.Run("missing profile rejected by validation", func(t *testing.T) {
-		cfg := config.Config{
-			Collections: map[string]config.CollectionConfig{
-				"songs": {Plan: "songs.csv", Profile: "nonexistent"},
-			},
-		}
-		_, err := NewCollectionResolver(cfg, pp)
-		if err == nil {
-			t.Fatal("expected error for missing profile")
-		}
-	})
-
 	t.Run("loads valid collection", func(t *testing.T) {
 		csvContent := "link,title,artist,start_time\nhttps://example.com/1,Song One,Artist A,0:30\nhttps://example.com/2,Song Two,Artist B,1:00\n"
 		writeCSV(t, pp.Root, "valid.csv", csvContent)
@@ -177,16 +112,40 @@ func TestLoadCollections(t *testing.T) {
 		}
 	})
 
-	t.Run("loads with profile", func(t *testing.T) {
-		csvContent := "link,start_time\nhttps://example.com/1,0:30\n"
-		writeCSV(t, pp.Root, "profiled.csv", csvContent)
+	t.Run("empty plan file returns collection with no rows", func(t *testing.T) {
+		// A CSV with headers but no data rows should not be an error
+		csvContent := "link,title,artist,start_time\n"
+		writeCSV(t, pp.Root, "empty.csv", csvContent)
 
 		cfg := config.Config{
-			Profiles: config.ProfilesConfig{
-				"overlay": {FadeInSec: floatPtr(1.0)},
-			},
 			Collections: map[string]config.CollectionConfig{
-				"songs": {Plan: "profiled.csv", Profile: "overlay"},
+				"interstitials": {Plan: "empty.csv"},
+			},
+		}
+		r, _ := NewCollectionResolver(cfg, pp)
+		colls, err := r.LoadCollections()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(colls) != 1 {
+			t.Fatalf("len(colls) = %d, want 1", len(colls))
+		}
+		coll := colls["interstitials"]
+		if len(coll.Rows) != 0 {
+			t.Errorf("len(Rows) = %d, want 0", len(coll.Rows))
+		}
+	})
+
+	t.Run("loads with overlays", func(t *testing.T) {
+		csvContent := "link,start_time\nhttps://example.com/1,0:30\n"
+		writeCSV(t, pp.Root, "overlaid.csv", csvContent)
+
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": {
+					Plan:     "overlaid.csv",
+					Overlays: []config.OverlayEntry{{Type: "song-info"}},
+				},
 			},
 		}
 		r, _ := NewCollectionResolver(cfg, pp)
@@ -196,8 +155,8 @@ func TestLoadCollections(t *testing.T) {
 		}
 
 		songs := colls["songs"]
-		if songs.Profile != "overlay" {
-			t.Errorf("Profile = %q, want %q", songs.Profile, "overlay")
+		if len(songs.Config.Overlays) != 1 {
+			t.Errorf("expected 1 overlay, got %d", len(songs.Config.Overlays))
 		}
 	})
 }
@@ -268,22 +227,13 @@ func TestBuildCollectionClips(t *testing.T) {
 		}
 	})
 
-	t.Run("unknown profile errors", func(t *testing.T) {
-		cfg := config.Config{}
-		r, _ := NewCollectionResolver(cfg, pp)
-		colls := map[string]Collection{
-			"songs": {Name: "songs", Profile: "missing"},
-		}
-		_, err := r.BuildCollectionClips(colls)
-		if err == nil {
-			t.Fatal("expected error for unknown profile")
-		}
-	})
-
-	t.Run("builds clips without profile", func(t *testing.T) {
+	t.Run("builds clips with overlays", func(t *testing.T) {
 		cfg := config.Config{
 			Collections: map[string]config.CollectionConfig{
-				"songs": {Plan: "songs.csv"},
+				"songs": {
+					Plan:     "songs.csv",
+					Overlays: []config.OverlayEntry{{Type: "song-info"}},
+				},
 			},
 		}
 		r, _ := NewCollectionResolver(cfg, pp)
@@ -292,6 +242,7 @@ func TestBuildCollectionClips(t *testing.T) {
 			"songs": {
 				Name:      "songs",
 				OutputDir: "/out/songs",
+				Config:    cfg.Collections["songs"],
 				Rows: []csvplan.CollectionRow{
 					{Index: 1, Link: "https://a.com", DurationSeconds: 60, CustomFields: map[string]string{"title": "A"}},
 					{Index: 2, Link: "https://b.com", DurationSeconds: 45, CustomFields: map[string]string{"title": "B"}},
@@ -307,7 +258,6 @@ func TestBuildCollectionClips(t *testing.T) {
 			t.Fatalf("len = %d, want 2", len(clips))
 		}
 
-		// Verify clip fields
 		c := clips[0]
 		if c.CollectionName != "songs" {
 			t.Errorf("CollectionName = %q", c.CollectionName)
@@ -321,50 +271,8 @@ func TestBuildCollectionClips(t *testing.T) {
 		if c.Clip.ClipType != "songs" {
 			t.Errorf("ClipType = %q, want %q", c.Clip.ClipType, "songs")
 		}
-	})
-
-	t.Run("builds clips with profile fade values", func(t *testing.T) {
-		cfg := config.Config{
-			Profiles: config.ProfilesConfig{
-				"fancy": {
-					FadeInSec:          floatPtr(0.5),
-					FadeOutSec:         floatPtr(1.0),
-					DefaultDurationSec: intPtr(30),
-				},
-			},
-			Collections: map[string]config.CollectionConfig{
-				"songs": {Plan: "songs.csv", Profile: "fancy"},
-			},
-		}
-		r, _ := NewCollectionResolver(cfg, pp)
-
-		colls := map[string]Collection{
-			"songs": {
-				Name:    "songs",
-				Profile: "fancy",
-				Rows: []csvplan.CollectionRow{
-					{Index: 1, Link: "https://a.com", DurationSeconds: 60, CustomFields: map[string]string{}},
-				},
-			},
-		}
-
-		clips, err := r.BuildCollectionClips(colls)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-
-		c := clips[0]
-		if c.Clip.FadeInSeconds != 0.5 {
-			t.Errorf("FadeInSeconds = %f, want 0.5", c.Clip.FadeInSeconds)
-		}
-		if c.Clip.FadeOutSeconds != 1.0 {
-			t.Errorf("FadeOutSeconds = %f, want 1.0", c.Clip.FadeOutSeconds)
-		}
-		if c.Clip.OverlayProfile != "fancy" {
-			t.Errorf("OverlayProfile = %q, want %q", c.Clip.OverlayProfile, "fancy")
-		}
-		if c.DefaultDuration != 30 {
-			t.Errorf("DefaultDuration = %d, want 30", c.DefaultDuration)
+		if len(c.Overlays) != 1 || c.Overlays[0].Type != "song-info" {
+			t.Errorf("Overlays = %v, want [{Type: song-info}]", c.Overlays)
 		}
 	})
 

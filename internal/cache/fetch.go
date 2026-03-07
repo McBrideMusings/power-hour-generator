@@ -41,6 +41,9 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	logWriter := s.logWriter(logFile)
 
 	writeProxyBanner(ctx, logWriter, s.ytDLPProxy)
+	if s.ytDLPSourceAddr != "" {
+		fmt.Fprintf(logWriter, "[powerhour] yt-dlp source address: %s\n", s.ytDLPSourceAddr)
+	}
 
 	pathFile, err := os.CreateTemp(s.Paths.LogsDir, "yt-dlp-path-*.txt")
 	if err != nil {
@@ -65,6 +68,9 @@ func (s *Service) fetchURL(ctx context.Context, row csvplan.Row, baseName string
 	}
 	if s.ytDLPProxy != "" {
 		args = append(args, "--proxy", s.ytDLPProxy)
+	}
+	if s.ytDLPSourceAddr != "" {
+		args = append(args, "--source-address", s.ytDLPSourceAddr)
 	}
 
 	args = append(args, src.Raw)

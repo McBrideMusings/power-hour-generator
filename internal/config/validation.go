@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -14,34 +13,29 @@ type ValidationResult struct {
 	Message string `json:"message"`
 }
 
+// KnownOverlayTypes is the set of built-in overlay preset type names.
+var KnownOverlayTypes = map[string]bool{
+	"song-info": true,
+	"drink":     true,
+	"custom":    true,
+	"none":      true,
+}
+
 // ValidateStrict runs all strict validations against the config and returns
 // structured results. knownSegmentTokens is the set of statically-known
 // $TOKEN names for segment templates (pass render.ValidSegmentTokens()).
 func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) []ValidationResult {
 	var results []ValidationResult
 	results = append(results, c.validateExternalFiles(projectRoot)...)
-	results = append(results, c.validateProfileRefs()...)
+	results = append(results, c.validateOverlayEntries()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
-	results = append(results, c.validateOrphanedProfiles()...)
 	results = append(results, c.validateTimeline()...)
 	return results
 }
 
 func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {
 	var results []ValidationResult
-	for _, path := range c.ProfileFiles {
-		resolved := path
-		if !filepath.IsAbs(resolved) {
-			resolved = filepath.Join(projectRoot, resolved)
-		}
-		if _, err := os.Stat(resolved); err != nil {
-			results = append(results, ValidationResult{
-				Level:   "error",
-				Message: fmt.Sprintf("profile file %q not found", path),
-			})
-		}
-	}
 	for _, path := range c.CollectionFiles {
 		resolved := path
 		if !filepath.IsAbs(resolved) {
@@ -57,17 +51,37 @@ func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {
 	return results
 }
 
-func (c Config) validateProfileRefs() []ValidationResult {
+func (c Config) validateOverlayEntries() []ValidationResult {
 	var results []ValidationResult
 	for name, coll := range c.Collections {
-		if coll.Profile == "" {
-			continue
-		}
-		if !profileExists(c.Profiles, coll.Profile) {
-			results = append(results, ValidationResult{
-				Level:   "error",
-				Message: fmt.Sprintf("collection %q references profile %q which does not exist", name, coll.Profile),
-			})
+		for i, entry := range coll.Overlays {
+			typeName := strings.TrimSpace(entry.Type)
+			if typeName == "" {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: overlay[%d] missing type", name, i),
+				})
+				continue
+			}
+			if !KnownOverlayTypes[typeName] {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: overlay[%d] unknown type %q", name, i, typeName),
+				})
+				continue
+			}
+			if typeName == "custom" && len(entry.Filters) == 0 {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: overlay[%d] type \"custom\" requires filters", name, i),
+				})
+			}
+			if typeName != "custom" && len(entry.Filters) > 0 {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: overlay[%d] type %q does not accept filters", name, i, typeName),
+				})
+			}
 		}
 	}
 	return results
@@ -114,36 +128,6 @@ func (c Config) validateSegmentTemplate(knownTokens []string) []ValidationResult
 				Message: fmt.Sprintf("segment template contains unknown token $%s (known tokens: %s)", tok, strings.Join(knownTokens, ", ")),
 			})
 		}
-	}
-	return results
-}
-
-func (c Config) validateOrphanedProfiles() []ValidationResult {
-	if len(c.Profiles) == 0 {
-		return nil
-	}
-
-	referenced := make(map[string]bool)
-	for _, coll := range c.Collections {
-		if coll.Profile != "" {
-			referenced[coll.Profile] = true
-		}
-	}
-
-	var orphaned []string
-	for name := range c.Profiles {
-		if !referenced[name] {
-			orphaned = append(orphaned, name)
-		}
-	}
-	sort.Strings(orphaned)
-
-	var results []ValidationResult
-	for _, name := range orphaned {
-		results = append(results, ValidationResult{
-			Level:   "warning",
-			Message: fmt.Sprintf("profile %q is defined but not referenced by any collection", name),
-		})
 	}
 	return results
 }

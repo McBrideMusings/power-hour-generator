@@ -35,15 +35,8 @@ func testSegment() render.Segment {
 				CustomFields:    map[string]string{"genre": "rock"},
 			},
 		},
-		Profile: project.ResolvedProfile{
-			Name:         "song-main",
-			DefaultStyle: config.TextStyle{FontColor: "white"},
-		},
-		Segments: []config.OverlaySegment{
-			{
-				Name:     "title",
-				Template: "{title}",
-			},
+		Overlays: []config.OverlayEntry{
+			{Type: "song-info"},
 		},
 		OutputPath: "/output/seg001.mp4",
 	}
@@ -130,16 +123,15 @@ func TestSegmentInputHashChangesOnStartTime(t *testing.T) {
 func TestSegmentInputHashChangesOnOverlay(t *testing.T) {
 	seg1 := testSegment()
 	seg2 := testSegment()
-	seg2.Segments = append(seg2.Segments, config.OverlaySegment{
-		Name:     "artist",
-		Template: "{artist}",
+	seg2.Overlays = append(seg2.Overlays, config.OverlayEntry{
+		Type: "drink",
 	})
 
 	h1 := SegmentInputHash(seg1, "$INDEX")
 	h2 := SegmentInputHash(seg2, "$INDEX")
 
 	if h1 == h2 {
-		t.Error("adding overlay segment should produce different hash")
+		t.Error("adding overlay entry should produce different hash")
 	}
 }
 

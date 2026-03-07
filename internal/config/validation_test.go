@@ -6,18 +6,28 @@ import (
 	"testing"
 )
 
-func TestValidateStrict_ProfileRefs(t *testing.T) {
+func TestValidateStrict_OverlayEntries_Valid(t *testing.T) {
 	cfg := Config{
-		Profiles: ProfilesConfig{
-			"exists": {},
-		},
 		Collections: map[string]CollectionConfig{
-			"good": {Plan: "x.csv", Profile: "exists"},
-			"bad":  {Plan: "y.csv", Profile: "missing"},
+			"songs": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "song-info"}}},
+			"drinks": {Plan: "y.csv", Overlays: []OverlayEntry{{Type: "drink"}}},
 		},
 	}
 
-	results := cfg.validateProfileRefs()
+	results := cfg.validateOverlayEntries()
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %v", results)
+	}
+}
+
+func TestValidateStrict_OverlayEntries_UnknownType(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"bad": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "bogus"}}},
+		},
+	}
+
+	results := cfg.validateOverlayEntries()
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -29,17 +39,84 @@ func TestValidateStrict_ProfileRefs(t *testing.T) {
 	}
 }
 
-func TestValidateStrict_ProfileRefs_Valid(t *testing.T) {
+func TestValidateStrict_OverlayEntries_MissingType(t *testing.T) {
 	cfg := Config{
-		Profiles: ProfilesConfig{
-			"p1": {},
-		},
 		Collections: map[string]CollectionConfig{
-			"c1": {Plan: "x.csv", Profile: "p1"},
+			"bad": {Plan: "x.csv", Overlays: []OverlayEntry{{}}},
 		},
 	}
 
-	results := cfg.validateProfileRefs()
+	results := cfg.validateOverlayEntries()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateStrict_OverlayEntries_CustomRequiresFilters(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"bad": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "custom"}}},
+		},
+	}
+
+	results := cfg.validateOverlayEntries()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateStrict_OverlayEntries_NonCustomRejectsFilters(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"bad": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "song-info", Filters: []string{"drawtext=text='hi'"}}}},
+		},
+	}
+
+	results := cfg.validateOverlayEntries()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateStrict_OverlayEntries_CustomWithFiltersValid(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"custom": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "custom", Filters: []string{"drawtext=text='hi'"}}}},
+		},
+	}
+
+	results := cfg.validateOverlayEntries()
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %v", results)
+	}
+}
+
+func TestValidateStrict_OverlayEntries_NoneValid(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"raw": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "none"}}},
+		},
+	}
+
+	results := cfg.validateOverlayEntries()
 	if len(results) != 0 {
 		t.Fatalf("expected no results, got %v", results)
 	}
@@ -141,33 +218,8 @@ func TestValidateStrict_SegmentTemplate_MixedTokens(t *testing.T) {
 	}
 }
 
-func TestValidateStrict_OrphanedProfiles(t *testing.T) {
-	cfg := Config{
-		Profiles: ProfilesConfig{
-			"used":     {},
-			"orphaned": {},
-		},
-		Collections: map[string]CollectionConfig{
-			"c1": {Plan: "x.csv", Profile: "used"},
-		},
-	}
-
-	results := cfg.validateOrphanedProfiles()
-	var warnings []ValidationResult
-	for _, r := range results {
-		if r.Level == "warning" {
-			warnings = append(warnings, r)
-		}
-	}
-	if len(warnings) != 1 {
-		t.Fatalf("expected 1 warning, got %d: %v", len(warnings), warnings)
-	}
-}
-
 func TestValidateStrict_NoCollections(t *testing.T) {
-	cfg := Config{
-		Profiles: ProfilesConfig{},
-	}
+	cfg := Config{}
 
 	results := cfg.ValidateStrict("/tmp", nil)
 	if len(results) != 0 {
@@ -341,23 +393,6 @@ func TestValidateTimeline_EmptyCollectionName(t *testing.T) {
 	}
 }
 
-func TestValidateExternalFiles_MissingProfileFile(t *testing.T) {
-	dir := t.TempDir()
-	cfg := Config{
-		ProfileFiles: []string{"missing.yaml"},
-	}
-	results := cfg.validateExternalFiles(dir)
-	var errs []ValidationResult
-	for _, r := range results {
-		if r.Level == "error" {
-			errs = append(errs, r)
-		}
-	}
-	if len(errs) != 1 {
-		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
-	}
-}
-
 func TestValidateExternalFiles_MissingCollectionFile(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{
@@ -377,11 +412,9 @@ func TestValidateExternalFiles_MissingCollectionFile(t *testing.T) {
 
 func TestValidateExternalFiles_AllPresent(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "profiles.yaml"), []byte("{}"), 0644)
 	os.WriteFile(filepath.Join(dir, "colls.yaml"), []byte("{}"), 0644)
 
 	cfg := Config{
-		ProfileFiles:    []string{"profiles.yaml"},
 		CollectionFiles: []string{"colls.yaml"},
 	}
 	results := cfg.validateExternalFiles(dir)

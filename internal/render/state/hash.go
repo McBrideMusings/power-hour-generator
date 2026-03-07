@@ -25,19 +25,17 @@ type fieldEntry struct {
 
 // segmentInput is the canonical structure hashed for per-segment changes.
 type segmentInput struct {
-	Link            string                  `json:"link"`
-	StartRaw        string                  `json:"start_raw"`
-	DurationSeconds int                     `json:"duration_seconds"`
-	Title           string                  `json:"title"`
-	Artist          string                  `json:"artist"`
-	Name            string                  `json:"name"`
-	CustomFields    []fieldEntry            `json:"custom_fields"`
-	FadeInSeconds   float64                 `json:"fade_in_seconds"`
-	FadeOutSeconds  float64                 `json:"fade_out_seconds"`
-	ProfileName     string                  `json:"profile_name"`
-	DefaultStyle    config.TextStyle        `json:"default_style"`
-	Segments        []config.OverlaySegment `json:"segments"`
-	Template        string                  `json:"template"`
+	Link            string                `json:"link"`
+	StartRaw        string                `json:"start_raw"`
+	DurationSeconds int                   `json:"duration_seconds"`
+	Title           string                `json:"title"`
+	Artist          string                `json:"artist"`
+	Name            string                `json:"name"`
+	CustomFields    []fieldEntry          `json:"custom_fields"`
+	FadeInSeconds   float64               `json:"fade_in_seconds"`
+	FadeOutSeconds  float64               `json:"fade_out_seconds"`
+	Overlays        []config.OverlayEntry `json:"overlays"`
+	Template        string                `json:"template"`
 }
 
 // GlobalConfigHash returns a deterministic hash of the video, audio, and
@@ -73,9 +71,7 @@ func SegmentInputHash(seg render.Segment, filenameTemplate string) string {
 		CustomFields:    fields,
 		FadeInSeconds:   seg.Clip.FadeInSeconds,
 		FadeOutSeconds:  seg.Clip.FadeOutSeconds,
-		ProfileName:     seg.Profile.Name,
-		DefaultStyle:    seg.Profile.DefaultStyle,
-		Segments:        seg.Segments,
+		Overlays:        seg.Overlays,
 		Template:        filenameTemplate,
 	}
 	return hashJSON(input)

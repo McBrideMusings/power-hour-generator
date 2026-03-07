@@ -221,19 +221,9 @@ func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bo
 			}
 		}
 
-		var prof project.ResolvedProfile
-		var segments []config.OverlaySegment
-		if clip.OverlayProfile != "" {
-			if p, ok := resolver.Profile(clip.OverlayProfile); ok {
-				prof = p
-				segments = p.ResolveSegments()
-			}
-		}
-
 		seg := render.Segment{
 			Clip:     clip,
-			Profile:  prof,
-			Segments: segments,
+			Overlays: collClip.Overlays,
 		}
 
 		outputDir := collClip.OutputDir

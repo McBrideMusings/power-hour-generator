@@ -95,7 +95,7 @@ func runValidateCollection(cmd *cobra.Command, _ []string) error {
 	// Build validation results
 	results := make([]collectionValidationRow, 0, len(clips))
 	for _, collClip := range clips {
-		result := validateCollectionRow(pp, idx, collResolver, collClip)
+		result := validateCollectionRow(pp, idx, collClip)
 		results = append(results, result)
 	}
 
@@ -107,7 +107,7 @@ func runValidateCollection(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func validateCollectionRow(pp paths.ProjectPaths, idx *cache.Index, resolver *project.CollectionResolver, collClip project.CollectionClip) collectionValidationRow {
+func validateCollectionRow(pp paths.ProjectPaths, idx *cache.Index, collClip project.CollectionClip) collectionValidationRow {
 	clip := collClip.Clip
 	row := clip.Row
 
@@ -154,17 +154,13 @@ func validateCollectionRow(pp paths.ProjectPaths, idx *cache.Index, resolver *pr
 		return result
 	}
 
-	// Get profile and segments if configured
-	if clip.OverlayProfile != "" {
-		profile, hasProfile := resolver.Profile(clip.OverlayProfile)
-		if !hasProfile {
-			result.Status = "error"
-			result.Error = fmt.Sprintf("unknown overlay profile: %s", clip.OverlayProfile)
-			return result
+	// Format overlays if configured
+	if len(collClip.Overlays) > 0 {
+		parts := make([]string, 0, len(collClip.Overlays))
+		for _, o := range collClip.Overlays {
+			parts = append(parts, o.Type)
 		}
-
-		segments := profile.ResolveSegments()
-		result.Segments = formatSegments(segments)
+		result.Segments = strings.Join(parts, ", ")
 	}
 
 	// Build output path
@@ -207,33 +203,16 @@ func buildOutputPath(pp paths.ProjectPaths, collClip project.CollectionClip, row
 	return filepath.Join(outputDir, filename)
 }
 
-func formatSegments(segments []config.OverlaySegment) string {
-	if len(segments) == 0 {
-		return "none"
-	}
-
-	parts := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		if seg.Name != "" {
-			parts = append(parts, seg.Name)
-		} else if seg.Template != "" {
-			parts = append(parts, "template")
-		}
-	}
-	return strings.Join(parts, ", ")
-}
 
 func writeCollectionValidationJSON(cmd *cobra.Command, collectionName string, collection project.Collection, rows []collectionValidationRow) error {
 	payload := struct {
 		Collection string                      `json:"collection"`
 		Plan       string                      `json:"plan"`
-		Profile    string                      `json:"profile,omitempty"`
 		Rows       []collectionValidationRow   `json:"rows"`
 		Summary    collectionValidationSummary `json:"summary"`
 	}{
 		Collection: collectionName,
 		Plan:       collection.Plan,
-		Profile:    collection.Profile,
 		Rows:       rows,
 		Summary:    buildValidationSummary(rows),
 	}
@@ -250,9 +229,6 @@ func writeCollectionValidationJSON(cmd *cobra.Command, collectionName string, co
 func writeCollectionValidationTable(cmd *cobra.Command, collectionName string, collection project.Collection, rows []collectionValidationRow) {
 	fmt.Fprintf(cmd.OutOrStdout(), "Collection: %s\n", collectionName)
 	fmt.Fprintf(cmd.OutOrStdout(), "Plan: %s\n", collection.Plan)
-	if collection.Profile != "" {
-		fmt.Fprintf(cmd.OutOrStdout(), "Profile: %s\n", collection.Profile)
-	}
 	fmt.Fprintln(cmd.OutOrStdout())
 
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 2, 2, ' ', 0)
