@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/cache"
+	"powerhour/internal/logx"
 )
 
 var (
@@ -38,6 +39,10 @@ type pruneResult struct {
 }
 
 func runLibraryPrune(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("library-prune")
+	defer gcloser.Close()
+	glogf("library prune started (older_than=%s, dry_run=%v)", pruneOlderThan, pruneDryRun)
+
 	cutoff, err := parseDurationFlag(pruneOlderThan)
 	if err != nil {
 		return fmt.Errorf("invalid --older-than: %w", err)

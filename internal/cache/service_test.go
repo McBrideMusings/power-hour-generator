@@ -248,7 +248,7 @@ func TestServiceResolveDownloadCustomTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve source: %v", err)
 	}
-	key := hashIdentifier(src.Identifier)
+	key := HashIdentifier(src.Identifier)
 	short := truncateHash(key, 10)
 	remoteVals, _ := filenameTemplateValues(row, src, key, short)
 	if remoteVals["INDEX"] != "005" {

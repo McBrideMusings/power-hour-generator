@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 )
 
@@ -25,6 +26,10 @@ func newValidateSegmentsCmd() *cobra.Command {
 }
 
 func runValidateSegments(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("validate-segments")
+	defer gcloser.Close()
+	glogf("validate segments started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err

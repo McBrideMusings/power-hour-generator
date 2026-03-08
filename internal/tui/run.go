@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"io"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // wraps tea.Program.Send with a small yield to give the renderer time to
 // draw between updates.
 func RunWithWork(out io.Writer, model ProgressModel, workFn func(send func(tea.Msg))) error {
-	p := tea.NewProgram(model, tea.WithOutput(out))
+	p := tea.NewProgram(model, tea.WithOutput(out), tea.WithAltScreen())
 
 	go func() {
 		// Let bubbletea start its event loop and render the initial frame.
@@ -34,8 +35,12 @@ func RunWithWork(out io.Writer, model ProgressModel, workFn func(send func(tea.M
 	if err != nil {
 		return err
 	}
-	if m, ok := finalModel.(ProgressModel); ok && m.Err() != nil {
-		return m.Err()
+	if m, ok := finalModel.(ProgressModel); ok {
+		// Print the full static table so all rows appear in terminal scrollback.
+		fmt.Fprint(out, m.RenderFinalTable())
+		if m.Err() != nil {
+			return m.Err()
+		}
 	}
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
@@ -72,10 +73,15 @@ func runRender(cmd *cobra.Command, _ []string) error {
 		ctx = context.Background()
 	}
 
+	glogf, gcloser := logx.StartCommand("render")
+	defer gcloser.Close()
+	glogf("render started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {
@@ -83,12 +89,19 @@ func runRender(cmd *cobra.Command, _ []string) error {
 	}
 	pp = paths.ApplyConfig(pp, cfg)
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
+	glogf("config loaded (%d collections)", len(cfg.Collections))
 
 	if cfg.Collections == nil || len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
-	return runCollectionRender(ctx, cmd, pp, cfg)
+	err = runCollectionRender(ctx, cmd, pp, cfg)
+	if err != nil {
+		glogf("render failed: %v", err)
+	} else {
+		glogf("render finished")
+	}
+	return err
 }
 
 func renderPreflightResult(clip project.Clip, err error) render.Result {

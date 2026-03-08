@@ -14,6 +14,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/pkg/csvplan"
@@ -37,6 +38,10 @@ func newValidateCollectionCmd() *cobra.Command {
 }
 
 func runValidateCollection(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("validate-collection")
+	defer gcloser.Close()
+	glogf("validate collection started: %s", validateCollectionName)
+
 	ctx := cmd.Context()
 	if ctx == nil {
 		ctx = context.Background()

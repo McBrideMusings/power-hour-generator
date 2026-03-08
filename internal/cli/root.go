@@ -44,6 +44,7 @@ func newRootCmd() *cobra.Command {
 	cmd.AddCommand(newCleanCmd())
 	cmd.AddCommand(newDoctorCmd())
 	cmd.AddCommand(newExportCmd())
+	cmd.AddCommand(newCacheCmd())
 
 	convertCmd := newConvertCmd()
 	cmd.AddCommand(convertCmd)

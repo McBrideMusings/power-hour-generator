@@ -32,10 +32,15 @@ func newCheckCmd() *cobra.Command {
 }
 
 func runCheck(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("check")
+	defer gcloser.Close()
+	glogf("check started (strict=%v)", checkStrict)
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	exists, err := paths.DirExists(pp.Root)
 	if err != nil {

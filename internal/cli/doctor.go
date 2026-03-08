@@ -10,6 +10,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
@@ -32,10 +33,16 @@ type healthCheck struct {
 }
 
 func runDoctor(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("doctor")
+	defer gcloser.Close()
+	glogf("doctor started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
+
 	exists, err := paths.DirExists(pp.Root)
 	if err != nil {
 		return fmt.Errorf("stat project dir: %w", err)
@@ -86,6 +93,9 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	for _, c := range checks {
+		glogf("check %s: %s — %s", c.Name, c.Status, c.Summary)
+	}
 	return writeDoctorResult(cmd, pp.Root, checks)
 }
 

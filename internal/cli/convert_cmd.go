@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"powerhour/internal/logx"
 	"powerhour/pkg/csvplan"
 )
 
@@ -26,7 +27,11 @@ func newConvertCmd() *cobra.Command {
 		Short: "Convert a CSV/TSV plan file to YAML format",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			glogf, gcloser := logx.StartCommand("convert")
+			defer gcloser.Close()
+
 			input := args[0]
+			glogf("convert started: %s", input)
 
 			opts := csvplan.ImportOptions{
 				LinkHeader:     linkHeader,

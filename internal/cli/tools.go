@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/tools"
 	"powerhour/internal/tui"
@@ -47,6 +48,10 @@ func newToolsListCmd() *cobra.Command {
 }
 
 func runToolsList(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("tools-list")
+	defer gcloser.Close()
+	glogf("tools list started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
@@ -89,10 +94,15 @@ func newToolsInstallCmd() *cobra.Command {
 }
 
 func runToolsInstall(cmd *cobra.Command, args []string) error {
+	glogf, gcloser := logx.StartCommand("tools-install")
+	defer gcloser.Close()
+
 	target := "all"
 	if len(args) == 1 {
 		target = strings.ToLower(args[0])
 	}
+
+	glogf("tools install started: target=%s version=%s force=%v", target, installVersion, installForce)
 
 	var toolsToInstall []string
 	if target == "all" {
@@ -154,6 +164,10 @@ func newToolsEncodingCmd() *cobra.Command {
 }
 
 func runToolsEncoding(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("tools-encoding")
+	defer gcloser.Close()
+	glogf("tools encoding started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err

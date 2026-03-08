@@ -64,11 +64,27 @@ This pattern allows cache tests to run without requiring external tools.
 
 The `newCacheService` variable in `fetch.go` is typed as the `NewService` signature for test injection. `newCacheServiceWithStatus` provides the status-callback variant.
 
+## Exported Helpers
+
+Several cache functions are exported for use by the CLI layer (e.g., `cache add`):
+
+| Function | Description |
+|----------|-------------|
+| `ExtractYouTubeID(raw)` | Parse YouTube video ID from various URL formats |
+| `CanonicalRemoteIdentifier(link, extractor, id)` | Build `extractor:id` or `urlhash:...` identifier |
+| `HashIdentifier(id)` | SHA-256 hash of an identifier string |
+| `SanitizeSegment(value)` | Sanitize a string for use in filenames |
+| `TryLinkOrCopy(src, dest)` | Hard-link with copy fallback |
+| `CopyFile(src, dest)` | Atomic file copy via temp file |
+| `Service.QueryRemoteID(ctx, link)` | Query yt-dlp for video metadata without downloading |
+| `Service.ProbeFile(ctx, path)` | Run ffprobe on an arbitrary file path |
+
 ## Cache Operations
 
 | Operation | Description |
 |-----------|-------------|
 | **Fetch** | Download or copy source, update index |
+| **Manual add** | Register a pre-downloaded file with its URL (`cache add`) |
 | **Re-probe** | Run ffprobe on existing cached file, update metadata |
 | **Match** | Check if source is already cached |
 | **Validate** | Audit filenames against the active template |

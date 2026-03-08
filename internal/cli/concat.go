@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
@@ -29,22 +30,28 @@ func newConcatCmd() *cobra.Command {
 		RunE:  runConcat,
 	}
 
-	cmd.Flags().StringVar(&concatOut, "out", "", "Output file path (default: <project>/final.mp4)")
+	cmd.Flags().StringVar(&concatOut, "out", "", "Output file path (default: <project>/powerhour.mp4)")
 	cmd.Flags().BoolVar(&concatDryRun, "dry-run", false, "Print the resolved segment list without running ffmpeg")
 
 	return cmd
 }
 
 func runConcat(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("concat")
+	defer gcloser.Close()
+	glogf("concat started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {
 		return err
 	}
+	glogf("config loaded")
 
 	outWriter := cmd.OutOrStdout()
 	sw := tui.NewStatusWriter(outWriter)
@@ -86,6 +93,8 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	glogf("resolved %d segments", len(segments))
+
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments found; run `powerhour render` first")
 	}
@@ -121,7 +130,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	// Determine output path.
 	outputPath := concatOut
 	if outputPath == "" {
-		outputPath = filepath.Join(pp.Root, "final"+containerExt(enc.Container))
+		outputPath = filepath.Join(pp.Root, "powerhour"+containerExt(enc.Container))
 	}
 	if !filepath.IsAbs(outputPath) {
 		outputPath = filepath.Join(pp.Root, outputPath)
@@ -135,6 +144,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	}
 
 	sw.Stop()
+	glogf("concat finished: %s (method=%s)", result.OutputPath, result.Method)
 
 	// Report result.
 	info, statErr := os.Stat(result.OutputPath)

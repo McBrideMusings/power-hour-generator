@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 )
 
@@ -39,6 +40,10 @@ func newValidateFilenamesCmd() *cobra.Command {
 }
 
 func runValidateFilenames(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("validate-filenames")
+	defer gcloser.Close()
+	glogf("validate filenames started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err

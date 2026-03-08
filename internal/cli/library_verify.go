@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/cache"
+	"powerhour/internal/logx"
 )
 
 var verifyFix bool
@@ -42,6 +43,10 @@ type verifyEntry struct {
 }
 
 func runLibraryVerify(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("library-verify")
+	defer gcloser.Close()
+	glogf("library verify started (fix=%v)", verifyFix)
+
 	idx, _, indexFile, err := loadLibraryIndex()
 	if err != nil {
 		return err
