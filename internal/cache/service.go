@@ -189,6 +189,20 @@ func NewServiceWithStatus(ctx context.Context, pp paths.ProjectPaths, logger Log
 	return svc, nil
 }
 
+// QueryRemoteID queries yt-dlp for video metadata without downloading.
+func (s *Service) QueryRemoteID(ctx context.Context, link string) (remoteIDInfo, error) {
+	return s.queryRemoteID(ctx, link)
+}
+
+// RemoteIDInfo exposes the fields of remoteIDInfo for external callers.
+type RemoteIDInfo = remoteIDInfo
+
+// ProbeFile runs ffprobe on the given file path and returns probe metadata.
+func (s *Service) ProbeFile(ctx context.Context, path string) (*ProbeMetadata, error) {
+	row := csvplan.Row{Index: 0}
+	return s.probe(ctx, row, path)
+}
+
 // SetLogOutput configures a secondary writer for fetch logs.
 func (s *Service) SetLogOutput(w io.Writer) {
 	if s == nil {
@@ -227,7 +241,7 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		}
 		return ResolveResult{}, err
 	}
-	key := hashIdentifier(src.Identifier)
+	key := HashIdentifier(src.Identifier)
 	names := s.buildFilenameParts(row, src, key)
 
 	var (
@@ -411,7 +425,7 @@ func (s *Service) buildFilenameParts(row csvplan.Row, src sourceInfo, key string
 
 	remoteValues, localValues := filenameTemplateValues(row, src, key, shortHash)
 
-	if id := sanitizeSegment(src.ID); id != "" {
+	if id := SanitizeSegment(src.ID); id != "" {
 		remoteValues["ID"] = id
 		remoteValues["REMOTE_ID"] = id
 	}
@@ -449,7 +463,7 @@ func (s *Service) ExpectedFilenameBase(row csvplan.Row, entry Entry) (string, er
 			identifier = fmt.Sprintf("row:%03d", row.Index)
 		}
 	}
-	key := hashIdentifier(identifier)
+	key := HashIdentifier(identifier)
 	src := sourceInfoFromEntry(row, entry, identifier)
 
 	shortHash := truncateHash(key, 10)
@@ -462,7 +476,7 @@ func (s *Service) ExpectedFilenameBase(row csvplan.Row, entry Entry) (string, er
 	default:
 		values = remoteVals
 		if id := resolveRemoteID(src, entry, shortHash); id != "" {
-			values["ID"] = sanitizeSegment(id)
+			values["ID"] = SanitizeSegment(id)
 		}
 	}
 
@@ -525,7 +539,7 @@ func (s *Service) resolveRemoteSource(ctx context.Context, idx *Index, link stri
 		return sourceInfo{}, err
 	}
 
-	identifier := canonicalRemoteIdentifier(link, info.Extractor, info.ID)
+	identifier := CanonicalRemoteIdentifier(link, info.Extractor, info.ID)
 	return sourceInfo{
 		Identifier:  identifier,
 		ID:          strings.TrimSpace(info.ID),
@@ -645,7 +659,7 @@ func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo,
 	}, nil
 }
 
-func canonicalRemoteIdentifier(link, extractor, id string) string {
+func CanonicalRemoteIdentifier(link, extractor, id string) string {
 	id = strings.TrimSpace(id)
 	extractor = strings.TrimSpace(extractor)
 	if extractor == "" {
@@ -654,7 +668,7 @@ func canonicalRemoteIdentifier(link, extractor, id string) string {
 	if id != "" {
 		return fmt.Sprintf("%s:%s", extractor, id)
 	}
-	return fmt.Sprintf("urlhash:%s", hashIdentifier(link))
+	return fmt.Sprintf("urlhash:%s", HashIdentifier(link))
 }
 
 func splitCanonicalIdentifier(identifier string) (string, string) {
@@ -832,10 +846,10 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 	indexPadded := fmt.Sprintf("%03d", row.Index)
 	indexRaw := strconv.Itoa(row.Index)
 
-	title := sanitizeSegment(row.Title)
-	artist := sanitizeSegment(row.Artist)
-	name := sanitizeSegment(row.Name)
-	start := sanitizeSegment(row.StartRaw)
+	title := SanitizeSegment(row.Title)
+	artist := SanitizeSegment(row.Artist)
+	name := SanitizeSegment(row.Name)
+	start := SanitizeSegment(row.StartRaw)
 
 	host := ""
 	if src.Type == SourceTypeURL {
@@ -844,10 +858,10 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 		}
 	}
 
-	sourceID := sanitizeSegment(src.Identifier)
+	sourceID := SanitizeSegment(src.Identifier)
 	canonicalID := sourceID
 	if canonicalID == "" {
-		canonicalID = sanitizeSegment(key)
+		canonicalID = SanitizeSegment(key)
 	}
 
 	common := map[string]string{
@@ -863,7 +877,7 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 		"NAME":          name,
 		"START":         start,
 		"DURATION":      duration,
-		"SOURCE_HOST":   sanitizeSegment(host),
+		"SOURCE_HOST":   SanitizeSegment(host),
 		"SOURCE_ID":     sourceID,
 		"ROW_ID":        indexRaw,
 		"PLAN_TITLE":    title,
@@ -874,16 +888,16 @@ func filenameTemplateValues(row csvplan.Row, src sourceInfo, key, shortHash stri
 	}
 	common["CANONICAL_ID"] = canonicalID
 
-	if remoteID := sanitizeSegment(src.ID); remoteID != "" {
+	if remoteID := SanitizeSegment(src.ID); remoteID != "" {
 		common["REMOTE_ID"] = remoteID
 	}
-	if extractor := sanitizeSegment(src.Extractor); extractor != "" {
+	if extractor := SanitizeSegment(src.Extractor); extractor != "" {
 		common["SOURCE_EXTRACTOR"] = extractor
 	}
 
 	remote := cloneTemplateValues(common)
 	remote["ID"] = "%(id)s"
-	if remoteID := sanitizeSegment(src.ID); remoteID != "" {
+	if remoteID := SanitizeSegment(src.ID); remoteID != "" {
 		remote["REMOTE_ID"] = remoteID
 	}
 
@@ -907,11 +921,11 @@ func localIdentifier(src sourceInfo, shortHash string) string {
 		base := filepath.Base(src.LocalPath)
 		ext := filepath.Ext(base)
 		name := strings.TrimSuffix(base, ext)
-		if seg := sanitizeSegment(name); seg != "" {
+		if seg := SanitizeSegment(name); seg != "" {
 			return seg
 		}
 	}
-	if seg := sanitizeSegment(shortHash); seg != "" {
+	if seg := SanitizeSegment(shortHash); seg != "" {
 		return seg
 	}
 	return "source"
@@ -933,21 +947,21 @@ func resolveRemoteID(src sourceInfo, entry Entry, shortHash string) string {
 		return strings.TrimSpace(id)
 	}
 
-	if id := extractYouTubeID(src.Raw); id != "" {
+	if id := ExtractYouTubeID(src.Raw); id != "" {
 		return id
 	}
-	if id := extractYouTubeID(entry.Source); id != "" {
+	if id := ExtractYouTubeID(entry.Source); id != "" {
 		return id
 	}
 	for _, link := range entry.Links {
-		if id := extractYouTubeID(link); id != "" {
+		if id := ExtractYouTubeID(link); id != "" {
 			return id
 		}
 	}
 
 	if entry.CachedPath != "" {
 		base := strings.TrimSuffix(filepath.Base(entry.CachedPath), filepath.Ext(entry.CachedPath))
-		if seg := sanitizeSegment(base); seg != "" {
+		if seg := SanitizeSegment(base); seg != "" {
 			return seg
 		}
 	}
@@ -955,7 +969,7 @@ func resolveRemoteID(src sourceInfo, entry Entry, shortHash string) string {
 	return shortHash
 }
 
-func extractYouTubeID(raw string) string {
+func ExtractYouTubeID(raw string) string {
 	if raw == "" {
 		return ""
 	}
@@ -1055,7 +1069,7 @@ func cleanupFilename(value string) string {
 	return value
 }
 
-func sanitizeSegment(value string) string {
+func SanitizeSegment(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
@@ -1099,7 +1113,7 @@ func truncateHash(value string, n int) string {
 	return value[:n]
 }
 
-func hashIdentifier(id string) string {
+func HashIdentifier(id string) string {
 	sum := sha256.Sum256([]byte(id))
 	return hex.EncodeToString(sum[:])
 }

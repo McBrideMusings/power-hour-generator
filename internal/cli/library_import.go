@@ -10,6 +10,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 )
 
@@ -43,6 +44,10 @@ type importStats struct {
 }
 
 func runLibraryImport(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("library-import")
+	defer gcloser.Close()
+	glogf("library import started (project=%s, dry_run=%v)", importProjectDir, importDryRun)
+
 	pp, err := paths.Resolve(importProjectDir)
 	if err != nil {
 		return err
@@ -226,6 +231,9 @@ func runLibraryImport(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("save local index: %w", err)
 		}
 	}
+
+	glogf("library import finished: moved=%d already_global=%d skipped=%d recovered=%d orphans=%d",
+		stats.Moved, stats.AlreadyGlobal, stats.Skipped, stats.Recovered, stats.Orphans)
 
 	label := "complete"
 	if importDryRun {

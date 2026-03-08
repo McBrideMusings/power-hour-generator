@@ -13,6 +13,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
@@ -75,10 +76,15 @@ func buildCollectionStyles(names []string) map[string]lipgloss.Style {
 }
 
 func runStatus(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("status")
+	defer gcloser.Close()
+	glogf("status started")
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 )
 
@@ -81,6 +82,10 @@ func newLibraryListCmd() *cobra.Command {
 }
 
 func runLibraryList(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("library-list")
+	defer gcloser.Close()
+	glogf("library list started")
+
 	idx, _, _, err := loadLibraryIndex()
 	if err != nil {
 		return err
@@ -123,6 +128,10 @@ func newLibrarySearchCmd() *cobra.Command {
 }
 
 func runLibrarySearch(cmd *cobra.Command, args []string) error {
+	glogf, gcloser := logx.StartCommand("library-search")
+	defer gcloser.Close()
+	glogf("library search started: query=%s", args[0])
+
 	query := strings.ToLower(args[0])
 
 	idx, _, _, err := loadLibraryIndex()
@@ -196,6 +205,10 @@ func newLibraryInfoCmd() *cobra.Command {
 }
 
 func runLibraryInfo(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("library-info")
+	defer gcloser.Close()
+	glogf("library info started")
+
 	idx, sourcesDir, indexFile, err := loadLibraryIndex()
 	if err != nil {
 		return err

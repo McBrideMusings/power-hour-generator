@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 )
@@ -61,10 +62,15 @@ type exportTimelineEntry struct {
 }
 
 func runExport(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("export")
+	defer gcloser.Close()
+	glogf("export started (timeline=%v)", exportTimeline)
+
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {
@@ -142,5 +148,6 @@ func runExport(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("encode json: %w", err)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	glogf("export finished (%d collections)", len(collections))
 	return nil
 }

@@ -149,6 +149,30 @@ go run ./cmd/powerhour validate segments --project <dir> [--index <n>] [--json]
 
 ## Cache Management
 
+### `powerhour cache add`
+
+Register a manually-downloaded video into the project cache. This is useful for age-restricted, geo-blocked, or otherwise unavailable content that yt-dlp cannot fetch automatically.
+
+```bash
+powerhour cache add <url> <file-path> [flags]
+go run ./cmd/powerhour cache add <url> <file-path> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--title "..."` | Override title metadata |
+| `--artist "..."` | Override artist metadata |
+| `--dry-run` | Preview what would happen without making changes |
+| `--no-probe` | Skip ffprobe metadata extraction |
+
+The command first attempts a yt-dlp metadata query (`--dump-json --skip-download`) to identify the video. If that fails (e.g., age-restricted content), it falls back to:
+
+1. Extracting the video ID from the URL (YouTube, Vimeo, etc.)
+2. Prompting interactively for platform and video ID if URL parsing fails
+3. Prompting for title and artist when not provided via flags
+
+The file is copied (or hardlinked) into the project's active cache directory, probed with ffprobe, and registered in the index with a link mapping from the URL to the canonical identifier.
+
 ### `powerhour migrate`
 
 Move project-local cache files into the global cache (`~/.powerhour/cache/`).

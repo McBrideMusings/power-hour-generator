@@ -73,10 +73,15 @@ func nextAvailableDir(base string) (string, error) {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	glogf, gcloser := logx.StartCommand("init")
+	defer gcloser.Close()
+	glogf("init started")
+
 	dir, err := resolveInitDir(projectDir, args)
 	if err != nil {
 		return err
 	}
+	glogf("target directory: %s", dir)
 
 	pp, err := paths.Resolve(dir)
 	if err != nil {

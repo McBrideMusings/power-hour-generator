@@ -47,9 +47,9 @@ type ProgressModel struct {
 	// Animation state.
 	tick int
 
-	// Viewport scrolling.
-	termHeight int // 0 means unknown (render all rows)
-	scrollTop  int // first visible row index
+	// Viewport state for scrolling when rows exceed terminal height.
+	termHeight int
+	scrollTop  int
 }
 
 // NewProgressModel creates a progress model with the given title and columns.
@@ -105,7 +105,9 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case RowUpdateMsg:
 		m.applyRowUpdate(msg)
-		m.autoScroll(msg.Key)
+		if idx, ok := m.rowIndex[msg.Key]; ok {
+			m.autoScroll(idx)
+		}
 		return m, nil
 
 	case WorkDoneMsg:
@@ -141,42 +143,6 @@ func (m *ProgressModel) applyRowUpdate(msg RowUpdateMsg) {
 	}
 }
 
-// visibleRowCount returns how many rows fit in the viewport.
-// Returns len(rows) if the terminal height is unknown or all rows fit.
-func (m ProgressModel) visibleRowCount() int {
-	if m.termHeight <= 0 {
-		return len(m.rows)
-	}
-	// Reserve lines: 1 header + 1 blank + 1 footer + 1 scroll indicator = 4
-	available := m.termHeight - 4
-	if available < 1 {
-		available = 1
-	}
-	if available >= len(m.rows) {
-		return len(m.rows)
-	}
-	return available
-}
-
-// autoScroll adjusts scrollTop so the updated row is visible.
-func (m *ProgressModel) autoScroll(key string) {
-	idx, ok := m.rowIndex[key]
-	if !ok {
-		return
-	}
-	visible := m.visibleRowCount()
-	if visible >= len(m.rows) {
-		m.scrollTop = 0
-		return
-	}
-	// Ensure the updated row is within the visible window.
-	if idx < m.scrollTop {
-		m.scrollTop = idx
-	} else if idx >= m.scrollTop+visible {
-		m.scrollTop = idx - visible + 1
-	}
-}
-
 // View satisfies the tea.Model interface.
 func (m ProgressModel) View() string {
 	if m.done && m.err != nil {
@@ -203,20 +169,25 @@ func (m ProgressModel) View() string {
 	b.WriteString(strings.Join(headerParts, "  "))
 	b.WriteByte('\n')
 
-	// Rows (viewport)
-	visible := m.visibleRowCount()
-	scrollable := visible < len(m.rows) && !m.done
-	end := m.scrollTop + visible
-	if end > len(m.rows) {
-		end = len(m.rows)
+	// Determine visible row range (viewport).
+	visibleRows := m.visibleRowCount()
+	startRow := 0
+	endRow := len(m.rows)
+	if visibleRows > 0 && len(m.rows) > visibleRows {
+		startRow = m.scrollTop
+		endRow = startRow + visibleRows
+		if endRow > len(m.rows) {
+			endRow = len(m.rows)
+		}
 	}
 
-	if scrollable && m.scrollTop > 0 {
-		fmt.Fprintf(&b, "  ↑ %d more above\n", m.scrollTop)
+	// Scroll-up indicator.
+	if startRow > 0 {
+		fmt.Fprintf(&b, "  ↑ %d more above\n", startRow)
 	}
 
-	for ri := m.scrollTop; ri < end; ri++ {
-		row := m.rows[ri]
+	// Rows
+	for _, row := range m.rows[startRow:endRow] {
 		parts := make([]string, len(m.columns))
 		for i := range m.columns {
 			val := ""
@@ -238,8 +209,9 @@ func (m ProgressModel) View() string {
 		b.WriteByte('\n')
 	}
 
-	if scrollable && end < len(m.rows) {
-		fmt.Fprintf(&b, "  ↓ %d more below\n", len(m.rows)-end)
+	// Scroll-down indicator.
+	if endRow < len(m.rows) {
+		fmt.Fprintf(&b, "  ↓ %d more below\n", len(m.rows)-endRow)
 	}
 
 	// Footer: spinner + progress counter while work is in progress.
@@ -278,6 +250,82 @@ func (m ProgressModel) Done() bool {
 // Err returns any fatal error that occurred.
 func (m ProgressModel) Err() error {
 	return m.err
+}
+
+// visibleRowCount returns how many data rows fit in the terminal, accounting
+// for the header line, footer (spinner + blank line), and possible scroll
+// indicators. Returns 0 if the terminal height is unknown or all rows fit.
+func (m ProgressModel) visibleRowCount() int {
+	if m.termHeight <= 0 {
+		return 0
+	}
+	// Reserve: 1 header + 2 footer (blank + spinner) + 2 scroll indicators.
+	available := m.termHeight - 5
+	if available <= 0 {
+		available = 1
+	}
+	if len(m.rows) <= available {
+		return 0 // all rows fit, no viewport needed
+	}
+	return available
+}
+
+// autoScroll adjusts scrollTop so that the given row index is visible.
+func (m *ProgressModel) autoScroll(idx int) {
+	visible := m.visibleRowCount()
+	if visible <= 0 {
+		return
+	}
+	if idx < m.scrollTop {
+		m.scrollTop = idx
+	} else if idx >= m.scrollTop+visible {
+		m.scrollTop = idx - visible + 1
+	}
+}
+
+// RenderFinalTable returns a plain-text rendering of the complete table
+// (header + all rows) with status coloring. No spinner, no scroll indicators,
+// no marquee — suitable for printing after bubbletea exits so the full table
+// appears in terminal scrollback.
+func (m ProgressModel) RenderFinalTable() string {
+	widths := make([]int, len(m.columns))
+	for i, col := range m.columns {
+		widths[i] = len(col.Header)
+		if col.Width > widths[i] {
+			widths[i] = col.Width
+		}
+	}
+
+	var b strings.Builder
+
+	// Header
+	headerParts := make([]string, len(m.columns))
+	for i, col := range m.columns {
+		headerParts[i] = HeaderStyle.Render(pad(col.Header, widths[i]))
+	}
+	b.WriteString(strings.Join(headerParts, "  "))
+	b.WriteByte('\n')
+
+	// All rows
+	for _, row := range m.rows {
+		parts := make([]string, len(m.columns))
+		for i := range m.columns {
+			val := ""
+			if i < len(row.Fields) {
+				val = row.Fields[i]
+			}
+			val = TruncateWithEllipsis(val, widths[i])
+			if i == m.statusCol {
+				parts[i] = StatusStyle(val).Render(pad(val, widths[i]))
+			} else {
+				parts[i] = pad(val, widths[i])
+			}
+		}
+		b.WriteString(strings.Join(parts, "  "))
+		b.WriteByte('\n')
+	}
+
+	return b.String()
 }
 
 func pad(s string, width int) string {

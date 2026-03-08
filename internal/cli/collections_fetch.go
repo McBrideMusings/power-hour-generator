@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -27,13 +26,7 @@ func addCollectionFetchFlags(cmd *cobra.Command) {
 }
 
 // runCollectionFetch handles fetching for collections-based configuration.
-func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.ProjectPaths, cfg config.Config, glog *log.Logger, status *tui.StatusWriter) error {
-	glogf := func(format string, v ...any) {
-		if glog != nil {
-			glog.Printf(format, v...)
-		}
-	}
-
+func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.ProjectPaths, cfg config.Config, glogf func(string, ...any), status *tui.StatusWriter) error {
 	if cfg.Collections == nil || len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}

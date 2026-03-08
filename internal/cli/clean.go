@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
+	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
@@ -75,10 +76,15 @@ type cleanResult struct {
 }
 
 func runCleanSegments(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("clean-segments")
+	defer gcloser.Close()
+	glogf("clean segments started (dry_run=%v)", cleanDryRun)
+
 	pp, err := resolveCleanPaths()
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	out := cmd.OutOrStdout()
 	result := cleanResult{DryRun: cleanDryRun}
@@ -86,28 +92,40 @@ func runCleanSegments(cmd *cobra.Command, _ []string) error {
 	removeGlob(pp.SegmentsDir, "**/*.mp4", out, &result)
 	removeSingleFile(pp.RenderStateFile, out, &result)
 
+	glogf("clean segments finished: %d removed, %d skipped", result.Removed, result.Skipped)
 	return writeCleanResult(out, "segments", result)
 }
 
 func runCleanLogs(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("clean-logs")
+	defer gcloser.Close()
+	glogf("clean logs started (dry_run=%v)", cleanDryRun)
+
 	pp, err := resolveCleanPaths()
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	out := cmd.OutOrStdout()
 	result := cleanResult{DryRun: cleanDryRun}
 
 	removeGlob(pp.LogsDir, "*", out, &result)
 
+	glogf("clean logs finished: %d removed, %d skipped", result.Removed, result.Skipped)
 	return writeCleanResult(out, "logs", result)
 }
 
 func runCleanOrphans(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("clean-orphans")
+	defer gcloser.Close()
+	glogf("clean orphans started (dry_run=%v)", cleanDryRun)
+
 	pp, err := resolveCleanPaths()
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	cfg, err := config.Load(pp.ConfigFile)
 	if err != nil {
@@ -140,6 +158,8 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 		removeFileEntry(path, out, &result)
 	}
 
+	glogf("found %d orphans", len(orphans))
+
 	// Prune render state
 	if !cleanDryRun {
 		rs, err := state.Load(pp.RenderStateFile)
@@ -156,10 +176,15 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 }
 
 func runCleanAll(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("clean-all")
+	defer gcloser.Close()
+	glogf("clean all started (dry_run=%v)", cleanDryRun)
+
 	pp, err := resolveCleanPaths()
 	if err != nil {
 		return err
 	}
+	glogf("project resolved: %s", pp.Root)
 
 	out := cmd.OutOrStdout()
 	result := cleanResult{DryRun: cleanDryRun}
@@ -174,6 +199,7 @@ func runCleanAll(cmd *cobra.Command, _ []string) error {
 		removeFileEntry(f, out, &result)
 	}
 
+	glogf("clean all finished: %d removed, %d skipped", result.Removed, result.Skipped)
 	return writeCleanResult(out, "all", result)
 }
 

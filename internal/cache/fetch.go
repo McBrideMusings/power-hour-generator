@@ -259,7 +259,7 @@ func (s *Service) fetchLocal(_ context.Context, row csvplan.Row, baseName string
 		return fetchResult{}, fmt.Errorf("ensure target dir: %w", err)
 	}
 
-	hardLinked, err := tryLinkOrCopy(src.LocalPath, targetPath)
+	hardLinked, err := TryLinkOrCopy(src.LocalPath, targetPath)
 	if err != nil {
 		return fetchResult{}, err
 	}
@@ -282,17 +282,17 @@ func (s *Service) fetchLocal(_ context.Context, row csvplan.Row, baseName string
 	return res, nil
 }
 
-func tryLinkOrCopy(src, dest string) (bool, error) {
+func TryLinkOrCopy(src, dest string) (bool, error) {
 	if err := os.Link(src, dest); err == nil {
 		return true, nil
 	}
-	if err := copyFile(src, dest); err != nil {
+	if err := CopyFile(src, dest); err != nil {
 		return false, err
 	}
 	return false, nil
 }
 
-func copyFile(src, dest string) error {
+func CopyFile(src, dest string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)

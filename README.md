@@ -44,6 +44,7 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
 - `powerhour concat --project <dir> [--output <path>] [--dry-run]` – concatenate rendered segments into a final video following the timeline sequence. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
 - `powerhour convert --project <dir> [--output <path>] [--dry-run]` – convert a CSV/TSV plan file to YAML format with permissive column detection.
+- `powerhour cache add <url> <file-path> [--title "..."] [--artist "..."] [--dry-run] [--no-probe]` – register a manually-downloaded video into the project cache. Useful for age-restricted or geo-blocked content that yt-dlp cannot fetch automatically. Attempts yt-dlp metadata query first; falls back to URL parsing or interactive prompts when metadata is unavailable.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 
