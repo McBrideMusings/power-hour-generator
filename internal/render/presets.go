@@ -2,8 +2,10 @@ package render
 
 import (
 	"fmt"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"powerhour/internal/config"
 	"powerhour/pkg/csvplan"
@@ -50,23 +52,38 @@ func ExpandOverlays(overlays []config.OverlayEntry, row csvplan.Row, clipDuratio
 }
 
 func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float64) []string {
-	font := optStr(opts, "font", "Impact")
+	font := defaultFont()
+	titleFont := optStr(opts, "title_font", font+"\\:Bold")
+	artistFont := optStr(opts, "artist_font", font)
+	numberFont := optStr(opts, "number_font", font+"\\:Bold")
+	// Legacy "font" option overrides all three if set
+	if overrideFont := optStr(opts, "font", ""); overrideFont != "" {
+		titleFont = overrideFont
+		artistFont = overrideFont
+		numberFont = overrideFont
+	}
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
-	outlineWidth := optInt(opts, "outline_width", 3)
+	outlineWidth := optInt(opts, "outline_width", 2)
 	titleSize := optInt(opts, "title_size", 64)
-	artistSize := optInt(opts, "artist_size", 42)
+	artistSize := optInt(opts, "artist_size", 32)
+	_ = optInt(opts, "artist_letter_spacing", 0) // reserved for future use
 	numberSize := optInt(opts, "number_size", 140)
+	numberOutlineWidth := optInt(opts, "number_outline_width", 5)
 	showNumber := optBool(opts, "show_number", true)
 	infoDuration := optFloat(opts, "info_duration", 4.0)
 	fadeDuration := optFloat(opts, "fade_duration", 0.5)
+	bottomMargin := optInt(opts, "bottom_margin", 40)
 
 	var filters []string
 
-	// Title overlay: bottom-left, fade in/out
+	// Title overlay: bottom-left, positioned above artist line
+	// Artist sits at bottom_margin, title sits above artist
 	titleText := renderOverlayTemplate("{title}", row)
 	titleText = strings.TrimSpace(titleText)
 	if titleText != "" {
+		// Position title so its bottom edge is just above the artist line
+		titleY := fmt.Sprintf("h-text_h-%d-%d", bottomMargin, artistSize+8)
 		filters = append(filters, buildDrawText(drawTextOptions{
 			Text:         titleText,
 			Start:        0,
@@ -74,52 +91,81 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 			FadeIn:       fadeDuration,
 			FadeOut:      fadeDuration,
 			FontSize:     titleSize,
-			Font:         font,
+			Font:         titleFont,
 			FontColor:    color,
 			OutlineColor: outlineColor,
 			OutlineWidth: outlineWidth,
 			XExpr:        "40",
-			YExpr:        "h-text_h-220",
+			YExpr:        titleY,
 		}))
 	}
 
-	// Artist overlay: bottom-left below title, ALL CAPS
+	// Artist overlay: bottom-left, ALL CAPS, bottom-aligned with number badge
 	artistText := renderOverlayTemplate("{artist}", row)
 	artistText = strings.ToUpper(strings.TrimSpace(artistText))
 	if artistText != "" {
+		artistY := fmt.Sprintf("h-text_h-%d", bottomMargin)
 		filters = append(filters, buildDrawText(drawTextOptions{
-			Text:         artistText,
-			Start:        0,
-			End:          infoDuration,
+			Text:          artistText,
+			Start:         0,
+			End:           infoDuration,
+			FadeIn:        fadeDuration,
+			FadeOut:       fadeDuration,
+			FontSize:      artistSize,
+			Font:          artistFont,
+			FontColor:     color,
+			OutlineColor:  outlineColor,
+			OutlineWidth:  max(outlineWidth-1, 1),
+			XExpr:         "40",
+			YExpr:         artistY,
+		}))
+	}
+
+	// "Added by" overlay: bottom-left, appears at end of clip, fade in/out
+	nameText := renderOverlayTemplate("{name}", row)
+	nameText = strings.TrimSpace(nameText)
+	if nameText != "" {
+		addedBySize := optInt(opts, "added_by_size", artistSize)
+		addedByDuration := optFloat(opts, "added_by_duration", infoDuration)
+		addedByStart := clipDuration - addedByDuration
+		if addedByStart < 0 {
+			addedByStart = 0
+		}
+		addedByText := "Added by: " + nameText
+		addedByY := fmt.Sprintf("h-text_h-%d", bottomMargin)
+		filters = append(filters, buildDrawText(drawTextOptions{
+			Text:         addedByText,
+			Start:        addedByStart,
+			End:          clipDuration,
 			FadeIn:       fadeDuration,
 			FadeOut:      fadeDuration,
-			FontSize:     artistSize,
-			Font:         font,
+			FontSize:     addedBySize,
+			Font:         artistFont,
 			FontColor:    color,
 			OutlineColor: outlineColor,
 			OutlineWidth: max(outlineWidth-1, 1),
 			XExpr:        "40",
-			YExpr:        "h-text_h-160",
+			YExpr:        addedByY,
 		}))
 	}
 
-	// Number badge: bottom-right, persistent
+	// Number badge: bottom-right, persistent, bottom-aligned with artist
 	if showNumber {
 		numberText := renderOverlayTemplate("{index}", row)
 		numberText = strings.TrimSpace(numberText)
 		if numberText != "" {
-			numberOutline := optInt(opts, "number_outline_width", 4)
+			numberY := fmt.Sprintf("h-text_h-%d", bottomMargin)
 			filters = append(filters, buildDrawText(drawTextOptions{
 				Text:         numberText,
 				Start:        0,
 				End:          clipDuration,
 				FontSize:     numberSize,
-				Font:         font,
+				Font:         numberFont,
 				FontColor:    color,
 				OutlineColor: outlineColor,
-				OutlineWidth: numberOutline,
+				OutlineWidth: numberOutlineWidth,
 				XExpr:        "w-text_w-40",
-				YExpr:        "h-text_h-40",
+				YExpr:        numberY,
 				Persistent:   true,
 			}))
 		}
@@ -129,7 +175,7 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 }
 
 func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) []string {
-	font := optStr(opts, "font", "Impact")
+	font := optStr(opts, "font", defaultFont()+"\\:Bold")
 	text := optStr(opts, "text", "Drink!")
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
@@ -211,4 +257,31 @@ func optBool(opts map[string]string, key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+// fontAvailable checks whether a font family is known to fontconfig.
+func fontAvailable(family string) bool {
+	out, err := exec.Command("fc-match", "--format=%{family}", family).Output()
+	if err != nil {
+		return false
+	}
+	matched := strings.ToLower(strings.TrimSpace(string(out)))
+	return strings.Contains(matched, strings.ToLower(family))
+}
+
+var (
+	resolvedDefaultFont     string
+	resolvedDefaultFontOnce sync.Once
+)
+
+// defaultFont returns "Oswald" if installed, otherwise "Futura".
+func defaultFont() string {
+	resolvedDefaultFontOnce.Do(func() {
+		if fontAvailable("Oswald") {
+			resolvedDefaultFont = "Oswald"
+		} else {
+			resolvedDefaultFont = "Futura"
+		}
+	})
+	return resolvedDefaultFont
 }

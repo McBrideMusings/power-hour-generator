@@ -20,11 +20,13 @@ func TestPresetSongInfoDefaults(t *testing.T) {
 		t.Fatalf("expected 3 filters (title, artist, number), got %d", len(filters))
 	}
 
+	font := defaultFont()
+
 	// Title filter
 	if !strings.Contains(filters[0], "text='Test Song'") {
 		t.Errorf("title filter missing text: %s", filters[0])
 	}
-	if !strings.Contains(filters[0], "font='Impact'") {
+	if !strings.Contains(filters[0], "font='"+font+"\\:Bold'") {
 		t.Errorf("title filter missing font: %s", filters[0])
 	}
 	if !strings.Contains(filters[0], "fontsize=64") {
@@ -35,7 +37,7 @@ func TestPresetSongInfoDefaults(t *testing.T) {
 	if !strings.Contains(filters[1], "text='TEST ARTIST'") {
 		t.Errorf("artist filter missing uppercased text: %s", filters[1])
 	}
-	if !strings.Contains(filters[1], "fontsize=42") {
+	if !strings.Contains(filters[1], "fontsize=32") {
 		t.Errorf("artist filter missing fontsize: %s", filters[1])
 	}
 
@@ -55,9 +57,9 @@ func TestPresetSongInfoOverrides(t *testing.T) {
 		Artist: "Band",
 	}
 	opts := map[string]string{
-		"font":        "Oswald",
+		"font":        "Arial",
 		"title_size":  "48",
-		"artist_size": "32",
+		"artist_size": "28",
 		"show_number": "false",
 	}
 	filters := presetSongInfo(opts, row, 60)
@@ -65,13 +67,13 @@ func TestPresetSongInfoOverrides(t *testing.T) {
 	if len(filters) != 2 {
 		t.Fatalf("expected 2 filters (no number), got %d", len(filters))
 	}
-	if !strings.Contains(filters[0], "font='Oswald'") {
+	if !strings.Contains(filters[0], "font='Arial'") {
 		t.Errorf("expected custom font: %s", filters[0])
 	}
 	if !strings.Contains(filters[0], "fontsize=48") {
 		t.Errorf("expected custom title size: %s", filters[0])
 	}
-	if !strings.Contains(filters[1], "fontsize=32") {
+	if !strings.Contains(filters[1], "fontsize=28") {
 		t.Errorf("expected custom artist size: %s", filters[1])
 	}
 }
@@ -96,7 +98,7 @@ func TestPresetDrinkDefaults(t *testing.T) {
 	if !strings.Contains(filters[1], "fontcolor=white") {
 		t.Errorf("text filter missing white color: %s", filters[1])
 	}
-	if !strings.Contains(filters[1], "font='Impact'") {
+	if !strings.Contains(filters[1], "font='"+defaultFont()+"\\:Bold'") {
 		t.Errorf("text filter missing font: %s", filters[1])
 	}
 }
@@ -161,7 +163,7 @@ func TestExpandOverlaysMultiple(t *testing.T) {
 	}
 	filters := ExpandOverlays(overlays, row, 60)
 
-	// song-info: 3 (title + artist + number) + drink: 2 (shadow + text) = 5
+	// song-info: 3 (title + artist + number, no name field) + drink: 2 (shadow + text) = 5
 	if len(filters) != 5 {
 		t.Fatalf("expected 5 filters, got %d", len(filters))
 	}
