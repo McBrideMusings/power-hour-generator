@@ -89,8 +89,8 @@ go run ./cmd/powerhour render --project <dir> [flags]
 | `--no-progress` | Disable interactive progress table |
 | `--index <n\|n-m>` | Limit to specific plan rows (repeatable) |
 | `--collection <name>` | Target a specific collection |
-| `--sample-time <time>` | Extract a single frame at specified time for testing overlays |
-| `--sample-output <path>` | Output path for the sample frame |
+| `--sample-time <time>` | Extract a single frame at specified time for testing overlays (requires `--collection`). Accepts Go durations (`500ms`, `2s`), timecodes (`0:30`), or raw seconds (`0.5`) |
+| `--sample-output <path>` | Output path for the sample frame (default: `<segment>_sample_<time>.png`) |
 | `--json` | Structured output |
 
 Render tracks input hashes in `.powerhour/render-state.json` and automatically skips unchanged segments on subsequent runs. Use `--force` to bypass change detection, or `--dry-run` to preview what would happen.
