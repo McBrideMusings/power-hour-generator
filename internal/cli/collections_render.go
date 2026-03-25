@@ -169,19 +169,6 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		return err
 	}
 
-	// Handle sample mode
-	if renderSampleTime != "" {
-		svc.SetWriters(cmd.OutOrStdout(), nil)
-		validSegments := make([]render.Segment, 0, len(renderOrder))
-		for _, idx := range renderOrder {
-			validSegments = append(validSegments, segments[idx])
-		}
-		if len(validSegments) == 0 {
-			return fmt.Errorf("no valid segments to sample")
-		}
-		return runRenderSample(ctx, cmd, svc, validSegments, nil)
-	}
-
 	outWriter := cmd.OutOrStdout()
 	mode := tui.DetectMode(outWriter, renderNoProgress, outputJSON)
 
