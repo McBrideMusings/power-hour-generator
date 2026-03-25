@@ -202,13 +202,20 @@ Centered "Drink!" text with a shadow effect, persistent for the full clip.
 
 ## Previewing Overlays
 
-Use `--sample-time` to extract a single frame and inspect overlays without rendering the full clip:
+Use the `sample` command to extract a single frame and inspect overlays without rendering the full clip:
 
 ```bash
-powerhour render --collection songs --index 1 --sample-time 2s --sample-output preview.png
+# Preview a specific clip
+powerhour sample 2s --collection songs --index 1
+
+# What's at the 10-minute mark of the full power hour?
+powerhour sample 10m
+
+# Custom output path
+powerhour sample 2s --collection songs --index 1 --output preview.png
 ```
 
-The time accepts Go durations (`500ms`, `2s`), timecodes (`0:30`), or raw seconds (`0.5`). `--collection` is required in sample mode.
+The time argument accepts Go durations (`500ms`, `2s`), timecodes (`0:30`), or raw seconds (`0.5`). Without `--index`, the time is treated as an absolute position in the concatenated timeline.
 
 ## Custom Profiles
 
