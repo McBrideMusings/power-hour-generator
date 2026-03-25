@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -170,13 +172,17 @@ func runSample(cmd *cobra.Command, args []string) error {
 	// Generate output path.
 	outputPath := sampleOutput
 	if outputPath == "" {
+		samplesDir := filepath.Join(pp.Root, "samples")
+		if err := os.MkdirAll(samplesDir, 0o755); err != nil {
+			return fmt.Errorf("create samples directory: %w", err)
+		}
 		base := render.SegmentBaseName(cfg.SegmentFilenameTemplate(), seg)
 		if base == "" {
 			base = fmt.Sprintf("segment_%03d", targetClip.Clip.Row.Index)
 		}
 		timeStr := strings.ReplaceAll(timeArg, ":", "_")
 		timeStr = strings.ReplaceAll(timeStr, ".", "_")
-		outputPath = fmt.Sprintf("%s_sample_%s.png", base, timeStr)
+		outputPath = filepath.Join(samplesDir, fmt.Sprintf("%s_sample_%s.png", base, timeStr))
 	}
 
 	if err := svc.RenderSample(ctx, seg, clipOffset, outputPath); err != nil {
