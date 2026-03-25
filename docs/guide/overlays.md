@@ -134,9 +134,85 @@ timing:
   fade_out_s: 0.5
 ```
 
-## Common Profile Example
+## Built-in Presets
 
-A typical power hour profile with title, artist, and persistent index badge:
+Collections can use built-in overlay presets instead of custom profiles. Specify them in your collection config:
+
+```yaml
+collections:
+  songs:
+    overlays:
+      - type: song-info
+  interstitials:
+    overlays:
+      - type: drink
+```
+
+### `song-info` Preset
+
+Renders title, artist, an optional "Added by" credit, and a persistent index badge.
+
+**Default font**: Oswald if installed, otherwise Futura (macOS built-in). Each element supports independent font overrides via `title_font`, `artist_font`, and `number_font` options. A legacy `font` option overrides all three.
+
+| Element | Font Weight | Size | Position | Timing |
+|---------|-------------|------|----------|--------|
+| Title | Bold | 64px | Bottom-left, above artist | First 4s, 0.5s fade |
+| Artist (ALL CAPS) | Regular | 32px | Bottom-left, bottom-aligned with number | First 4s, 0.5s fade |
+| Added by: {name} | Regular | 32px | Bottom-left, bottom-aligned with number | Last 4s, 0.5s fade |
+| Number badge | Bold | 140px | Bottom-right | Persistent |
+
+The "Added by" line only appears when the `name` field is present in the CSV/YAML plan. All elements share a `bottom_margin` (default 40px) for vertical alignment.
+
+**Configurable options:**
+
+| Option | Default |
+|--------|---------|
+| `title_font` | `Oswald\:Bold` or `Futura\:Bold` |
+| `artist_font` | `Oswald` or `Futura` |
+| `number_font` | `Oswald\:Bold` or `Futura\:Bold` |
+| `color` | `white` |
+| `outline_color` | `black` |
+| `outline_width` | `2` |
+| `title_size` | `64` |
+| `artist_size` | `32` |
+| `number_size` | `140` |
+| `number_outline_width` | `5` |
+| `show_number` | `true` |
+| `info_duration` | `4.0` |
+| `fade_duration` | `0.5` |
+| `bottom_margin` | `40` |
+| `added_by_size` | same as `artist_size` |
+| `added_by_duration` | same as `info_duration` |
+
+### `drink` Preset
+
+Centered "Drink!" text with a shadow effect, persistent for the full clip.
+
+| Option | Default |
+|--------|---------|
+| `font` | auto-detected (Bold) |
+| `text` | `Drink!` |
+| `color` | `white` |
+| `outline_color` | `black` |
+| `outline_width` | `4` |
+| `shadow_color` | `yellow` |
+| `shadow_offset_x` | `3` |
+| `shadow_offset_y` | `3` |
+| `size` | `120` |
+
+## Previewing Overlays
+
+Use `--sample-time` to extract a single frame and inspect overlays without rendering the full clip:
+
+```bash
+powerhour render --collection songs --index 1 --sample-time 2s --sample-output preview.png
+```
+
+The time accepts Go durations (`500ms`, `2s`), timecodes (`0:30`), or raw seconds (`0.5`). `--collection` is required in sample mode.
+
+## Custom Profiles
+
+For full control, define custom profiles under `profiles.overlays`:
 
 ```yaml
 profiles:
@@ -155,7 +231,7 @@ profiles:
           position:
             origin: bottom-left
             offset_x: 40
-            offset_y: 220
+            offset_y: 80
           timing:
             start: { type: from_start, offset_s: 0 }
             end: { type: from_start, offset_s: 4 }
@@ -169,7 +245,7 @@ profiles:
           position:
             origin: bottom-left
             offset_x: 40
-            offset_y: 160
+            offset_y: 40
           timing:
             start: { type: from_start, offset_s: 0 }
             end: { type: from_start, offset_s: 4 }
