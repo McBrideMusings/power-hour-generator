@@ -106,6 +106,96 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 	return result, nil
 }
 
+// TimelineClip represents a clip in timeline order with full metadata.
+type TimelineClip struct {
+	CollectionName string
+	CollectionClip project.CollectionClip
+}
+
+// ResolveTimelineClips returns collection clips in timeline order by walking
+// the timeline config with interleave logic. Unlike ResolveTimelineSegments,
+// this preserves full clip data (duration, overlays, etc.).
+func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip) ([]TimelineClip, error) {
+	if len(cfg.Timeline.Sequence) == 0 {
+		return nil, fmt.Errorf("no timeline sequence configured")
+	}
+
+	// Group clips by collection, sorted by row index.
+	byCollection := make(map[string][]project.CollectionClip)
+	for _, cc := range collClips {
+		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], cc)
+	}
+	for name := range byCollection {
+		clips := byCollection[name]
+		sort.Slice(clips, func(i, j int) bool {
+			return clips[i].Clip.Row.Index < clips[j].Clip.Row.Index
+		})
+		byCollection[name] = clips
+	}
+
+	consumed := make(map[string]int)
+	var result []TimelineClip
+
+	for _, entry := range cfg.Timeline.Sequence {
+		mainClips, ok := byCollection[entry.Collection]
+		if !ok {
+			return nil, fmt.Errorf("timeline references unknown collection %q", entry.Collection)
+		}
+
+		mainStart := consumed[entry.Collection]
+		mainCount := len(mainClips) - mainStart
+		if entry.Count > 0 && entry.Count < mainCount {
+			mainCount = entry.Count
+		}
+		mainSlice := mainClips[mainStart : mainStart+mainCount]
+		consumed[entry.Collection] += mainCount
+
+		if entry.Interleave == nil {
+			for _, cc := range mainSlice {
+				result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
+			}
+			continue
+		}
+
+		il := entry.Interleave
+		ilClips, ok := byCollection[il.Collection]
+		if !ok {
+			return nil, fmt.Errorf("timeline interleave references unknown collection %q", il.Collection)
+		}
+		ilStart := consumed[il.Collection]
+		every := il.Every
+		if every <= 0 {
+			every = 1
+		}
+
+		ilAvail := len(ilClips) - ilStart
+		if ilAvail <= 0 {
+			ilStart = 0
+			ilAvail = len(ilClips)
+		}
+		if ilAvail == 0 {
+			for _, cc := range mainSlice {
+				result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
+			}
+			continue
+		}
+
+		ilIdx := 0
+		for mainIdx, cc := range mainSlice {
+			result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
+			if (mainIdx+1)%every == 0 {
+				absIdx := ilStart + (ilIdx % ilAvail)
+				ilCC := ilClips[absIdx]
+				result = append(result, TimelineClip{CollectionName: ilCC.CollectionName, CollectionClip: ilCC})
+				ilIdx++
+			}
+		}
+		consumed[il.Collection] = ilStart + (ilIdx % ilAvail)
+	}
+
+	return result, nil
+}
+
 // buildCollectionPaths returns the expected output paths for all rows in a
 // collection, sorted by row index.
 func buildCollectionPaths(pp paths.ProjectPaths, cfg config.Config, name string, coll project.Collection) ([]TimelineSegmentPath, error) {

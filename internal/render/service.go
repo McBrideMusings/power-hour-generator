@@ -427,29 +427,37 @@ func (s *Service) RenderSample(ctx context.Context, seg Segment, sampleTime floa
 		return fmt.Errorf("segment missing source path")
 	}
 
+	// Validate sample time against clip duration
+	clipDuration := float64(seg.Clip.DurationSeconds)
+	if clipDuration > 0 && sampleTime >= clipDuration {
+		return fmt.Errorf("sample time %s exceeds clip duration %s",
+			formatSeconds(sampleTime), formatSeconds(clipDuration))
+	}
+
 	// Build the filter graph with all overlays
 	filterGraph, err := BuildFilterGraph(seg, s.Config)
 	if err != nil {
 		return fmt.Errorf("build filter graph: %w", err)
 	}
 
-	// Calculate the absolute time in the source video
-	absoluteTime := sampleTime
-	if seg.Clip.SourceKind == project.SourceKindPlan {
-		absoluteTime += seg.Clip.Row.Start.Seconds()
-	}
-
-	// Build ffmpeg command to extract a single frame
+	// Input-seek to the clip start so the filter graph sees t=0 at clip start,
+	// matching the overlay enable/alpha expressions. Then output-seek to the
+	// desired sample time so we grab the correct frame with overlays visible.
 	args := []string{
 		"-hide_banner",
 		"-y",
-		"-ss", fmt.Sprintf("%.3f", absoluteTime),
+	}
+	if seg.Clip.SourceKind == project.SourceKindPlan {
+		args = append(args, "-ss", fmt.Sprintf("%.3f", seg.Clip.Row.Start.Seconds()))
+	}
+	args = append(args,
 		"-i", source,
 		"-vf", filterGraph,
+		"-ss", fmt.Sprintf("%.3f", sampleTime),
 		"-frames:v", "1",
-		"-q:v", "2", // High quality JPEG encoding (for PNG this sets compression)
+		"-q:v", "2",
 		outputPath,
-	}
+	)
 
 	// Create a log file for debugging
 	logPath := strings.TrimSuffix(outputPath, filepath.Ext(outputPath)) + ".log"
@@ -462,8 +470,7 @@ func (s *Service) RenderSample(ctx context.Context, seg Segment, sampleTime floa
 		defer logFile.Close()
 	}
 
-	s.printf("Extracting frame at %.2fs (absolute: %.2fs) from %s\n", sampleTime, absoluteTime, filepath.Base(source))
-	s.printf("Filter graph: %s\n", filterGraph)
+	s.printf("Extracting frame at %.2fs from %s\n", sampleTime, filepath.Base(source))
 
 	runOpts := cache.RunOptions{
 		Dir: s.Paths.Root,
