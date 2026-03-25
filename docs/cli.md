@@ -115,7 +115,7 @@ The `<time>` argument accepts Go durations (`500ms`, `2s`, `1m30s`), timecodes (
 |------|-------------|
 | `--index <n>` | Target a specific clip (timeline slot, or collection row if `--collection` is set) |
 | `--collection <name>` | Narrow `--index` to a specific collection's rows (requires `--index`) |
-| `--output <path>` | Output file path (default: auto-generated PNG) |
+| `--output <path>` | Output file path (default: `samples/<segment>_sample_<time>.png`) |
 
 ```bash
 # What's at the 10-minute mark of the full power hour?
