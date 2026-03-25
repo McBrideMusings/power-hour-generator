@@ -89,11 +89,44 @@ go run ./cmd/powerhour render --project <dir> [flags]
 | `--no-progress` | Disable interactive progress table |
 | `--index <n\|n-m>` | Limit to specific plan rows (repeatable) |
 | `--collection <name>` | Target a specific collection |
-| `--sample-time <time>` | Extract a single frame at specified time for testing overlays (requires `--collection`). Accepts Go durations (`500ms`, `2s`), timecodes (`0:30`), or raw seconds (`0.5`) |
-| `--sample-output <path>` | Output path for the sample frame (default: `<segment>_sample_<time>.png`) |
 | `--json` | Structured output |
 
 Render tracks input hashes in `.powerhour/render-state.json` and automatically skips unchanged segments on subsequent runs. Use `--force` to bypass change detection, or `--dry-run` to preview what would happen.
+
+### `powerhour sample`
+
+Extract a single frame for previewing overlays without rendering full clips.
+
+```bash
+powerhour sample <time> [flags]
+```
+
+The `<time>` argument accepts Go durations (`500ms`, `2s`, `1m30s`), timecodes (`0:30`), or raw seconds (`0.5`).
+
+**Modes:**
+
+| Flags | Behavior |
+|-------|----------|
+| `<time>` only | Timeline-absolute: finds which clip is at that position in the full concatenated video |
+| `--index N` | Time relative to the Nth clip in timeline order (including interstitials) |
+| `--collection <name> --index N` | Time relative to row N in the specified collection |
+
+| Flag | Description |
+|------|-------------|
+| `--index <n>` | Target a specific clip (timeline slot, or collection row if `--collection` is set) |
+| `--collection <name>` | Narrow `--index` to a specific collection's rows (requires `--index`) |
+| `--output <path>` | Output file path (default: auto-generated PNG) |
+
+```bash
+# What's at the 10-minute mark of the full power hour?
+powerhour sample 10m
+
+# Preview song #5 at 2 seconds in
+powerhour sample 2s --collection songs --index 5
+
+# Preview the 3rd clip in timeline order at 500ms
+powerhour sample 500ms --index 3
+```
 
 ### `powerhour concat`
 
