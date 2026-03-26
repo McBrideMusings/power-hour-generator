@@ -156,7 +156,7 @@ Renders title, artist, an optional credit line, and a persistent index badge (tw
 
 | Element | Font Weight | Size | Position | Timing |
 |---------|-------------|------|----------|--------|
-| Title | Bold | 64px | Bottom-left, above artist | First 4s, 0.5s fade |
+| Title | Regular | 64px | Bottom-left, above artist | First 4s, 0.5s fade |
 | Artist (ALL CAPS) | Regular | 32px | Bottom-left, bottom-aligned with number | First 4s, 0.5s fade |
 | Credit: {name} | Regular | 32px | Bottom-left, bottom-aligned with number | Last 4s, 0.5s fade |
 | Number badge | Bold | 140px | Bottom-right, two-layer (outline + fill) | Persistent |
@@ -167,7 +167,7 @@ The credit line only appears when the `name` field is present in the CSV/YAML pl
 
 | Option | Default |
 |--------|---------|
-| `title_font` | `Oswald:Bold` or `Futura:Bold` |
+| `title_font` | `Oswald` or `Futura` |
 | `artist_font` | `Oswald` or `Futura` |
 | `number_font` | `Oswald:Bold` or `Futura:Bold` |
 | `color` | `white` |

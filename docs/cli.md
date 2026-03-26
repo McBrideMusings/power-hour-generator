@@ -98,10 +98,10 @@ Render tracks input hashes in `.powerhour/render-state.json` and automatically s
 Extract a single frame for previewing overlays without rendering full clips.
 
 ```bash
-powerhour sample <time> [flags]
+powerhour sample <time|overlay-name> [flags]
 ```
 
-The `<time>` argument accepts Go durations (`500ms`, `2s`, `1m30s`), timecodes (`0:30`), or raw seconds (`0.5`).
+The first argument accepts a timestamp (`500ms`, `2s`, `0:30`) or an overlay name (`title`, `artist`, `credit`, `number`, `drink`) to automatically sample at the midpoint of that overlay's visible window.
 
 **Modes:**
 
@@ -110,6 +110,7 @@ The `<time>` argument accepts Go durations (`500ms`, `2s`, `1m30s`), timecodes (
 | `<time>` only | Timeline-absolute: finds which clip is at that position in the full concatenated video |
 | `--index N` | Time relative to the Nth clip in timeline order (including interstitials) |
 | `--collection <name> --index N` | Time relative to row N in the specified collection |
+| `<overlay-name> --index N` | Sample at the midpoint of the named overlay's visible window |
 
 | Flag | Description |
 |------|-------------|
@@ -124,8 +125,11 @@ powerhour sample 10m
 # Preview song #5 at 2 seconds in
 powerhour sample 2s --collection songs --index 5
 
-# Preview the 3rd clip in timeline order at 500ms
-powerhour sample 500ms --index 3
+# Preview the title overlay of song #5 (auto-picks midpoint)
+powerhour sample title --collection songs --index 5
+
+# Preview the credit overlay
+powerhour sample credit --collection songs --index 5
 ```
 
 ### `powerhour concat`
