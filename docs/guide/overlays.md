@@ -150,39 +150,40 @@ collections:
 
 ### `song-info` Preset
 
-Renders title, artist, an optional "Added by" credit, and a persistent index badge.
+Renders title, artist, an optional credit line, and a persistent index badge (two-layer: thick outline + white fill).
 
-**Default font**: Oswald if installed, otherwise Futura (macOS built-in). Each element supports independent font overrides via `title_font`, `artist_font`, and `number_font` options. A legacy `font` option overrides all three.
+**Default font**: Oswald if installed, otherwise Futura (macOS built-in). Font patterns are resolved to file paths via `fc-match` to guarantee correct weight selection. Each element supports independent font overrides via `title_font`, `artist_font`, and `number_font` options. A legacy `font` option overrides all three.
 
 | Element | Font Weight | Size | Position | Timing |
 |---------|-------------|------|----------|--------|
 | Title | Bold | 64px | Bottom-left, above artist | First 4s, 0.5s fade |
 | Artist (ALL CAPS) | Regular | 32px | Bottom-left, bottom-aligned with number | First 4s, 0.5s fade |
-| Added by: {name} | Regular | 32px | Bottom-left, bottom-aligned with number | Last 4s, 0.5s fade |
-| Number badge | Bold | 140px | Bottom-right | Persistent |
+| Credit: {name} | Regular | 32px | Bottom-left, bottom-aligned with number | Last 4s, 0.5s fade |
+| Number badge | Bold | 140px | Bottom-right, two-layer (outline + fill) | Persistent |
 
-The "Added by" line only appears when the `name` field is present in the CSV/YAML plan. All elements share a `bottom_margin` (default 40px) for vertical alignment.
+The credit line only appears when the `name` field is present in the CSV/YAML plan. All elements share a `bottom_margin` (default 40px) for vertical alignment.
 
 **Configurable options:**
 
 | Option | Default |
 |--------|---------|
-| `title_font` | `Oswald\:Bold` or `Futura\:Bold` |
+| `title_font` | `Oswald:Bold` or `Futura:Bold` |
 | `artist_font` | `Oswald` or `Futura` |
-| `number_font` | `Oswald\:Bold` or `Futura\:Bold` |
+| `number_font` | `Oswald:Bold` or `Futura:Bold` |
 | `color` | `white` |
 | `outline_color` | `black` |
 | `outline_width` | `2` |
 | `title_size` | `64` |
 | `artist_size` | `32` |
 | `number_size` | `140` |
-| `number_outline_width` | `5` |
+| `number_outline_width` | `8` |
 | `show_number` | `true` |
 | `info_duration` | `4.0` |
 | `fade_duration` | `0.5` |
 | `bottom_margin` | `40` |
-| `added_by_size` | same as `artist_size` |
-| `added_by_duration` | same as `info_duration` |
+| `credit_prefix` | `Credit:` |
+| `credit_size` | same as `artist_size` |
+| `credit_duration` | same as `info_duration` |
 
 ### `drink` Preset
 
