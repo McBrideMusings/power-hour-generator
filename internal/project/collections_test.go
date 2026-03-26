@@ -161,6 +161,76 @@ func TestLoadCollections(t *testing.T) {
 	})
 }
 
+func TestLoadCollections_SingleFile(t *testing.T) {
+	pp := makeProjectPaths(t)
+
+	// Create the source file
+	filePath := filepath.Join(pp.Root, "opening.mp4")
+	os.WriteFile(filePath, []byte("fake video"), 0o644)
+
+	t.Run("synthesizes single row from file", func(t *testing.T) {
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"opening": {File: "opening.mp4", Duration: 90},
+			},
+		}
+		r, err := NewCollectionResolver(cfg, pp)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		colls, err := r.LoadCollections()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(colls) != 1 {
+			t.Fatalf("len(colls) = %d, want 1", len(colls))
+		}
+
+		opening := colls["opening"]
+		if len(opening.Rows) != 1 {
+			t.Fatalf("len(Rows) = %d, want 1", len(opening.Rows))
+		}
+
+		row := opening.Rows[0]
+		if row.Index != 1 {
+			t.Errorf("Index = %d, want 1", row.Index)
+		}
+		if row.Link != filePath {
+			t.Errorf("Link = %q, want %q", row.Link, filePath)
+		}
+		if row.DurationSeconds != 90 {
+			t.Errorf("DurationSeconds = %d, want 90", row.DurationSeconds)
+		}
+		if row.Start != 0 {
+			t.Errorf("Start = %v, want 0", row.Start)
+		}
+		if opening.Plan != "" {
+			t.Errorf("Plan = %q, want empty", opening.Plan)
+		}
+	})
+
+	t.Run("zero duration for full video", func(t *testing.T) {
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"opening": {File: "opening.mp4"},
+			},
+		}
+		r, err := NewCollectionResolver(cfg, pp)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		colls, err := r.LoadCollections()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		row := colls["opening"].Rows[0]
+		if row.DurationSeconds != 0 {
+			t.Errorf("DurationSeconds = %d, want 0 (full video)", row.DurationSeconds)
+		}
+	})
+}
+
 func TestFlattenCollections(t *testing.T) {
 	t.Run("nil input", func(t *testing.T) {
 		got := FlattenCollections(nil)

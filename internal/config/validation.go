@@ -90,6 +90,20 @@ func (c Config) validateOverlayEntries() []ValidationResult {
 func (c Config) validatePlanPaths(projectRoot string) []ValidationResult {
 	var results []ValidationResult
 	for name, coll := range c.Collections {
+		if file := strings.TrimSpace(coll.File); file != "" {
+			resolved := file
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(projectRoot, resolved)
+			}
+			if _, err := os.Stat(resolved); err != nil {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: file %q not found", name, file),
+				})
+			}
+			continue
+		}
+
 		plan := strings.TrimSpace(coll.Plan)
 		if plan == "" {
 			continue

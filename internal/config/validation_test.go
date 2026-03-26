@@ -147,6 +147,39 @@ func TestValidateStrict_PlanPaths(t *testing.T) {
 	}
 }
 
+func TestValidateStrict_FilePaths_Missing(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"opening": {File: "missing.mp4"},
+		},
+	}
+	results := cfg.validatePlanPaths(dir)
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error for missing file, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateStrict_FilePaths_Exists(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "opening.mp4"), []byte("fake"), 0644)
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"opening": {File: "opening.mp4"},
+		},
+	}
+	results := cfg.validatePlanPaths(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected no errors, got %v", results)
+	}
+}
+
 func TestValidateStrict_PlanPaths_AllExist(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "a.csv"), []byte("a"), 0644)

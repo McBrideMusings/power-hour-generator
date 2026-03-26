@@ -20,6 +20,8 @@ type OverlayEntry struct {
 // CollectionConfig defines a collection of clips with configurable CSV headers.
 type CollectionConfig struct {
 	Plan           string         `yaml:"plan"`
+	File           string         `yaml:"file,omitempty"`
+	Duration       int            `yaml:"duration,omitempty"`
 	OutputDir      string         `yaml:"output_dir"`
 	Overlays       []OverlayEntry `yaml:"overlays,omitempty"`
 	LinkHeader     string         `yaml:"link_header"`
@@ -615,20 +617,27 @@ func (c Config) ValidateCollections() error {
 	}
 
 	for name, collection := range c.Collections {
-		// Check for protected header names
-		if protectedHeaders[normalizeHeaderName(collection.LinkHeader)] {
-			return fmt.Errorf("collection %q: link_header cannot be %q (protected name)", name, collection.LinkHeader)
+		hasFile := strings.TrimSpace(collection.File) != ""
+		hasPlan := strings.TrimSpace(collection.Plan) != ""
+
+		if hasFile && hasPlan {
+			return fmt.Errorf("collection %q: cannot specify both file and plan", name)
 		}
-		if protectedHeaders[normalizeHeaderName(collection.StartHeader)] {
-			return fmt.Errorf("collection %q: start_header cannot be %q (protected name)", name, collection.StartHeader)
-		}
-		if collection.DurationHeader != "" && protectedHeaders[normalizeHeaderName(collection.DurationHeader)] {
-			return fmt.Errorf("collection %q: duration_header cannot be %q (protected name)", name, collection.DurationHeader)
+		if !hasFile && !hasPlan {
+			return fmt.Errorf("collection %q: either file or plan is required", name)
 		}
 
-		// Validate plan file is specified
-		if strings.TrimSpace(collection.Plan) == "" {
-			return fmt.Errorf("collection %q: plan file path is required", name)
+		// Header validation only applies to plan-based collections
+		if hasPlan {
+			if protectedHeaders[normalizeHeaderName(collection.LinkHeader)] {
+				return fmt.Errorf("collection %q: link_header cannot be %q (protected name)", name, collection.LinkHeader)
+			}
+			if protectedHeaders[normalizeHeaderName(collection.StartHeader)] {
+				return fmt.Errorf("collection %q: start_header cannot be %q (protected name)", name, collection.StartHeader)
+			}
+			if collection.DurationHeader != "" && protectedHeaders[normalizeHeaderName(collection.DurationHeader)] {
+				return fmt.Errorf("collection %q: duration_header cannot be %q (protected name)", name, collection.DurationHeader)
+			}
 		}
 	}
 

@@ -48,17 +48,35 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 	collections := make(map[string]Collection, len(r.cfg.Collections))
 
 	for name, collCfg := range r.cfg.Collections {
-		// Resolve plan path
+		outputDir := r.paths.CollectionOutputDir(r.cfg, name)
+
+		// Single-file collection: synthesize one row, no CSV loading
+		if file := strings.TrimSpace(collCfg.File); file != "" {
+			filePath := resolveProjectPath(r.paths.Root, file)
+			rows := []csvplan.CollectionRow{{
+				Index:           1,
+				Link:            filePath,
+				StartRaw:        "0:00",
+				Start:           0,
+				DurationSeconds: collCfg.Duration,
+				CustomFields:    map[string]string{},
+			}}
+			collections[name] = Collection{
+				Name:      name,
+				OutputDir: outputDir,
+				Config:    collCfg,
+				Rows:      rows,
+			}
+			continue
+		}
+
+		// Plan-based collection: load CSV/YAML
 		planPath := strings.TrimSpace(collCfg.Plan)
 		if planPath == "" {
 			return nil, fmt.Errorf("collection %q: plan path is required", name)
 		}
 		planPath = resolveProjectPath(r.paths.Root, planPath)
 
-		// Resolve output directory
-		outputDir := r.paths.CollectionOutputDir(r.cfg, name)
-
-		// Load collection plan
 		opts := csvplan.CollectionOptions{
 			LinkHeader:      collCfg.LinkHeader,
 			StartHeader:     collCfg.StartHeader,
@@ -79,7 +97,6 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		var planErrs csvplan.ValidationErrors
 		if err != nil {
 			if err.Error() == "no data rows found" {
-				// Empty collection — will be skipped during render/concat
 				rows = nil
 			} else if ve, ok := err.(csvplan.ValidationErrors); ok {
 				planErrs = ve
@@ -88,7 +105,7 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			}
 		}
 
-		collection := Collection{
+		collections[name] = Collection{
 			Name:       name,
 			Plan:       planPath,
 			OutputDir:  outputDir,
@@ -96,8 +113,6 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			Rows:       rows,
 			PlanErrors: planErrs,
 		}
-
-		collections[name] = collection
 	}
 
 	return collections, nil

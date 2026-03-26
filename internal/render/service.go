@@ -179,6 +179,26 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool, report
 		return result
 	}
 
+	// Resolve zero duration (full video) by probing actual length
+	if clip.DurationSeconds <= 0 {
+		videoDur, err := s.probeVideoDuration(ctx, source)
+		if err != nil {
+			result.Err = fmt.Errorf("probe video duration for full-length clip: %w", err)
+			return result
+		}
+		startSec := clip.Row.Start.Seconds()
+		resolved := int(videoDur - startSec)
+		if resolved <= 0 {
+			result.Err = fmt.Errorf("start_time %s exceeds video length %s",
+				formatDuration(clip.Row.Start), formatSeconds(videoDur))
+			return result
+		}
+		seg.Clip.DurationSeconds = resolved
+		seg.Clip.Row.DurationSeconds = resolved
+		clip = seg.Clip
+		row = clip.Row
+	}
+
 	outputPath, logPath := s.segmentPaths(seg)
 	result.OutputPath = outputPath
 
@@ -357,12 +377,14 @@ func (s *Service) validateSegmentTiming(ctx context.Context, seg Segment, source
 			formatDuration(row.Start), formatSeconds(videoDuration))
 	}
 
-	// Check if start + duration exceeds video duration
-	requestedDuration := float64(row.DurationSeconds)
-	endTime := startSeconds + requestedDuration
-	if endTime > videoDuration {
-		return fmt.Errorf("start_time %s + %ds duration exceeds video length %s",
-			formatDuration(row.Start), row.DurationSeconds, formatSeconds(videoDuration))
+	// Check if start + duration exceeds video duration (skip when duration is 0 = full video)
+	if row.DurationSeconds > 0 {
+		requestedDuration := float64(row.DurationSeconds)
+		endTime := startSeconds + requestedDuration
+		if endTime > videoDuration {
+			return fmt.Errorf("start_time %s + %ds duration exceeds video length %s",
+				formatDuration(row.Start), row.DurationSeconds, formatSeconds(videoDuration))
+		}
 	}
 
 	return nil
