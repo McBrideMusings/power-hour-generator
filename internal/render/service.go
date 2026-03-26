@@ -62,6 +62,7 @@ type Result struct {
 // ProgressReporter receives notifications as segments move through the render pipeline.
 type ProgressReporter interface {
 	Start(segment Segment)
+	Progress(segment Segment, pct float64) // pct in 0.0–1.0
 	Complete(result Result)
 }
 
@@ -133,7 +134,6 @@ func (s *Service) Render(ctx context.Context, segments []Segment, opts Options) 
 	)
 
 	for i, seg := range segments {
-		i, seg := i, seg
 		if opts.Reporter != nil {
 			opts.Reporter.Start(seg)
 		}
@@ -142,7 +142,7 @@ func (s *Service) Render(ctx context.Context, segments []Segment, opts Options) 
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			res := s.renderOne(ctx, seg, opts.Force)
+			res := s.renderOne(ctx, seg, opts.Force, opts.Reporter)
 			results[i] = res
 			if opts.Reporter != nil {
 				opts.Reporter.Complete(res)
@@ -154,7 +154,7 @@ func (s *Service) Render(ctx context.Context, segments []Segment, opts Options) 
 	return results
 }
 
-func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result {
+func (s *Service) renderOne(ctx context.Context, seg Segment, force bool, reporter ProgressReporter) Result {
 	clip := seg.Clip
 	row := clip.Row
 	result := Result{
@@ -222,12 +222,24 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool) Result
 
 	s.printf("rendering %s -> %s\n", segmentLabel(seg), filepath.Base(outputPath))
 
+	// Add -progress flag for real-time progress reporting.
+	args = append(args[:len(args)-1], "-progress", "pipe:1", args[len(args)-1])
+
 	runOpts := cache.RunOptions{
 		Dir:    s.Paths.Root,
 		Stderr: logFile,
 	}
 	if s.stderr != nil {
 		runOpts.Stderr = io.MultiWriter(logFile, s.stderr)
+	}
+
+	// Wire up progress parsing if reporter is available.
+	if reporter != nil {
+		clipDur := float64(clip.DurationSeconds)
+		pw := newProgressWriter(clipDur, func(pct float64) {
+			reporter.Progress(seg, pct)
+		})
+		runOpts.Stdout = pw
 	}
 
 	if _, err := s.Runner.Run(ctx, s.ffmpegPath, args, runOpts); err != nil {

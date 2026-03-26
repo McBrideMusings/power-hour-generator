@@ -376,7 +376,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 					return fmt.Sprintf("unknown:%d", res.Index)
 				},
 				func(seg render.Segment) map[string]string {
-					return map[string]string{"STATUS": "rendering"}
+					return map[string]string{"STATUS": "queued"}
 				},
 				func(res render.Result) map[string]string {
 					for _, clipIdx := range renderOrder {
@@ -389,7 +389,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 					if res.Err != nil {
 						status = "error"
 					} else if res.Skipped {
-						status = "skipped"
+						status = "cached"
 					}
 					return map[string]string{"STATUS": status}
 				},
@@ -642,7 +642,7 @@ func writeCollectionRenderTable(cmd *cobra.Command, projectRoot string, clips []
 				source = "MISSING"
 			}
 		} else if res.Skipped {
-			status = "skipped"
+			status = "cached"
 		}
 
 		if res.OutputPath != "" {

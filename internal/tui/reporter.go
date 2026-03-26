@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"powerhour/internal/render"
@@ -42,10 +44,44 @@ func (r *RenderReporter) Start(seg render.Segment) {
 	})
 }
 
+// Progress implements render.ProgressReporter.
+func (r *RenderReporter) Progress(seg render.Segment, pct float64) {
+	r.send(RowUpdateMsg{
+		Key:    r.keyFromSeg(seg),
+		Fields: map[string]string{"STATUS": FormatProgressBar(pct)},
+	})
+}
+
 // Complete implements render.ProgressReporter.
 func (r *RenderReporter) Complete(res render.Result) {
 	r.send(RowUpdateMsg{
 		Key:    r.keyFromRes(res),
 		Fields: r.completeFields(res),
 	})
+}
+
+// FormatProgressBar renders a compact progress bar for the STATUS column.
+// Uses ASCII characters to avoid multi-byte UTF-8 truncation issues.
+// Output fits within 10 characters: "===-- 100%"
+func FormatProgressBar(pct float64) string {
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	const barWidth = 5
+	filled := int(pct * barWidth)
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := make([]byte, barWidth)
+	for i := range bar {
+		if i < filled {
+			bar[i] = '='
+		} else {
+			bar[i] = '-'
+		}
+	}
+	return fmt.Sprintf("%s %3d%%", string(bar), int(pct*100))
 }
