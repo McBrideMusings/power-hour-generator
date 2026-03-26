@@ -53,15 +53,19 @@ func ExpandOverlays(overlays []config.OverlayEntry, row csvplan.Row, clipDuratio
 
 func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float64) []string {
 	font := defaultFont()
-	titleFont := optStr(opts, "title_font", font+"\\:Bold")
-	artistFont := optStr(opts, "artist_font", font)
-	numberFont := optStr(opts, "number_font", font+"\\:Bold")
+	titleFontPattern := optStr(opts, "title_font", font+":Bold")
+	artistFontPattern := optStr(opts, "artist_font", font)
+	numberFontPattern := optStr(opts, "number_font", font+":Bold")
 	// Legacy "font" option overrides all three if set
 	if overrideFont := optStr(opts, "font", ""); overrideFont != "" {
-		titleFont = overrideFont
-		artistFont = overrideFont
-		numberFont = overrideFont
+		titleFontPattern = overrideFont
+		artistFontPattern = overrideFont
+		numberFontPattern = overrideFont
 	}
+	// Resolve fontconfig patterns to file paths for reliable weight selection.
+	titleFontFile := fontFilePath(titleFontPattern)
+	artistFontFile := fontFilePath(artistFontPattern)
+	numberFontFile := fontFilePath(numberFontPattern)
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
 	outlineWidth := optInt(opts, "outline_width", 2)
@@ -69,7 +73,7 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 	artistSize := optInt(opts, "artist_size", 32)
 	_ = optInt(opts, "artist_letter_spacing", 0) // reserved for future use
 	numberSize := optInt(opts, "number_size", 140)
-	numberOutlineWidth := optInt(opts, "number_outline_width", 5)
+	numberOutlineWidth := optInt(opts, "number_outline_width", 8)
 	showNumber := optBool(opts, "show_number", true)
 	infoDuration := optFloat(opts, "info_duration", 4.0)
 	fadeDuration := optFloat(opts, "fade_duration", 0.5)
@@ -91,7 +95,7 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 			FadeIn:       fadeDuration,
 			FadeOut:      fadeDuration,
 			FontSize:     titleSize,
-			Font:         titleFont,
+			FontFile:     titleFontFile,
 			FontColor:    color,
 			OutlineColor: outlineColor,
 			OutlineWidth: outlineWidth,
@@ -112,7 +116,7 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 			FadeIn:        fadeDuration,
 			FadeOut:       fadeDuration,
 			FontSize:      artistSize,
-			Font:          artistFont,
+			FontFile:      artistFontFile,
 			FontColor:     color,
 			OutlineColor:  outlineColor,
 			OutlineWidth:  max(outlineWidth-1, 1),
@@ -121,49 +125,67 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 		}))
 	}
 
-	// "Added by" overlay: bottom-left, appears at end of clip, fade in/out
+	// Credit overlay: bottom-left, appears at end of clip, fade in/out
+	creditPrefix := optStr(opts, "credit_prefix", "Credit:")
 	nameText := renderOverlayTemplate("{name}", row)
 	nameText = strings.TrimSpace(nameText)
 	if nameText != "" {
-		addedBySize := optInt(opts, "added_by_size", artistSize)
-		addedByDuration := optFloat(opts, "added_by_duration", infoDuration)
-		addedByStart := clipDuration - addedByDuration
-		if addedByStart < 0 {
-			addedByStart = 0
+		creditSize := optInt(opts, "credit_size", artistSize)
+		creditDuration := optFloat(opts, "credit_duration", infoDuration)
+		creditStart := clipDuration - creditDuration
+		if creditStart < 0 {
+			creditStart = 0
 		}
-		addedByText := "Added by: " + nameText
-		addedByY := fmt.Sprintf("h-text_h-%d", bottomMargin)
+		creditText := creditPrefix + " " + nameText
+		creditY := fmt.Sprintf("h-text_h-%d", bottomMargin)
 		filters = append(filters, buildDrawText(drawTextOptions{
-			Text:         addedByText,
-			Start:        addedByStart,
+			Text:         creditText,
+			Start:        creditStart,
 			End:          clipDuration,
 			FadeIn:       fadeDuration,
 			FadeOut:      fadeDuration,
-			FontSize:     addedBySize,
-			Font:         artistFont,
+			FontSize:     creditSize,
+			FontFile:     artistFontFile,
 			FontColor:    color,
 			OutlineColor: outlineColor,
 			OutlineWidth: max(outlineWidth-1, 1),
 			XExpr:        "40",
-			YExpr:        addedByY,
+			YExpr:        creditY,
 		}))
 	}
 
-	// Number badge: bottom-right, persistent, bottom-aligned with artist
+	// Number badge: bottom-right, persistent, bottom-aligned with artist.
+	// Two-layer rendering: thick black outline underneath, then white fill on top.
+	// This produces the heavy, high-contrast badge seen in reference designs.
 	if showNumber {
 		numberText := renderOverlayTemplate("{index}", row)
 		numberText = strings.TrimSpace(numberText)
 		if numberText != "" {
 			numberY := fmt.Sprintf("h-text_h-%d", bottomMargin)
+			// Layer 1: thick black outline
 			filters = append(filters, buildDrawText(drawTextOptions{
 				Text:         numberText,
 				Start:        0,
 				End:          clipDuration,
 				FontSize:     numberSize,
-				Font:         numberFont,
-				FontColor:    color,
+				FontFile:     numberFontFile,
+				FontColor:    outlineColor,
 				OutlineColor: outlineColor,
 				OutlineWidth: numberOutlineWidth,
+				XExpr:        "w-text_w-40",
+				YExpr:        numberY,
+				Persistent:   true,
+			}))
+			// Layer 2: white fill with thin outline for crispness
+			filters = append(filters, buildDrawText(drawTextOptions{
+				Text:         numberText,
+				Start:        0,
+				End:          clipDuration,
+				FontSize:     numberSize,
+				FontFile:     numberFontFile,
+				FontColor:    color,
+				OutlineColor: outlineColor,
+				OutlineWidth: 2,
 				XExpr:        "w-text_w-40",
 				YExpr:        numberY,
 				Persistent:   true,
@@ -175,7 +197,8 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 }
 
 func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) []string {
-	font := optStr(opts, "font", defaultFont()+"\\:Bold")
+	fontPattern := optStr(opts, "font", defaultFont()+":Bold")
+	fontFile := fontFilePath(fontPattern)
 	text := optStr(opts, "text", "Drink!")
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
@@ -195,7 +218,7 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 		Start:        0,
 		End:          clipDuration,
 		FontSize:     size,
-		Font:         font,
+		FontFile:     fontFile,
 		FontColor:    shadowColor,
 		OutlineColor: shadowColor + "@0",
 		OutlineWidth: 0,
@@ -210,7 +233,7 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 		Start:        0,
 		End:          clipDuration,
 		FontSize:     size,
-		Font:         font,
+		FontFile:     fontFile,
 		FontColor:    color,
 		OutlineColor: outlineColor,
 		OutlineWidth: outlineWidth,
@@ -257,6 +280,15 @@ func optBool(opts map[string]string, key string, fallback bool) bool {
 		}
 	}
 	return fallback
+}
+
+// fontFilePath resolves a fontconfig pattern to an absolute font file path.
+func fontFilePath(pattern string) string {
+	out, err := exec.Command("fc-match", "--format=%{file}", pattern).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // fontAvailable checks whether a font family is known to fontconfig.

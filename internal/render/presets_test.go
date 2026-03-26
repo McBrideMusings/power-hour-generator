@@ -16,18 +16,16 @@ func TestPresetSongInfoDefaults(t *testing.T) {
 	}
 	filters := presetSongInfo(nil, row, 60)
 
-	if len(filters) != 3 {
-		t.Fatalf("expected 3 filters (title, artist, number), got %d", len(filters))
+	if len(filters) != 4 {
+		t.Fatalf("expected 4 filters (title, artist, number outline, number fill), got %d", len(filters))
 	}
-
-	font := defaultFont()
 
 	// Title filter
 	if !strings.Contains(filters[0], "text='Test Song'") {
 		t.Errorf("title filter missing text: %s", filters[0])
 	}
-	if !strings.Contains(filters[0], "font='"+font+"\\:Bold'") {
-		t.Errorf("title filter missing font: %s", filters[0])
+	if !strings.Contains(filters[0], "fontfile=") {
+		t.Errorf("title filter missing fontfile: %s", filters[0])
 	}
 	if !strings.Contains(filters[0], "fontsize=64") {
 		t.Errorf("title filter missing fontsize: %s", filters[0])
@@ -41,12 +39,20 @@ func TestPresetSongInfoDefaults(t *testing.T) {
 		t.Errorf("artist filter missing fontsize: %s", filters[1])
 	}
 
-	// Number filter
+	// Number outline layer
 	if !strings.Contains(filters[2], "text='1'") {
-		t.Errorf("number filter missing text: %s", filters[2])
+		t.Errorf("number outline filter missing text: %s", filters[2])
 	}
-	if !strings.Contains(filters[2], "fontsize=140") {
-		t.Errorf("number filter missing fontsize: %s", filters[2])
+	if !strings.Contains(filters[2], "fontfile=") {
+		t.Errorf("number outline filter missing fontfile: %s", filters[2])
+	}
+
+	// Number fill layer
+	if !strings.Contains(filters[3], "text='1'") {
+		t.Errorf("number fill filter missing text: %s", filters[3])
+	}
+	if !strings.Contains(filters[3], "fontsize=140") {
+		t.Errorf("number fill filter missing fontsize: %s", filters[3])
 	}
 }
 
@@ -67,8 +73,8 @@ func TestPresetSongInfoOverrides(t *testing.T) {
 	if len(filters) != 2 {
 		t.Fatalf("expected 2 filters (no number), got %d", len(filters))
 	}
-	if !strings.Contains(filters[0], "font='Arial'") {
-		t.Errorf("expected custom font: %s", filters[0])
+	if !strings.Contains(filters[0], "fontfile=") {
+		t.Errorf("expected fontfile in filter: %s", filters[0])
 	}
 	if !strings.Contains(filters[0], "fontsize=48") {
 		t.Errorf("expected custom title size: %s", filters[0])
@@ -98,8 +104,8 @@ func TestPresetDrinkDefaults(t *testing.T) {
 	if !strings.Contains(filters[1], "fontcolor=white") {
 		t.Errorf("text filter missing white color: %s", filters[1])
 	}
-	if !strings.Contains(filters[1], "font='"+defaultFont()+"\\:Bold'") {
-		t.Errorf("text filter missing font: %s", filters[1])
+	if !strings.Contains(filters[1], "fontfile=") {
+		t.Errorf("text filter missing fontfile: %s", filters[1])
 	}
 }
 
@@ -163,9 +169,9 @@ func TestExpandOverlaysMultiple(t *testing.T) {
 	}
 	filters := ExpandOverlays(overlays, row, 60)
 
-	// song-info: 3 (title + artist + number, no name field) + drink: 2 (shadow + text) = 5
-	if len(filters) != 5 {
-		t.Fatalf("expected 5 filters, got %d", len(filters))
+	// song-info: 4 (title + artist + number outline + number fill, no name field) + drink: 2 (shadow + text) = 6
+	if len(filters) != 6 {
+		t.Fatalf("expected 6 filters, got %d", len(filters))
 	}
 }
 
