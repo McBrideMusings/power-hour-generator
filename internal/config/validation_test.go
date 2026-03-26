@@ -426,6 +426,87 @@ func TestValidateTimeline_EmptyCollectionName(t *testing.T) {
 	}
 }
 
+func TestValidateTimeline_FileBothCollectionAndFile(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{"songs": {Plan: "songs.csv"}},
+		Timeline: TimelineConfig{
+			Sequence: []SequenceEntry{
+				{Collection: "songs", File: "intro.mp4"},
+			},
+		},
+	}
+	results := cfg.validateTimeline()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected error for entry with both collection and file set, got none")
+	}
+}
+
+func TestValidateTimeline_FileWithCount(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{},
+		Timeline: TimelineConfig{
+			Sequence: []SequenceEntry{
+				{File: "intro.mp4", Count: 5},
+			},
+		},
+	}
+	results := cfg.validateTimeline()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected error for file entry with count set, got none")
+	}
+}
+
+func TestValidateTimeline_FileWithInterleave(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{"interstitials": {Plan: "interstitials.csv"}},
+		Timeline: TimelineConfig{
+			Sequence: []SequenceEntry{
+				{File: "intro.mp4", Interleave: &InterleaveConfig{Collection: "interstitials", Every: 1}},
+			},
+		},
+	}
+	results := cfg.validateTimeline()
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) == 0 {
+		t.Fatal("expected error for file entry with interleave set, got none")
+	}
+}
+
+func TestValidateTimeline_FileEntryValid(t *testing.T) {
+	cfg := Config{
+		Collections: map[string]CollectionConfig{"songs": {Plan: "songs.csv"}},
+		Timeline: TimelineConfig{
+			Sequence: []SequenceEntry{
+				{File: "intro.mp4"},
+				{Collection: "songs"},
+			},
+		},
+	}
+	results := cfg.validateTimeline()
+	for _, r := range results {
+		if r.Level == "error" {
+			t.Errorf("unexpected validation error: %s", r.Message)
+		}
+	}
+}
+
 func TestValidateExternalFiles_MissingCollectionFile(t *testing.T) {
 	dir := t.TempDir()
 	cfg := Config{

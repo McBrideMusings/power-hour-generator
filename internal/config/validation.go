@@ -149,13 +149,42 @@ func (c Config) validateSegmentTemplate(knownTokens []string) []ValidationResult
 func (c Config) validateTimeline() []ValidationResult {
 	var results []ValidationResult
 	for i, entry := range c.Timeline.Sequence {
-		if strings.TrimSpace(entry.Collection) == "" {
+		hasCollection := strings.TrimSpace(entry.Collection) != ""
+		hasFile := strings.TrimSpace(entry.File) != ""
+
+		if hasCollection && hasFile {
 			results = append(results, ValidationResult{
 				Level:   "error",
-				Message: fmt.Sprintf("timeline sequence[%d]: collection name is required", i),
+				Message: fmt.Sprintf("timeline sequence[%d]: collection and file are mutually exclusive", i),
 			})
 			continue
 		}
+		if !hasCollection && !hasFile {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("timeline sequence[%d]: collection name or file is required", i),
+			})
+			continue
+		}
+
+		// Inline file entry: count and interleave are not valid.
+		if hasFile {
+			if entry.Count > 0 {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("timeline sequence[%d] (file %q): count is not valid for file entries", i, entry.File),
+				})
+			}
+			if entry.Interleave != nil {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("timeline sequence[%d] (file %q): interleave is not valid for file entries", i, entry.File),
+				})
+			}
+			continue
+		}
+
+		// Collection entry validation.
 		if _, ok := c.Collections[entry.Collection]; !ok {
 			results = append(results, ValidationResult{
 				Level:   "error",

@@ -19,9 +19,10 @@ func makeCollectionWithRows(name string, n int) Collection {
 
 func TestResolveTimeline(t *testing.T) {
 	type entry struct {
-		coll string
-		idx  int
-		seq  int // 0 = don't check
+		coll       string
+		idx        int
+		seq        int    // 0 = don't check
+		sourceFile string // non-empty = expect SourceFile set to this value
 	}
 	tests := []struct {
 		name        string
@@ -49,10 +50,10 @@ func TestResolveTimeline(t *testing.T) {
 				"songs": makeCollectionWithRows("songs", 4),
 			},
 			want: []entry{
-				{"songs", 1, 1},
-				{"songs", 2, 2},
-				{"songs", 3, 3},
-				{"songs", 4, 4},
+				{coll: "songs", idx: 1, seq: 1},
+				{coll: "songs", idx: 2, seq: 2},
+				{coll: "songs", idx: 3, seq: 3},
+				{coll: "songs", idx: 4, seq: 4},
 			},
 		},
 		{
@@ -66,8 +67,8 @@ func TestResolveTimeline(t *testing.T) {
 				"songs": makeCollectionWithRows("songs", 5),
 			},
 			want: []entry{
-				{"songs", 1, 0},
-				{"songs", 2, 0},
+				{coll: "songs", idx: 1},
+				{coll: "songs", idx: 2},
 			},
 		},
 		{
@@ -81,9 +82,9 @@ func TestResolveTimeline(t *testing.T) {
 				"songs": makeCollectionWithRows("songs", 3),
 			},
 			want: []entry{
-				{"songs", 1, 0},
-				{"songs", 2, 0},
-				{"songs", 3, 0},
+				{coll: "songs", idx: 1},
+				{coll: "songs", idx: 2},
+				{coll: "songs", idx: 3},
 			},
 		},
 		{
@@ -106,10 +107,10 @@ func TestResolveTimeline(t *testing.T) {
 				"interstitials": makeCollectionWithRows("interstitials", 4),
 			},
 			want: []entry{
-				{"songs", 1, 1}, {"interstitials", 1, 2},
-				{"songs", 2, 3}, {"interstitials", 2, 4},
-				{"songs", 3, 5}, {"interstitials", 3, 6},
-				{"songs", 4, 7}, {"interstitials", 4, 8},
+				{coll: "songs", idx: 1, seq: 1}, {coll: "interstitials", idx: 1, seq: 2},
+				{coll: "songs", idx: 2, seq: 3}, {coll: "interstitials", idx: 2, seq: 4},
+				{coll: "songs", idx: 3, seq: 5}, {coll: "interstitials", idx: 3, seq: 6},
+				{coll: "songs", idx: 4, seq: 7}, {coll: "interstitials", idx: 4, seq: 8},
 			},
 		},
 		{
@@ -132,9 +133,9 @@ func TestResolveTimeline(t *testing.T) {
 				"interstitials": makeCollectionWithRows("interstitials", 2),
 			},
 			want: []entry{
-				{"songs", 1, 0}, {"interstitials", 1, 0},
-				{"songs", 2, 0}, {"interstitials", 2, 0},
-				{"songs", 3, 0}, {"interstitials", 1, 0},
+				{coll: "songs", idx: 1}, {coll: "interstitials", idx: 1},
+				{coll: "songs", idx: 2}, {coll: "interstitials", idx: 2},
+				{coll: "songs", idx: 3}, {coll: "interstitials", idx: 1},
 			},
 		},
 		{
@@ -157,9 +158,9 @@ func TestResolveTimeline(t *testing.T) {
 				"interstitials": makeCollectionWithRows("interstitials", 3),
 			},
 			want: []entry{
-				{"songs", 1, 1}, {"songs", 2, 2}, {"interstitials", 1, 3},
-				{"songs", 3, 4}, {"songs", 4, 5}, {"interstitials", 2, 6},
-				{"songs", 5, 7}, {"songs", 6, 8}, {"interstitials", 3, 9},
+				{coll: "songs", idx: 1, seq: 1}, {coll: "songs", idx: 2, seq: 2}, {coll: "interstitials", idx: 1, seq: 3},
+				{coll: "songs", idx: 3, seq: 4}, {coll: "songs", idx: 4, seq: 5}, {coll: "interstitials", idx: 2, seq: 6},
+				{coll: "songs", idx: 5, seq: 7}, {coll: "songs", idx: 6, seq: 8}, {coll: "interstitials", idx: 3, seq: 9},
 			},
 		},
 		{
@@ -186,15 +187,15 @@ func TestResolveTimeline(t *testing.T) {
 				"outro":         makeCollectionWithRows("outro", 1),
 			},
 			want: []entry{
-				{"intro", 1, 1},
-				{"intro", 2, 2},
-				{"songs", 1, 3},
-				{"interstitials", 1, 4},
-				{"songs", 2, 5},
-				{"interstitials", 2, 6},
-				{"songs", 3, 7},
-				{"interstitials", 3, 8},
-				{"outro", 1, 9},
+				{coll: "intro", idx: 1, seq: 1},
+				{coll: "intro", idx: 2, seq: 2},
+				{coll: "songs", idx: 1, seq: 3},
+				{coll: "interstitials", idx: 1, seq: 4},
+				{coll: "songs", idx: 2, seq: 5},
+				{coll: "interstitials", idx: 2, seq: 6},
+				{coll: "songs", idx: 3, seq: 7},
+				{coll: "interstitials", idx: 3, seq: 8},
+				{coll: "outro", idx: 1, seq: 9},
 			},
 		},
 		{
@@ -214,10 +215,10 @@ func TestResolveTimeline(t *testing.T) {
 				"outro": makeCollectionWithRows("outro", 1),
 			},
 			want: []entry{
-				{"intro", 1, 1},
-				{"songs", 1, 2},
-				{"songs", 2, 3},
-				{"outro", 1, 4},
+				{coll: "intro", idx: 1, seq: 1},
+				{coll: "songs", idx: 1, seq: 2},
+				{coll: "songs", idx: 2, seq: 3},
+				{coll: "outro", idx: 1, seq: 4},
 			},
 		},
 		{
@@ -233,8 +234,8 @@ func TestResolveTimeline(t *testing.T) {
 				"songs": makeCollectionWithRows("songs", 2),
 			},
 			want: []entry{
-				{"songs", 1, 1},
-				{"songs", 2, 2},
+				{coll: "songs", idx: 1, seq: 1},
+				{coll: "songs", idx: 2, seq: 2},
 			},
 		},
 		{
@@ -265,6 +266,97 @@ func TestResolveTimeline(t *testing.T) {
 			},
 			wantErr: "ghost",
 		},
+		{
+			name: "stateful cursor two halves",
+			// songs appears twice: first count:2, then no count on 5-row collection
+			// Expected: rows 1-2, then rows 3-5 (cursor picks up at 2)
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs", Count: 2},
+					{Collection: "songs"},
+				},
+			},
+			collections: map[string]Collection{
+				"songs": makeCollectionWithRows("songs", 5),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1, seq: 1},
+				{coll: "songs", idx: 2, seq: 2},
+				{coll: "songs", idx: 3, seq: 3},
+				{coll: "songs", idx: 4, seq: 4},
+				{coll: "songs", idx: 5, seq: 5},
+			},
+		},
+		{
+			name: "stateful cursor both halves with count",
+			// songs appears twice, each count:2 on 4-row collection
+			// Expected: rows 1-2, then rows 3-4
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs", Count: 2},
+					{Collection: "songs", Count: 2},
+				},
+			},
+			collections: map[string]Collection{
+				"songs": makeCollectionWithRows("songs", 4),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1, seq: 1},
+				{coll: "songs", idx: 2, seq: 2},
+				{coll: "songs", idx: 3, seq: 3},
+				{coll: "songs", idx: 4, seq: 4},
+			},
+		},
+		{
+			name: "stateful cursor collection exhausted skips silently",
+			// songs count:3 on 3-row collection, then songs again (exhausted) → only first 3 entries
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs", Count: 3},
+					{Collection: "songs"},
+				},
+			},
+			collections: map[string]Collection{
+				"songs": makeCollectionWithRows("songs", 3),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1, seq: 1},
+				{coll: "songs", idx: 2, seq: 2},
+				{coll: "songs", idx: 3, seq: 3},
+			},
+		},
+		{
+			name: "inline file entry",
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{File: "videos/intro.mp4"},
+				},
+			},
+			collections: map[string]Collection{},
+			want: []entry{
+				{sourceFile: "videos/intro.mp4", seq: 1},
+			},
+		},
+		{
+			name: "inline file between collection entries",
+			// intro file, songs (2 rows), outro file
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{File: "intro.mp4"},
+					{Collection: "songs"},
+					{File: "outro.mp4"},
+				},
+			},
+			collections: map[string]Collection{
+				"songs": makeCollectionWithRows("songs", 2),
+			},
+			want: []entry{
+				{sourceFile: "intro.mp4", seq: 1},
+				{coll: "songs", idx: 1, seq: 2},
+				{coll: "songs", idx: 2, seq: 3},
+				{sourceFile: "outro.mp4", seq: 4},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -286,11 +378,17 @@ func TestResolveTimeline(t *testing.T) {
 				t.Fatalf("len=%d, want %d; got %v", len(got), len(tc.want), got)
 			}
 			for i, w := range tc.want {
-				if got[i].Collection != w.coll {
-					t.Errorf("[%d] collection=%q, want %q", i, got[i].Collection, w.coll)
-				}
-				if got[i].Index != w.idx {
-					t.Errorf("[%d] Index=%d, want %d", i, got[i].Index, w.idx)
+				if w.sourceFile != "" {
+					if got[i].SourceFile != w.sourceFile {
+						t.Errorf("[%d] SourceFile=%q, want %q", i, got[i].SourceFile, w.sourceFile)
+					}
+				} else {
+					if got[i].Collection != w.coll {
+						t.Errorf("[%d] collection=%q, want %q", i, got[i].Collection, w.coll)
+					}
+					if got[i].Index != w.idx {
+						t.Errorf("[%d] Index=%d, want %d", i, got[i].Index, w.idx)
+					}
 				}
 				if w.seq != 0 && got[i].Sequence != w.seq {
 					t.Errorf("[%d] Sequence=%d, want %d", i, got[i].Sequence, w.seq)
