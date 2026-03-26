@@ -79,27 +79,49 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 					status.Source = entry.Source
 					status.Checksum = entry.Checksum
 					status.InstalledAt = entry.InstalledAt
+					status.InstallMethod = entry.InstallMethod
 					status.Satisfied = meetsMinimum(entry.Version, status.Minimum)
 					if !status.Satisfied {
 						status.Error = fmt.Sprintf("version %s below minimum %s", entry.Version, status.Minimum)
 					}
-					return status, entry, false
+					if entry.InstallMethod == "" {
+						entry.InstallMethod = detectInstallMethod(mainPath)
+						status.InstallMethod = entry.InstallMethod
+						dirty = true
+					}
+					return status, entry, dirty
 				}
 			}
 
 			version, err := readVersion(ctx, def, entry.Paths)
 			if err == nil {
+				mainPath := entry.Paths[def.Binaries[0].ID]
 				status.Version = version
-				status.Path = entry.Paths[def.Binaries[0].ID]
+				status.Path = mainPath
 				status.Paths = entry.Paths
 				status.Source = entry.Source
 				status.Checksum = entry.Checksum
 				status.InstalledAt = entry.InstalledAt
+				status.InstallMethod = entry.InstallMethod
 				status.Satisfied = meetsMinimum(version, status.Minimum)
 				if !status.Satisfied {
 					status.Error = fmt.Sprintf("version %s below minimum %s", version, status.Minimum)
 				}
-				return status, entry, false
+				needUpdate := false
+				if entry.Version != version {
+					entry.Version = version
+					if cs, csErr := computeChecksum(mainPath); csErr == nil {
+						entry.Checksum = cs
+						status.Checksum = cs
+					}
+					needUpdate = true
+				}
+				if entry.InstallMethod == "" {
+					entry.InstallMethod = detectInstallMethod(mainPath)
+					status.InstallMethod = entry.InstallMethod
+					needUpdate = true
+				}
+				return status, entry, needUpdate
 			}
 			status.Notes = append(status.Notes, fmt.Sprintf("manifest entry invalid: %v", err))
 		}
@@ -126,13 +148,16 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 				status.Checksum = checksum
 			}
 
+			method := detectInstallMethod(cachePaths[def.Binaries[0].ID])
+			status.InstallMethod = method
 			entry = ManifestEntry{
-				Tool:        def.Name,
-				Version:     version,
-				Source:      SourceCache,
-				Paths:       cachePaths,
-				Checksum:    status.Checksum,
-				InstalledAt: time.Now().UTC().Format(time.RFC3339),
+				Tool:          def.Name,
+				Version:       version,
+				Source:        SourceCache,
+				Paths:         cachePaths,
+				Checksum:      status.Checksum,
+				InstalledAt:   time.Now().UTC().Format(time.RFC3339),
+				InstallMethod: method,
 			}
 			dirty = true
 			return status, entry, dirty
@@ -169,12 +194,16 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 		status.Error = fmt.Sprintf("version %s below minimum %s", version, status.Minimum)
 	}
 
+	method := detectInstallMethod(systemPaths[def.Binaries[0].ID])
+	status.InstallMethod = method
+
 	newEntry := ManifestEntry{
-		Tool:        def.Name,
-		Version:     version,
-		Source:      SourceSystem,
-		Paths:       systemPaths,
-		InstalledAt: time.Now().UTC().Format(time.RFC3339),
+		Tool:          def.Name,
+		Version:       version,
+		Source:        SourceSystem,
+		Paths:         systemPaths,
+		InstalledAt:   time.Now().UTC().Format(time.RFC3339),
+		InstallMethod: method,
 	}
 
 	if entry.Tool == "" || entry.Source != SourceSystem || !equalPathMaps(entry.Paths, systemPaths) || entry.Version != version {

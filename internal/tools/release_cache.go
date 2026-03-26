@@ -85,6 +85,17 @@ func cachedLatestRelease(tool string) (releaseSpec, bool) {
 	}, true
 }
 
+// LatestCachedRelease returns the cached latest version for a tool if the
+// release cache entry exists and has not expired. This is used by the update
+// checker to opportunistically avoid a network call.
+func LatestCachedRelease(tool string) (string, bool) {
+	spec, ok := cachedLatestRelease(tool)
+	if !ok {
+		return "", false
+	}
+	return spec.Version, true
+}
+
 // cacheLatestRelease stores a release spec in the cache.
 func cacheLatestRelease(tool string, spec releaseSpec) {
 	rc := loadReleaseCache()

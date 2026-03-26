@@ -55,6 +55,12 @@ func manifestPath() (string, error) {
 	return filepath.Join(root, manifestFileName), nil
 }
 
+// LoadManifestPublic loads the tool manifest from disk. This is the exported
+// version for use by the CLI layer (e.g. update notices).
+func LoadManifestPublic() (Manifest, error) {
+	return loadManifest()
+}
+
 func loadManifest() (Manifest, error) {
 	path, err := manifestPath()
 	if err != nil {
