@@ -22,6 +22,7 @@ type tickMsg time.Time
 type Column struct {
 	Header string
 	Width  int
+	Flex   bool // if true, expands to fill remaining terminal width
 }
 
 // Row holds the field values for a single table row.
@@ -49,6 +50,7 @@ type ProgressModel struct {
 
 	// Viewport state for scrolling when rows exceed terminal height.
 	termHeight int
+	termWidth  int
 	scrollTop  int
 }
 
@@ -94,6 +96,7 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.termHeight = msg.Height
+		m.termWidth = msg.Width
 		return m, nil
 
 	case tickMsg:
@@ -149,13 +152,34 @@ func (m ProgressModel) View() string {
 		return fmt.Sprintf("Error: %v\n", m.err)
 	}
 
-	// Calculate column widths: max of header width and specified width.
-	// Content is truncated/marqueed to fit rather than expanding columns.
+	// Calculate column widths. Non-flex columns use their specified width (at
+	// least as wide as the header). Flex columns split any remaining terminal
+	// width equally after accounting for fixed columns and separators.
 	widths := make([]int, len(m.columns))
+	flexCount := 0
+	fixedTotal := 0
 	for i, col := range m.columns {
-		widths[i] = len(col.Header)
-		if col.Width > widths[i] {
-			widths[i] = col.Width
+		w := len(col.Header)
+		if col.Width > w {
+			w = col.Width
+		}
+		widths[i] = w
+		if col.Flex {
+			flexCount++
+		} else {
+			fixedTotal += w
+		}
+	}
+	if flexCount > 0 && m.termWidth > 0 {
+		separators := (len(m.columns) - 1) * 2
+		remaining := m.termWidth - fixedTotal - separators
+		if remaining > flexCount {
+			perFlex := remaining / flexCount
+			for i, col := range m.columns {
+				if col.Flex && perFlex > widths[i] {
+					widths[i] = perFlex
+				}
+			}
 		}
 	}
 

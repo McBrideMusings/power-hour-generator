@@ -489,7 +489,84 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		writeCollectionRenderTable(cmd, pp.Root, collectionClips, segments, fullResults)
 	}
 
+	if err := renderInlineFiles(ctx, pp, cfg, svc, renderForce); err != nil {
+		return err
+	}
+
 	return printCollectionRenderErrors(cmd.ErrOrStderr(), collectionClips, fullResults)
+}
+
+// renderInlineFiles re-encodes inline file entries (SequenceEntry.File) to
+// normalized MP4 segments under segments/__inline__/. Raw source files such as
+// .webm cannot be stream-copied into an MP4 concat list; re-encoding ensures
+// correct timestamps and container compatibility. Skips files whose output
+// already exists unless force is true.
+func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Config, svc *render.Service, force bool) error {
+	var segments []render.Segment
+
+	for seqIdx, entry := range cfg.Timeline.Sequence {
+		if entry.File == "" {
+			continue
+		}
+
+		sourcePath := entry.File
+		if !filepath.IsAbs(sourcePath) {
+			sourcePath = filepath.Join(pp.Root, sourcePath)
+		}
+		if _, err := os.Stat(sourcePath); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("timeline sequence[%d] file %q: not found", seqIdx, entry.File)
+			}
+			return fmt.Errorf("timeline sequence[%d] file %q: %w", seqIdx, entry.File, err)
+		}
+
+		outPath := render.InlineSegmentPath(pp.SegmentsDir, seqIdx, sourcePath)
+		inlineDir := filepath.Dir(outPath)
+
+		if !force {
+			if _, err := os.Stat(outPath); err == nil {
+				continue
+			}
+		}
+
+		if err := os.MkdirAll(inlineDir, 0o755); err != nil {
+			return fmt.Errorf("create inline segments dir: %w", err)
+		}
+
+		clip := project.Clip{
+			Sequence:   seqIdx + 1,
+			ClipType:   project.ClipType("__inline__"),
+			TypeIndex:  seqIdx,
+			SourceKind: project.SourceKindPlan,
+			Row: csvplan.Row{
+				Index: seqIdx + 1,
+				Link:  sourcePath,
+			},
+		}
+		segments = append(segments, render.Segment{
+			Clip:       clip,
+			Overlays:   nil,
+			SourcePath: sourcePath,
+			CachedPath: sourcePath,
+			OutputPath: outPath,
+		})
+	}
+
+	if len(segments) == 0 {
+		return nil
+	}
+
+	results := svc.Render(ctx, segments, render.Options{Force: force})
+	var errs []string
+	for _, res := range results {
+		if res.Err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(res.OutputPath), res.Err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("inline file render failed:\n  %s", strings.Join(errs, "\n  "))
+	}
+	return nil
 }
 
 func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, resolver *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
@@ -685,8 +762,8 @@ var collectionRenderColumns = []tui.Column{
 	{Header: "COLLECTION", Width: 12},
 	{Header: "INDEX", Width: 5},
 	{Header: "STATUS", Width: 10},
-	{Header: "SOURCE", Width: 20},
-	{Header: "OUTPUT", Width: 30},
+	{Header: "SOURCE", Width: 20, Flex: true},
+	{Header: "OUTPUT", Width: 30, Flex: true},
 }
 
 func buildCollectionRenderProgressModel(projectRoot string, clips []project.CollectionClip, segments []render.Segment) tui.ProgressModel {
@@ -731,7 +808,7 @@ func collectionRenderResultFields(projectRoot string, cc project.CollectionClip,
 			fields["SOURCE"] = "MISSING"
 		}
 	} else if res.Skipped {
-		fields["STATUS"] = "skipped"
+		fields["STATUS"] = "cached"
 	} else {
 		fields["STATUS"] = "rendered"
 	}
