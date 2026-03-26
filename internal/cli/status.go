@@ -35,6 +35,7 @@ type timelineEntryOutput struct {
 	Collection  string `json:"collection"`
 	Index       int    `json:"index"`
 	SegmentPath string `json:"segment_path"`
+	SourceFile  string `json:"source_file,omitempty"` // set for inline file entries
 }
 
 // rowStatus captures per-row cache and render status.
@@ -124,14 +125,32 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("resolve timeline: %w", err)
 		}
-		timelineEntries = make([]timelineEntryOutput, len(resolved))
-		for i, e := range resolved {
-			timelineEntries[i] = timelineEntryOutput{
-				Sequence:    e.Sequence,
-				Collection:  e.Collection,
-				Index:       e.Index,
-				SegmentPath: e.SegmentPath,
+		// Build a seqIdx map so inline entries can compute their __inline__ segment path.
+		// seqIdx is the position in cfg.Timeline.Sequence, used by InlineSegmentPath.
+		fileSeqIdx := make(map[string]int)
+		for i, entry := range cfg.Timeline.Sequence {
+			if entry.File != "" {
+				fileSeqIdx[entry.File] = i
 			}
+		}
+		timelineEntries = make([]timelineEntryOutput, 0, len(resolved))
+		for _, e := range resolved {
+			out := timelineEntryOutput{
+				Sequence:   e.Sequence,
+				Collection: e.Collection,
+				Index:      e.Index,
+			}
+			if e.SourceFile != "" {
+				out.SourceFile = e.SourceFile
+				sourcePath := e.SourceFile
+				if !filepath.IsAbs(sourcePath) {
+					sourcePath = filepath.Join(pp.Root, sourcePath)
+				}
+				out.SegmentPath = render.InlineSegmentPath(pp.SegmentsDir, fileSeqIdx[e.SourceFile], sourcePath)
+			} else {
+				out.SegmentPath = e.SegmentPath
+			}
+			timelineEntries = append(timelineEntries, out)
 		}
 	}
 
@@ -289,6 +308,9 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 }
 
 func timelineEntryLabel(e timelineEntryOutput, collections map[string]project.Collection) string {
+	if e.SourceFile != "" {
+		return filepath.Base(e.SourceFile)
+	}
 	if c, ok := collections[e.Collection]; ok && e.Index >= 1 && e.Index <= len(c.Rows) {
 		row := c.Rows[e.Index-1]
 		title := sanitizeField(row.CustomFields["title"])
@@ -419,11 +441,19 @@ func printStatusResult(projectPath string, collections map[string]project.Collec
 	fmt.Println()
 	fmt.Printf("  %4s  %s\n", bold.Render("#"), bold.Render("Title"))
 
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Inline(true)
 	for _, e := range timeline {
 		label := timelineEntryLabel(e, collections)
 		style := collStyles[e.Collection]
 		seg := ""
-		if e.SegmentPath != "" {
+		if e.SourceFile != "" {
+			// Inline file: show source file and whether the rendered segment exists.
+			if _, err := os.Stat(e.SegmentPath); err == nil {
+				seg = "  " + green.Render("✓ rendered")
+			} else {
+				seg = "  " + red.Render("not rendered")
+			}
+		} else if e.SegmentPath != "" {
 			seg = "  " + green.Render("✓") + " " + filepath.Base(e.SegmentPath)
 		}
 		fmt.Printf("  %4d  %s%s\n", e.Sequence, style.Render(label), seg)

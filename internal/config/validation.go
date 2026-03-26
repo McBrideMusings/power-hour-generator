@@ -30,7 +30,7 @@ func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) 
 	results = append(results, c.validateOverlayEntries()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
-	results = append(results, c.validateTimeline()...)
+	results = append(results, c.validateTimeline(projectRoot)...)
 	return results
 }
 
@@ -146,7 +146,7 @@ func (c Config) validateSegmentTemplate(knownTokens []string) []ValidationResult
 	return results
 }
 
-func (c Config) validateTimeline() []ValidationResult {
+func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 	var results []ValidationResult
 	for i, entry := range c.Timeline.Sequence {
 		hasCollection := strings.TrimSpace(entry.Collection) != ""
@@ -167,7 +167,7 @@ func (c Config) validateTimeline() []ValidationResult {
 			continue
 		}
 
-		// Inline file entry: count and interleave are not valid.
+		// Inline file entry: count and interleave are not valid; file must exist.
 		if hasFile {
 			if entry.Count > 0 {
 				results = append(results, ValidationResult{
@@ -179,6 +179,16 @@ func (c Config) validateTimeline() []ValidationResult {
 				results = append(results, ValidationResult{
 					Level:   "error",
 					Message: fmt.Sprintf("timeline sequence[%d] (file %q): interleave is not valid for file entries", i, entry.File),
+				})
+			}
+			resolved := entry.File
+			if !filepath.IsAbs(resolved) {
+				resolved = filepath.Join(projectRoot, resolved)
+			}
+			if _, err := os.Stat(resolved); os.IsNotExist(err) {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("timeline sequence[%d] (file %q): file not found", i, entry.File),
 				})
 			}
 			continue
