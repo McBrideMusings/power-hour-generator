@@ -103,7 +103,7 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 	numberFontFile := fontFilePath(numberFontPattern)
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
-	outlineWidth := optInt(opts, "outline_width", 2)
+	outlineWidth := optInt(opts, "outline_width", 8)
 	titleSize := optInt(opts, "title_size", 64)
 	artistSize := optInt(opts, "artist_size", 32)
 	_ = optInt(opts, "artist_letter_spacing", 0) // reserved for future use
@@ -145,18 +145,18 @@ func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float6
 	if artistText != "" {
 		artistY := fmt.Sprintf("h-text_h-%d", bottomMargin)
 		filters = append(filters, buildDrawText(drawTextOptions{
-			Text:          artistText,
-			Start:         0,
-			End:           infoDuration,
-			FadeIn:        fadeDuration,
-			FadeOut:       fadeDuration,
-			FontSize:      artistSize,
-			FontFile:      artistFontFile,
-			FontColor:     color,
-			OutlineColor:  outlineColor,
-			OutlineWidth:  max(outlineWidth-1, 1),
-			XExpr:         "40",
-			YExpr:         artistY,
+			Text:         artistText,
+			Start:        0,
+			End:          infoDuration,
+			FadeIn:       fadeDuration,
+			FadeOut:      fadeDuration,
+			FontSize:     artistSize,
+			FontFile:     artistFontFile,
+			FontColor:    color,
+			OutlineColor: outlineColor,
+			OutlineWidth: max(outlineWidth-1, 1),
+			XExpr:        "40",
+			YExpr:        artistY,
 		}))
 	}
 
@@ -237,17 +237,20 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 	text := optStr(opts, "text", "Drink!")
 	color := optStr(opts, "color", "white")
 	outlineColor := optStr(opts, "outline_color", "black")
-	outlineWidth := optInt(opts, "outline_width", 4)
+	outlineWidth := optInt(opts, "outline_width", 14)
 	shadowColor := optStr(opts, "shadow_color", "yellow")
-	shadowOffsetX := optInt(opts, "shadow_offset_x", 3)
-	shadowOffsetY := optInt(opts, "shadow_offset_y", 3)
-	size := optInt(opts, "size", 120)
+	shadowOffsetX := optInt(opts, "shadow_offset_x", 6)
+	shadowOffsetY := optInt(opts, "shadow_offset_y", 8)
+	size := optInt(opts, "size", 140)
+	bottomMargin := optInt(opts, "bottom_margin", 40)
 
 	var filters []string
 
+	yExpr := fmt.Sprintf("h-text_h-%d", bottomMargin)
+
 	// Shadow layer
 	shadowX := fmt.Sprintf("(w-text_w)/2+%d", shadowOffsetX)
-	shadowY := fmt.Sprintf("(h-text_h)/2+%d", shadowOffsetY)
+	shadowY := fmt.Sprintf("h-text_h-%d+%d", bottomMargin, shadowOffsetY)
 	filters = append(filters, buildDrawText(drawTextOptions{
 		Text:         text,
 		Start:        0,
@@ -255,8 +258,8 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 		FontSize:     size,
 		FontFile:     fontFile,
 		FontColor:    shadowColor,
-		OutlineColor: shadowColor + "@0",
-		OutlineWidth: 0,
+		OutlineColor: shadowColor,
+		OutlineWidth: outlineWidth,
 		XExpr:        shadowX,
 		YExpr:        shadowY,
 		Persistent:   true,
@@ -273,7 +276,7 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 		OutlineColor: outlineColor,
 		OutlineWidth: outlineWidth,
 		XExpr:        "(w-text_w)/2",
-		YExpr:        "(h-text_h)/2",
+		YExpr:        yExpr,
 		Persistent:   true,
 	}))
 
