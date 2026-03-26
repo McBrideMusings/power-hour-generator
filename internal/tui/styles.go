@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 var (
 	// HeaderStyle styles the column header row.
@@ -33,6 +37,9 @@ var (
 		// Error
 		"error": lipgloss.NewStyle().Foreground(lipgloss.Color("1")),
 
+		// Queued
+		"queued": lipgloss.NewStyle().Foreground(lipgloss.Color("5")),
+
 		// Pending
 		"pending": lipgloss.NewStyle().Faint(true),
 	}
@@ -42,6 +49,10 @@ var (
 func StatusStyle(status string) lipgloss.Style {
 	if s, ok := statusStyles[status]; ok {
 		return s
+	}
+	// Progress bar strings (e.g. "===-- 40%") use the rendering color.
+	if strings.HasPrefix(status, "=") || strings.HasPrefix(status, "-") {
+		return statusStyles["rendering"]
 	}
 	return lipgloss.NewStyle()
 }
