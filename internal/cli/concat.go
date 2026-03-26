@@ -116,6 +116,21 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	// Re-encode any inline file entries to normalized MP4 segments.
+	for _, entry := range cfg.Timeline.Sequence {
+		if entry.File != "" {
+			sw.Update("Rendering inline files...")
+			svc, err := render.NewService(ctx2, pp, cfg, nil)
+			if err != nil {
+				return fmt.Errorf("init render service: %w", err)
+			}
+			if err := renderInlineFiles(ctx2, pp, cfg, svc, false); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	// Ensure project meta directory exists for the concat list.
 	if err := pp.EnsureMetaDirs(); err != nil {
 		return err
@@ -237,3 +252,4 @@ func formatBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
+
