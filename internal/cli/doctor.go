@@ -144,10 +144,23 @@ func checkTools(cmd *cobra.Command) healthCheck {
 			Summary: fmt.Sprintf("%d of %d tools satisfied", satisfied, total),
 		}
 	}
+
+	summary := fmt.Sprintf("%s (missing filters: %s)", joinComma(toolInfo), joinComma(missingFilters))
+	var ffmpegMethod string
+	for _, st := range statuses {
+		if st.Tool == "ffmpeg" {
+			ffmpegMethod = st.InstallMethod
+			break
+		}
+	}
+	suggestions := tools.FilterRemediation(missingFilters, ffmpegMethod)
+	if len(suggestions) > 0 {
+		summary += "\n  Suggested fix: " + joinComma(suggestions)
+	}
 	return healthCheck{
 		Name:    "Tools",
 		Status:  "warning",
-		Summary: fmt.Sprintf("%s (missing filters: %s)", joinComma(toolInfo), joinComma(missingFilters)),
+		Summary: summary,
 	}
 }
 

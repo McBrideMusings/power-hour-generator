@@ -1,15 +1,18 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	xterm "github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
@@ -265,25 +268,167 @@ func printStatusTable(cmd *cobra.Command, statuses []tools.Status) {
 		return
 	}
 
+	bold := lipgloss.NewStyle().Bold(true).Inline(true)
+	faint := lipgloss.NewStyle().Faint(true).Inline(true)
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Inline(true)
+	yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Inline(true)
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Inline(true)
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Inline(true)
+
 	rows := make([]tools.Status, len(statuses))
 	copy(rows, statuses)
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].Tool < rows[j].Tool
 	})
 
-	cmd.Printf("%-10s %-8s %-12s %-7s %s\n", "Tool", "Source", "Version", "OK", "Path")
-	for _, st := range rows {
-		ok := "no"
-		if st.Satisfied {
-			ok = "yes"
+	col := func(s lipgloss.Style, width int) func(string) string {
+		return func(text string) string {
+			return s.Width(width).Render(text)
 		}
+	}
+
+	hTool := col(bold, 10)
+	hVer := col(bold, 14)
+	hMethod := col(bold, 14)
+	hStatus := col(bold, 10)
+
+	out := cmd.OutOrStdout()
+	fmt.Fprintf(out, "  %s %s %s %s %s\n",
+		hTool("TOOL"),
+		hVer("VERSION"),
+		hMethod("INSTALLED VIA"),
+		hStatus("STATUS"),
+		bold.Render("PATH"),
+	)
+
+	cTool := col(lipgloss.NewStyle().Inline(true), 10)
+	cVer := col(lipgloss.NewStyle().Inline(true), 14)
+	cMethod := col(lipgloss.NewStyle().Inline(true), 14)
+
+	var updatable []tools.Status
+	for _, st := range rows {
+		statusLabel := red.Width(10).Render("missing")
+		if st.Satisfied {
+			statusLabel = green.Width(10).Render("ok")
+		} else if st.Version != "" {
+			statusLabel = yellow.Width(10).Render("outdated")
+		}
+
 		path := st.Path
 		if path == "" {
-			path = "(missing)"
+			path = faint.Render("(not found)")
 		}
-		cmd.Printf("%-10s %-8s %-12s %-7s %s\n", st.Tool, st.Source, st.Version, ok, path)
+
+		method := tools.InstallMethodLabel(st.InstallMethod)
+		if method == "" {
+			method = "-"
+		}
+
+		fmt.Fprintf(out, "  %s %s %s %s %s\n",
+			cTool(st.Tool),
+			cVer(st.Version),
+			cMethod(method),
+			statusLabel,
+			path,
+		)
+
 		if st.Error != "" {
-			cmd.Printf("  error: %s\n", st.Error)
+			fmt.Fprintf(out, "    %s\n", red.Render(st.Error))
+		}
+
+		if hint := tools.FormatUpdateHint(st.Tool, st.Version); hint != "" {
+			fmt.Fprintf(out, "    %s\n", cyan.Render(hint))
+			updatable = append(updatable, st)
+		}
+	}
+
+	if len(updatable) > 0 && xterm.IsTerminal(os.Stdin.Fd()) {
+		fmt.Fprintln(out)
+		promptToolUpdates(cmd, updatable)
+	}
+}
+
+func promptToolUpdates(cmd *cobra.Command, updatable []tools.Status) {
+	cyan := lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Inline(true)
+	faint := lipgloss.NewStyle().Faint(true).Inline(true)
+	green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Inline(true)
+
+	names := make([]string, len(updatable))
+	for i, st := range updatable {
+		names[i] = st.Tool
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n",
+		cyan.Render("Updates available for: "+strings.Join(names, ", ")+"."),
+		faint.Render("Install now? [y/N]"),
+	)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return
+	}
+	answer := strings.TrimSpace(strings.ToLower(scanner.Text()))
+	if answer != "y" && answer != "yes" {
+		return
+	}
+
+	out := cmd.OutOrStdout()
+
+	// Separate tools by update strategy.
+	var managed []tools.Status
+	var external []tools.Status
+	for _, st := range updatable {
+		switch st.InstallMethod {
+		case tools.InstallMethodManaged, "":
+			managed = append(managed, st)
+		default:
+			external = append(external, st)
+		}
+	}
+
+	// For externally-managed tools (homebrew, apt, etc.), run the appropriate
+	// package manager command directly.
+	for _, st := range external {
+		notice := tools.UpdateNotice{Tool: st.Tool, InstallMethod: st.InstallMethod}
+		updateCmd := notice.UpdateCommand()
+		fmt.Fprintf(out, "Updating %s via %s...\n", st.Tool, tools.InstallMethodLabel(st.InstallMethod))
+		parts := strings.Fields(updateCmd)
+		c := exec.CommandContext(cmd.Context(), parts[0], parts[1:]...)
+		c.Stdout = out
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+		} else {
+			fmt.Fprintf(out, "  %s\n", green.Render(st.Tool+" updated."))
+			tools.ClearUpdateNotice(st.Tool)
+		}
+	}
+
+	// For powerhour-managed tools, use the install system with the target version.
+	if len(managed) > 0 {
+		pp, err := paths.Resolve(projectDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return
+		}
+		cfg, err := config.Load(pp.ConfigFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return
+		}
+		baseCtx := tools.WithMinimums(cmd.Context(), cfg.ToolMinimums())
+		ctx, cancel := context.WithTimeout(baseCtx, 10*time.Minute)
+		defer cancel()
+
+		for _, st := range managed {
+			targetVersion := tools.FormatUpdateTarget(st.Tool)
+			fmt.Fprintf(out, "Updating %s to %s...\n", st.Tool, targetVersion)
+			_, err := tools.Install(ctx, st.Tool, targetVersion, tools.InstallOptions{Force: true, Version: targetVersion})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  error: %v\n", err)
+			} else {
+				fmt.Fprintf(out, "  %s\n", green.Render(st.Tool+" updated."))
+				tools.ClearUpdateNotice(st.Tool)
+			}
 		}
 	}
 }
