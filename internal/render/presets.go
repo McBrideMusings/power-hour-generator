@@ -14,6 +14,16 @@ import (
 // PresetFunc generates drawtext filter strings for an overlay preset.
 type PresetFunc func(opts map[string]string, row csvplan.Row, clipDuration float64) []string
 
+// OverlayMoment maps an overlay name to a sample timestamp (midpoint of its
+// visible window) for use by the sample command.
+type OverlayMoment struct {
+	Name       string
+	SampleTime float64 // midpoint of the overlay's visible window
+}
+
+// MomentsFunc returns the named sample moments for a preset.
+type MomentsFunc func(opts map[string]string, row csvplan.Row, clipDuration float64) []OverlayMoment
+
 var presetRegistry = map[string]PresetFunc{
 	"song-info": presetSongInfo,
 	"drink":     presetDrink,
@@ -21,10 +31,35 @@ var presetRegistry = map[string]PresetFunc{
 	"none":      nil, // no overlays
 }
 
+var momentsRegistry = map[string]MomentsFunc{
+	"song-info": momentsSongInfo,
+	"drink":     momentsDrink,
+}
+
 // LookupPreset returns the preset function for a given type name.
 func LookupPreset(typeName string) (PresetFunc, bool) {
 	fn, ok := presetRegistry[typeName]
 	return fn, ok
+}
+
+// LookupMoments returns the moments function for a given preset type.
+func LookupMoments(typeName string) (MomentsFunc, bool) {
+	fn, ok := momentsRegistry[typeName]
+	return fn, ok
+}
+
+// ResolveOverlayMoments returns all named sample moments for the given overlays.
+func ResolveOverlayMoments(overlays []config.OverlayEntry, row csvplan.Row, clipDuration float64) []OverlayMoment {
+	var moments []OverlayMoment
+	for _, entry := range overlays {
+		typeName := strings.TrimSpace(entry.Type)
+		fn, ok := momentsRegistry[typeName]
+		if !ok || fn == nil {
+			continue
+		}
+		moments = append(moments, fn(entry.Options, row, clipDuration)...)
+	}
+	return moments
 }
 
 // ExpandOverlays converts overlay entries into drawtext filter strings.
@@ -53,7 +88,7 @@ func ExpandOverlays(overlays []config.OverlayEntry, row csvplan.Row, clipDuratio
 
 func presetSongInfo(opts map[string]string, row csvplan.Row, clipDuration float64) []string {
 	font := defaultFont()
-	titleFontPattern := optStr(opts, "title_font", font+":Bold")
+	titleFontPattern := optStr(opts, "title_font", font)
 	artistFontPattern := optStr(opts, "artist_font", font)
 	numberFontPattern := optStr(opts, "number_font", font+":Bold")
 	// Legacy "font" option overrides all three if set
@@ -243,6 +278,57 @@ func presetDrink(opts map[string]string, row csvplan.Row, clipDuration float64) 
 	}))
 
 	return filters
+}
+
+func momentsSongInfo(opts map[string]string, row csvplan.Row, clipDuration float64) []OverlayMoment {
+	infoDuration := optFloat(opts, "info_duration", 4.0)
+	fadeDuration := optFloat(opts, "fade_duration", 0.5)
+	creditDuration := optFloat(opts, "credit_duration", infoDuration)
+
+	var moments []OverlayMoment
+
+	// Title/artist: visible from 0 to infoDuration, midpoint after fade-in
+	titleMid := (fadeDuration + infoDuration) / 2
+	if titleMid > clipDuration {
+		titleMid = clipDuration / 2
+	}
+
+	titleText := strings.TrimSpace(renderOverlayTemplate("{title}", row))
+	if titleText != "" {
+		moments = append(moments, OverlayMoment{Name: "title", SampleTime: titleMid})
+	}
+
+	artistText := strings.TrimSpace(renderOverlayTemplate("{artist}", row))
+	if artistText != "" {
+		moments = append(moments, OverlayMoment{Name: "artist", SampleTime: titleMid})
+	}
+
+	// Credit: visible from (clipDuration - creditDuration) to clipDuration
+	nameText := strings.TrimSpace(renderOverlayTemplate("{name}", row))
+	if nameText != "" {
+		creditStart := clipDuration - creditDuration
+		if creditStart < 0 {
+			creditStart = 0
+		}
+		creditMid := (creditStart + fadeDuration + clipDuration) / 2
+		if creditMid >= clipDuration {
+			creditMid = clipDuration - fadeDuration
+		}
+		moments = append(moments, OverlayMoment{Name: "credit", SampleTime: creditMid})
+	}
+
+	// Number: persistent, sample at midpoint of clip
+	if optBool(opts, "show_number", true) {
+		moments = append(moments, OverlayMoment{Name: "number", SampleTime: clipDuration / 2})
+	}
+
+	return moments
+}
+
+func momentsDrink(opts map[string]string, _ csvplan.Row, clipDuration float64) []OverlayMoment {
+	return []OverlayMoment{
+		{Name: "drink", SampleTime: clipDuration / 2},
+	}
 }
 
 func optStr(opts map[string]string, key, fallback string) string {

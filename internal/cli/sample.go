@@ -25,17 +25,17 @@ var (
 
 func newSampleCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "sample <time>",
+		Use:   "sample <time|overlay-name>",
 		Short: "Extract a single frame for previewing overlays",
 		Long: `Extract a single frame from the rendered timeline at a given time.
 
-Without --index, the time is treated as an absolute position in the
-concatenated timeline (e.g. "10m" shows what would be at the 10-minute mark).
+The first argument can be a timestamp (2s, 500ms, 0:30) or an overlay
+name (title, artist, credit, number, drink) to automatically sample at
+the midpoint of that overlay's visible window.
 
-With --index, the time is relative to a specific clip. If --collection is
-also provided, --index refers to the row number within that collection.
-Otherwise, --index refers to the position in the full timeline order
-(including interstitials).`,
+Without --index, a timestamp is treated as an absolute position in the
+concatenated timeline. With --index, the time is relative to that clip.
+Add --collection to narrow --index to a specific collection's rows.`,
 		Args: cobra.ExactArgs(1),
 		RunE: runSample,
 	}
@@ -54,13 +54,17 @@ func runSample(cmd *cobra.Command, args []string) error {
 	}
 
 	timeArg := args[0]
-	sampleTime, err := parseSampleTime(timeArg)
-	if err != nil {
-		return fmt.Errorf("invalid time %q: %w", timeArg, err)
-	}
+	// Try parsing as a timestamp first; if it fails, treat as an overlay name.
+	sampleTime, timeErr := parseSampleTime(timeArg)
+	isOverlayName := timeErr != nil
 
 	if sampleCollection != "" && sampleIndex == 0 {
 		return fmt.Errorf("--collection requires --index")
+	}
+
+	// Overlay names require --index (we need a specific clip to resolve moments)
+	if isOverlayName && sampleIndex == 0 {
+		return fmt.Errorf("%q is not a valid timestamp; use --index to specify a clip when sampling by overlay name", timeArg)
 	}
 
 	glogf, gcloser := logx.StartCommand("sample")
@@ -114,7 +118,7 @@ func runSample(cmd *cobra.Command, args []string) error {
 	var clipOffset float64
 
 	if sampleIndex > 0 {
-		// Clip-relative mode: find the specific clip, use sampleTime as offset within it.
+		// Clip-relative mode: find the specific clip.
 		clipOffset = sampleTime
 		if sampleCollection != "" {
 			// --collection + --index: index into that collection's rows
@@ -161,6 +165,31 @@ func runSample(cmd *cobra.Command, args []string) error {
 			targetClip.Clip.Row.Index,
 			title,
 			formatSampleTime(clipOffset))
+	}
+
+	// If the time arg is an overlay name, resolve it to a timestamp.
+	if isOverlayName {
+		clipDur := float64(targetClip.Clip.DurationSeconds)
+		if clipDur <= 0 {
+			clipDur = 60
+		}
+		moments := render.ResolveOverlayMoments(targetClip.Overlays, targetClip.Clip.Row, clipDur)
+		found := false
+		for _, m := range moments {
+			if strings.EqualFold(m.Name, timeArg) {
+				clipOffset = m.SampleTime
+				found = true
+				break
+			}
+		}
+		if !found {
+			var names []string
+			for _, m := range moments {
+				names = append(names, m.Name)
+			}
+			return fmt.Errorf("unknown overlay %q; available: %s", timeArg, strings.Join(names, ", "))
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Overlay %q → sampling at %s\n", timeArg, formatSampleTime(clipOffset))
 	}
 
 	// Build the render segment for the target clip.
