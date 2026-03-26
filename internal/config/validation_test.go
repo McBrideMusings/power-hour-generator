@@ -262,7 +262,7 @@ func TestValidateStrict_NoCollections(t *testing.T) {
 
 func TestValidateTimeline_Empty(t *testing.T) {
 	cfg := Config{}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	if len(results) != 0 {
 		t.Fatalf("expected no results for empty timeline, got %v", results)
 	}
@@ -284,7 +284,7 @@ func TestValidateTimeline_Valid(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	if len(results) != 0 {
 		t.Fatalf("expected no results for valid timeline, got %v", results)
 	}
@@ -299,7 +299,7 @@ func TestValidateTimeline_MissingCollection(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -322,7 +322,7 @@ func TestValidateTimeline_MissingInterleaveCollection(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -346,7 +346,7 @@ func TestValidateTimeline_EveryZero(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -370,7 +370,7 @@ func TestValidateTimeline_EveryNegative(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -393,7 +393,7 @@ func TestValidateTimeline_NegativeCount(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -414,7 +414,7 @@ func TestValidateTimeline_EmptyCollectionName(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -435,7 +435,7 @@ func TestValidateTimeline_FileBothCollectionAndFile(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -456,7 +456,7 @@ func TestValidateTimeline_FileWithCount(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -477,7 +477,7 @@ func TestValidateTimeline_FileWithInterleave(t *testing.T) {
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline("")
 	var errs []ValidationResult
 	for _, r := range results {
 		if r.Level == "error" {
@@ -490,16 +490,22 @@ func TestValidateTimeline_FileWithInterleave(t *testing.T) {
 }
 
 func TestValidateTimeline_FileEntryValid(t *testing.T) {
+	dir := t.TempDir()
+	f, err := os.CreateTemp(dir, "intro*.mp4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
 	cfg := Config{
 		Collections: map[string]CollectionConfig{"songs": {Plan: "songs.csv"}},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
-				{File: "intro.mp4"},
+				{File: filepath.Base(f.Name())},
 				{Collection: "songs"},
 			},
 		},
 	}
-	results := cfg.validateTimeline()
+	results := cfg.validateTimeline(dir)
 	for _, r := range results {
 		if r.Level == "error" {
 			t.Errorf("unexpected validation error: %s", r.Message)

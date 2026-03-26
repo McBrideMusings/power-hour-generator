@@ -21,6 +21,7 @@ import (
 var (
 	concatOut    string
 	concatDryRun bool
+	concatForce  bool
 )
 
 func newConcatCmd() *cobra.Command {
@@ -32,6 +33,7 @@ func newConcatCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&concatOut, "out", "", "Output file path (default: <project>/powerhour.mp4)")
 	cmd.Flags().BoolVar(&concatDryRun, "dry-run", false, "Print the resolved segment list without running ffmpeg")
+	cmd.Flags().BoolVar(&concatForce, "force", false, "Re-render inline file segments even if they already exist")
 
 	return cmd
 }
@@ -124,7 +126,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 			if err != nil {
 				return fmt.Errorf("init render service: %w", err)
 			}
-			if err := renderInlineFiles(ctx2, pp, cfg, svc, false); err != nil {
+			if err := renderInlineFiles(ctx2, pp, cfg, svc, concatForce); err != nil {
 				return err
 			}
 			break
