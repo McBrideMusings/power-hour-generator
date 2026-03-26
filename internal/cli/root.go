@@ -30,6 +30,9 @@ func newRootCmd() *cobra.Command {
 		Short:         "Power Hour generator CLI",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPostRun: func(cmd *cobra.Command, args []string) {
+			printUpdateNotices(cmd)
+		},
 	}
 
 	cmd.PersistentFlags().StringVar(&projectDir, "project", "", "Path to project directory")
