@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 )
@@ -25,6 +24,72 @@ const (
 # - link: path/to/clip.mp4
 #   start_time: "0:00"
 #   duration: 7
+`
+	// defaultConfigYAML is the raw template written by init. Using a string
+	// constant (rather than config.Default().Marshal()) allows embedding YAML
+	// comments for documentation and examples.
+	defaultConfigYAML = `version: 1
+video:
+    width: 1920
+    height: 1080
+    fps: 30
+    codec: libx264
+    crf: 20
+    preset: medium
+audio:
+    acodec: aac
+    bitrate_kbps: 192
+    sample_rate: 48000
+    channels: 2
+    loudnorm:
+        enabled: true
+        integrated_lufs: -14
+        true_peak_db: -1.5
+        lra_db: 11
+collections:
+    songs:
+        plan: songs.yaml
+        output_dir: songs
+        overlays:
+            - type: song-info
+        link_header: link
+        start_header: start_time
+        duration_header: duration
+    interstitials:
+        plan: interstitials.yaml
+        output_dir: interstitials
+        overlays:
+            - type: drink
+        link_header: link
+        start_header: start_time
+        duration_header: duration
+timeline:
+    sequence:
+        # - file: videos/intro.mp4              # optional: play a video before songs start
+        - collection: songs
+          count: 30                             # adjust to half your total song count
+          interleave:
+            collection: interstitials
+            every: 1
+        # - file: videos/intermission.mp4       # optional: play a video between halves
+        - collection: songs                     # automatically continues from row 31
+          interleave:
+            collection: interstitials
+            every: 1
+        # - file: videos/outro.mp4              # optional: play a video after songs end
+outputs:
+    segment_template: $INDEX_PAD3_$SAFE_TITLE
+plan:
+    headers: {}
+    default_duration_s: 60
+files:
+    plan: ""
+    cookies: ""
+tools: {}
+downloads:
+    filename_template: $ID
+library: {}
+segments_base_dir: segments
 `
 )
 
@@ -177,14 +242,7 @@ func ensureConfig(pp paths.ProjectPaths, created *[]string, logger Logger) error
 		return nil
 	}
 
-	cfg := config.Default()
-	cfg.ApplyDefaults()
-	data, err := cfg.Marshal()
-	if err != nil {
-		return err
-	}
-
-	if err := os.WriteFile(pp.ConfigFile, data, 0o644); err != nil {
+	if err := os.WriteFile(pp.ConfigFile, []byte(defaultConfigYAML), 0o644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	logger.Printf("created config: %s", pp.ConfigFile)

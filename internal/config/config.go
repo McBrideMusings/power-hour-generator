@@ -34,11 +34,13 @@ type TimelineConfig struct {
 	Sequence []SequenceEntry `yaml:"sequence"`
 }
 
-// SequenceEntry defines how a single collection appears in the timeline.
+// SequenceEntry defines how a single collection or inline file appears in the timeline.
+// Exactly one of Collection or File must be set.
 type SequenceEntry struct {
-	Collection string            `yaml:"collection"`
-	Count      int               `yaml:"count,omitempty"` // 0 = play all
-	Interleave *InterleaveConfig `yaml:"interleave,omitempty"`
+	Collection string            `yaml:"collection,omitempty"`
+	Count      int               `yaml:"count,omitempty"` // 0 = play all; only valid with Collection
+	File       string            `yaml:"file,omitempty"`  // inline file path; mutually exclusive with Collection
+	Interleave *InterleaveConfig `yaml:"interleave,omitempty"` // only valid with Collection
 }
 
 // InterleaveConfig describes how to splice a second collection into a sequence entry.
