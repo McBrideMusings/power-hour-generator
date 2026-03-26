@@ -36,9 +36,9 @@ func TestBuildFilterGraphIncludesOverlays(t *testing.T) {
 		"drawtext=text='JOURNEY'",
 		"enable='between(t\\,0\\,4)'",
 		"alpha='if(lt(t\\,0)",
-		"drawtext=text='Added by\\: O''Brien'",
+		"drawtext=text='Credit\\: O''Brien'",
 		"drawtext=text='1'",
-		"font='" + defaultFont(),
+		"fontfile='",
 	}
 
 	for _, expected := range expectations {
