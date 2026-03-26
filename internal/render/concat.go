@@ -47,7 +47,19 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 	consumed := make(map[string]int, len(collections))
 	var result []TimelineSegmentPath
 
-	for _, entry := range cfg.Timeline.Sequence {
+	for seqIdx, entry := range cfg.Timeline.Sequence {
+		// Inline file entry: resolve to the normalized segment path under __inline__/.
+		// Raw source files (e.g. .webm) cannot be stream-copied into MP4; they must
+		// be re-encoded first via renderInlineFiles.
+		if entry.File != "" {
+			resolvedFile := resolveInlineFilePath(pp.Root, entry.File)
+			result = append(result, TimelineSegmentPath{
+				CollectionName: "__inline__",
+				Path:           InlineSegmentPath(pp.SegmentsDir, seqIdx, resolvedFile),
+			})
+			continue
+		}
+
 		mainPaths, ok := collPaths[entry.Collection]
 		if !ok {
 			return nil, fmt.Errorf("timeline references unknown collection %q", entry.Collection)
@@ -137,6 +149,11 @@ func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip)
 	var result []TimelineClip
 
 	for _, entry := range cfg.Timeline.Sequence {
+		// Inline file entries have no collection clips; skip them.
+		if entry.File != "" {
+			continue
+		}
+
 		mainClips, ok := byCollection[entry.Collection]
 		if !ok {
 			return nil, fmt.Errorf("timeline references unknown collection %q", entry.Collection)
@@ -311,10 +328,13 @@ func RunConcat(ctx context.Context, concatFile, outputPath string, enc tools.Res
 	}
 
 	// Try stream copy first (always works when all segments share the same codec).
+	// -fflags +genpts regenerates presentation timestamps so discontinuous
+	// per-segment timestamps don't accumulate into a broken output duration.
 	streamArgs := []string{
 		"-y",
 		"-f", "concat",
 		"-safe", "0",
+		"-fflags", "+genpts",
 		"-i", concatFile,
 		"-c", "copy",
 		outputPath,
@@ -353,6 +373,23 @@ func buildReencodeArgs(concatFile, outputPath string, enc tools.ResolvedEncoding
 	}
 	args = append(args, outputPath)
 	return args
+}
+
+// resolveInlineFilePath resolves a file path from a sequence entry relative to
+// the project root when the path is not absolute.
+func resolveInlineFilePath(root, file string) string {
+	if filepath.IsAbs(file) {
+		return file
+	}
+	return filepath.Join(root, file)
+}
+
+// InlineSegmentPath returns the normalized output path for an inline file entry
+// at the given sequence index. Both ResolveTimelineSegments and renderInlineFiles
+// must use this to ensure the paths match.
+func InlineSegmentPath(segmentsDir string, seqIdx int, sourceFile string) string {
+	basename := strings.TrimSuffix(filepath.Base(sourceFile), filepath.Ext(sourceFile))
+	return filepath.Join(segmentsDir, "__inline__", fmt.Sprintf("%03d-%s.mp4", seqIdx, sanitizeSegment(basename)))
 }
 
 func runFFmpeg(ctx context.Context, ffmpegPath string, args []string, stdout, stderr io.Writer) error {
