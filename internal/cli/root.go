@@ -20,6 +20,10 @@ func Execute() {
 	}
 }
 
+func init() {
+	cobra.EnableCommandSorting = false
+}
+
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           "powerhour",
@@ -31,24 +35,44 @@ func newRootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&projectDir, "project", "", "Path to project directory")
 	cmd.PersistentFlags().BoolVar(&outputJSON, "json", false, "Output machine-readable JSON")
 
-	cmd.AddCommand(newInitCmd())
-	cmd.AddCommand(newCheckCmd())
-	cmd.AddCommand(newConfigCmd())
-	cmd.AddCommand(newToolsCmd())
-	cmd.AddCommand(newStatusCmd())
-	cmd.AddCommand(newValidateCmd())
-	cmd.AddCommand(newFetchCmd())
-	cmd.AddCommand(newRenderCmd())
-	cmd.AddCommand(newConcatCmd())
-	cmd.AddCommand(newLibraryCmd())
-	cmd.AddCommand(newCleanCmd())
-	cmd.AddCommand(newDoctorCmd())
-	cmd.AddCommand(newExportCmd())
-	cmd.AddCommand(newCacheCmd())
-	cmd.AddCommand(newSampleCmd())
+	cmd.AddGroup(
+		&cobra.Group{ID: "workflow", Title: "Workflow:"},
+		&cobra.Group{ID: "inspect", Title: "Inspect:"},
+		&cobra.Group{ID: "manage", Title: "Manage:"},
+	)
+
+	addTo := func(group string, cmds ...*cobra.Command) {
+		for _, c := range cmds {
+			c.GroupID = group
+			cmd.AddCommand(c)
+		}
+	}
+
+	addTo("workflow",
+		newInitCmd(),
+		newFetchCmd(),
+		newRenderCmd(),
+		newConcatCmd(),
+	)
+
+	addTo("inspect",
+		newStatusCmd(),
+		newSampleCmd(),
+		newValidateCmd(),
+		newDoctorCmd(),
+		newCheckCmd(),
+		newExportCmd(),
+		newConfigCmd(),
+	)
 
 	convertCmd := newConvertCmd()
-	cmd.AddCommand(convertCmd)
+	addTo("manage",
+		newCacheCmd(),
+		newLibraryCmd(),
+		newCleanCmd(),
+		newToolsCmd(),
+		convertCmd,
+	)
 	// convert operates on a standalone file path; project/json flags don't apply.
 	for _, name := range []string{"project", "json"} {
 		if f := convertCmd.InheritedFlags().Lookup(name); f != nil {
