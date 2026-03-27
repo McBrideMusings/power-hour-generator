@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -99,6 +101,25 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 
 	if len(segments) == 0 {
 		return fmt.Errorf("no segments found; run `powerhour render` first")
+	}
+
+	// Check for missing or stale segments and auto-render if needed.
+	if !concatDryRun && hasMissingSegments(segments) {
+		sw.Update("Rendering missing segments...")
+		glogf("auto-render: missing segments detected, triggering render")
+		savedConcurrency := renderConcurrency
+		savedNoProgress := renderNoProgress
+		renderConcurrency = runtime.NumCPU()
+		renderNoProgress = true
+		renderErr := runCollectionRender(ctx, cmd, pp, cfg)
+		renderConcurrency = savedConcurrency
+		renderNoProgress = savedNoProgress
+		if renderErr != nil {
+			return fmt.Errorf("auto-render: %w", renderErr)
+		}
+		if still := listMissingSegments(segments); len(still) > 0 {
+			return fmt.Errorf("render completed but %d segment(s) still missing:\n  %s", len(still), strings.Join(still, "\n  "))
+		}
 	}
 
 	if concatDryRun {
@@ -240,6 +261,25 @@ func containerExt(container string) string {
 	default:
 		return ".mp4"
 	}
+}
+
+func hasMissingSegments(segments []render.TimelineSegmentPath) bool {
+	for _, seg := range segments {
+		if _, err := os.Stat(seg.Path); os.IsNotExist(err) {
+			return true
+		}
+	}
+	return false
+}
+
+func listMissingSegments(segments []render.TimelineSegmentPath) []string {
+	var missing []string
+	for _, seg := range segments {
+		if _, err := os.Stat(seg.Path); os.IsNotExist(err) {
+			missing = append(missing, seg.Path)
+		}
+	}
+	return missing
 }
 
 func formatBytes(n int64) string {
