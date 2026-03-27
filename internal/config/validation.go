@@ -83,6 +83,12 @@ func (c Config) validateOverlayEntries() []ValidationResult {
 				})
 			}
 		}
+		if coll.Fade < 0 || coll.FadeIn < 0 || coll.FadeOut < 0 {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("collection %q: fade values must be >= 0", name),
+			})
+		}
 	}
 	return results
 }
@@ -169,6 +175,12 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 
 		// Inline file entry: count and interleave are not valid; file must exist.
 		if hasFile {
+			if entry.Fade < 0 || entry.FadeIn < 0 || entry.FadeOut < 0 {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("timeline sequence[%d] (file %q): fade values must be >= 0", i, entry.File),
+				})
+			}
 			if entry.Count > 0 {
 				results = append(results, ValidationResult{
 					Level:   "error",
@@ -207,6 +219,12 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 				Message: fmt.Sprintf("timeline sequence[%d] (%q): count must be >= 0", i, entry.Collection),
 			})
 		}
+		if entry.Fade < 0 || entry.FadeIn < 0 || entry.FadeOut < 0 {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("timeline sequence[%d] (%q): fade values must be >= 0", i, entry.Collection),
+			})
+		}
 		if entry.Interleave != nil {
 			if strings.TrimSpace(entry.Interleave.Collection) == "" {
 				results = append(results, ValidationResult{
@@ -223,6 +241,15 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 				results = append(results, ValidationResult{
 					Level:   "error",
 					Message: fmt.Sprintf("timeline sequence[%d] (%q): interleave every must be > 0", i, entry.Collection),
+				})
+			}
+			switch entry.Interleave.Placement {
+			case "", "between", "after", "before", "around":
+				// valid
+			default:
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("timeline sequence[%d] (%q): interleave placement %q is not valid (use between, after, before, or around)", i, entry.Collection, entry.Interleave.Placement),
 				})
 			}
 		}

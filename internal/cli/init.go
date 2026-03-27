@@ -50,6 +50,7 @@ collections:
     songs:
         plan: songs.yaml
         output_dir: songs
+        fade: 1.0
         overlays:
             - type: song-info
         link_header: link
@@ -58,6 +59,7 @@ collections:
     interstitials:
         plan: interstitials.yaml
         output_dir: interstitials
+        fade: 1.0
         overlays:
             - type: drink
         link_header: link
@@ -66,17 +68,22 @@ collections:
 timeline:
     sequence:
         # - file: videos/intro.mp4              # optional: play a video before songs start
+        #   fade_out: 0.5
         - collection: songs
           count: 30                             # adjust to half your total song count
           interleave:
             collection: interstitials
             every: 1
+            placement: between                  # between (default), after, before, around
         # - file: videos/intermission.mp4       # optional: play a video between halves
+        #   fade: 1.0
         - collection: songs                     # automatically continues from row 31
           interleave:
             collection: interstitials
             every: 1
+            placement: between                  # between (default), after, before, around
         # - file: videos/outro.mp4              # optional: play a video after songs end
+        #   fade_in: 0.5
 outputs:
     segment_template: $INDEX_PAD3_$SAFE_TITLE
 plan:

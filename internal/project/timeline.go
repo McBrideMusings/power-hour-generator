@@ -88,8 +88,33 @@ func ResolveTimeline(timeline config.TimelineConfig, collections map[string]Coll
 		}
 
 		ilIdx := 0
+		every := entry.Interleave.Every
+		placement := ResolvePlacement(entry.Interleave.Placement)
+
+		emitIL := func() {
+			if ilAvail <= 0 {
+				return
+			}
+			seq++
+			absIdx := ilStart + (ilIdx % ilAvail)
+			ilRow := interleaveRows[absIdx]
+			entries = append(entries, TimelineEntry{
+				Collection: entry.Interleave.Collection,
+				Index:      ilRow.Index,
+				Sequence:   seq,
+			})
+			ilIdx++
+		}
 
 		for i, row := range rows {
+			isLast := i == len(rows)-1
+
+			if placement == "before" || placement == "around" {
+				if i%every == 0 {
+					emitIL()
+				}
+			}
+
 			seq++
 			entries = append(entries, TimelineEntry{
 				Collection: entry.Collection,
@@ -97,21 +122,32 @@ func ResolveTimeline(timeline config.TimelineConfig, collections map[string]Coll
 				Sequence:   seq,
 			})
 
-			if ilAvail > 0 && (i+1)%entry.Interleave.Every == 0 {
-				seq++
-				absIdx := ilStart + (ilIdx % ilAvail)
-				ilRow := interleaveRows[absIdx]
-				entries = append(entries, TimelineEntry{
-					Collection: entry.Interleave.Collection,
-					Index:      ilRow.Index,
-					Sequence:   seq,
-				})
-				ilIdx++
+			switch placement {
+			case "after":
+				if (i+1)%every == 0 {
+					emitIL()
+				}
+			case "between":
+				if (i+1)%every == 0 && !isLast {
+					emitIL()
+				}
+			case "around":
+				if isLast {
+					emitIL()
+				}
 			}
 		}
 	}
 
 	return entries, nil
+}
+
+// ResolvePlacement returns the effective placement value, defaulting to "between".
+func ResolvePlacement(p string) string {
+	if p == "" {
+		return "between"
+	}
+	return p
 }
 
 func requireCollection(collections map[string]Collection, name string) (Collection, error) {

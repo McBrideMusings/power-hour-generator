@@ -90,6 +90,7 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 		if every <= 0 {
 			every = 1
 		}
+		placement := project.ResolvePlacement(il.Placement)
 
 		ilAvail := len(ilPaths) - ilStart
 		if ilAvail <= 0 {
@@ -104,12 +105,36 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 		}
 
 		ilIdx := 0
+		emitIL := func() {
+			absIdx := ilStart + (ilIdx % ilAvail)
+			result = append(result, ilPaths[absIdx])
+			ilIdx++
+		}
+
 		for mainIdx, seg := range mainSlice {
+			isLast := mainIdx == len(mainSlice)-1
+
+			if placement == "before" || placement == "around" {
+				if mainIdx%every == 0 {
+					emitIL()
+				}
+			}
+
 			result = append(result, seg)
-			if (mainIdx+1)%every == 0 {
-				absIdx := ilStart + (ilIdx % ilAvail)
-				result = append(result, ilPaths[absIdx])
-				ilIdx++
+
+			switch placement {
+			case "after":
+				if (mainIdx+1)%every == 0 {
+					emitIL()
+				}
+			case "between":
+				if (mainIdx+1)%every == 0 && !isLast {
+					emitIL()
+				}
+			case "around":
+				if isLast {
+					emitIL()
+				}
 			}
 		}
 		consumed[il.Collection] = ilStart + (ilIdx % ilAvail)
@@ -184,6 +209,7 @@ func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip)
 		if every <= 0 {
 			every = 1
 		}
+		placement := project.ResolvePlacement(il.Placement)
 
 		ilAvail := len(ilClips) - ilStart
 		if ilAvail <= 0 {
@@ -198,13 +224,37 @@ func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip)
 		}
 
 		ilIdx := 0
+		emitIL := func() {
+			absIdx := ilStart + (ilIdx % ilAvail)
+			ilCC := ilClips[absIdx]
+			result = append(result, TimelineClip{CollectionName: ilCC.CollectionName, CollectionClip: ilCC})
+			ilIdx++
+		}
+
 		for mainIdx, cc := range mainSlice {
+			isLast := mainIdx == len(mainSlice)-1
+
+			if placement == "before" || placement == "around" {
+				if mainIdx%every == 0 {
+					emitIL()
+				}
+			}
+
 			result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
-			if (mainIdx+1)%every == 0 {
-				absIdx := ilStart + (ilIdx % ilAvail)
-				ilCC := ilClips[absIdx]
-				result = append(result, TimelineClip{CollectionName: ilCC.CollectionName, CollectionClip: ilCC})
-				ilIdx++
+
+			switch placement {
+			case "after":
+				if (mainIdx+1)%every == 0 {
+					emitIL()
+				}
+			case "between":
+				if (mainIdx+1)%every == 0 && !isLast {
+					emitIL()
+				}
+			case "around":
+				if isLast {
+					emitIL()
+				}
 			}
 		}
 		consumed[il.Collection] = ilStart + (ilIdx % ilAvail)

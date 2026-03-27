@@ -110,6 +110,12 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		return fmt.Errorf("no clips to render in collections")
 	}
 
+	// Apply per-sequence-entry fade overrides to the specific clip ranges
+	// consumed by each timeline entry. Uses the same cursor logic as
+	// ResolveTimeline so that a collection appearing twice with different
+	// fades affects only its own portion of clips.
+	applySequenceEntryFades(cfg, collectionClips)
+
 	segments := make([]render.Segment, len(collectionClips))
 	renderOrder := make([]int, 0, len(collectionClips))
 	preflight := make([]render.Result, len(collectionClips))
@@ -264,6 +270,14 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		}
 
 		filenameTemplate := cfg.SegmentFilenameTemplate()
+
+		// Wire stored hashes into segments for service-level change detection.
+		for i := range valid {
+			if prior, ok := rs.Segments[valid[i].OutputPath]; ok {
+				valid[i].StoredHash = prior.InputHash
+			}
+		}
+
 		actions := state.DetectChanges(rs, valid, cfg, filenameTemplate, renderForce)
 
 		var toRender []render.Segment
@@ -499,9 +513,12 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 // renderInlineFiles re-encodes inline file entries (SequenceEntry.File) to
 // normalized MP4 segments under segments/__inline__/. Raw source files such as
 // .webm cannot be stream-copied into an MP4 concat list; re-encoding ensures
-// correct timestamps and container compatibility. Skips files whose output
-// already exists unless force is true.
+// correct timestamps and container compatibility. Uses hash-based change
+// detection: skips segments whose stored hash matches the computed hash and
+// output file exists. Render state is persisted for inline segments.
 func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Config, svc *render.Service, force bool) error {
+	rs, _ := state.Load(pp.RenderStateFile)
+	filenameTemplate := cfg.SegmentFilenameTemplate()
 	var segments []render.Segment
 
 	for seqIdx, entry := range cfg.Timeline.Sequence {
@@ -521,35 +538,35 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 		}
 
 		outPath := render.InlineSegmentPath(pp.SegmentsDir, seqIdx, sourcePath)
-		inlineDir := filepath.Dir(outPath)
 
-		if !force {
-			if _, err := os.Stat(outPath); err == nil {
-				continue
-			}
-		}
-
-		if err := os.MkdirAll(inlineDir, 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 			return fmt.Errorf("create inline segments dir: %w", err)
 		}
 
+		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
 		clip := project.Clip{
-			Sequence:   seqIdx + 1,
-			ClipType:   project.ClipType("__inline__"),
-			TypeIndex:  seqIdx,
-			SourceKind: project.SourceKindPlan,
+			Sequence:       seqIdx + 1,
+			ClipType:       project.ClipType("__inline__"),
+			TypeIndex:      seqIdx,
+			SourceKind:     project.SourceKindPlan,
+			FadeInSeconds:  fadeIn,
+			FadeOutSeconds: fadeOut,
 			Row: csvplan.Row{
 				Index: seqIdx + 1,
 				Link:  sourcePath,
 			},
 		}
-		segments = append(segments, render.Segment{
+		seg := render.Segment{
 			Clip:       clip,
 			Overlays:   nil,
 			SourcePath: sourcePath,
 			CachedPath: sourcePath,
 			OutputPath: outPath,
-		})
+		}
+		if prior, ok := rs.Segments[outPath]; ok {
+			seg.StoredHash = prior.InputHash
+		}
+		segments = append(segments, seg)
 	}
 
 	if len(segments) == 0 {
@@ -562,10 +579,23 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 		if res.Err != nil {
 			errs = append(errs, fmt.Sprintf("%s: %v", filepath.Base(res.OutputPath), res.Err))
 		}
+		if !res.Skipped && res.Err == nil && res.OutputPath != "" {
+			for _, seg := range segments {
+				if seg.OutputPath == res.OutputPath {
+					rs.Segments[res.OutputPath] = state.SegmentState{
+						InputHash:  state.SegmentInputHash(seg, filenameTemplate),
+						RenderedAt: time.Now(),
+						SourcePath: seg.CachedPath,
+					}
+					break
+				}
+			}
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("inline file render failed:\n  %s", strings.Join(errs, "\n  "))
 	}
+	_ = rs.Save(pp.RenderStateFile)
 	return nil
 }
 
@@ -637,6 +667,58 @@ func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx 
 	}
 
 	return segment, nil
+}
+
+// applySequenceEntryFades walks the timeline sequence with a stateful cursor
+// and applies per-entry fade overrides to the corresponding clips. This ensures
+// that a collection appearing twice with different fade values gets different
+// fades for each portion.
+func applySequenceEntryFades(cfg config.Config, clips []project.CollectionClip) {
+	// Index clips by collection name in row-index order.
+	byCollection := make(map[string][]int) // collection name → indices into clips
+	for i, cc := range clips {
+		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], i)
+	}
+	// Sort each collection's indices by row index for stable cursor consumption.
+	for _, indices := range byCollection {
+		sort.Slice(indices, func(a, b int) bool {
+			return clips[indices[a]].Clip.Row.Index < clips[indices[b]].Clip.Row.Index
+		})
+	}
+
+	consumed := make(map[string]int)
+	for _, entry := range cfg.Timeline.Sequence {
+		if entry.Collection == "" {
+			continue
+		}
+		indices := byCollection[entry.Collection]
+		start := consumed[entry.Collection]
+		count := len(indices) - start
+		if entry.Count > 0 && entry.Count < count {
+			count = entry.Count
+		}
+		consumed[entry.Collection] = start + count
+
+		if entry.Fade == 0 && entry.FadeIn == 0 && entry.FadeOut == 0 {
+			continue
+		}
+		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
+		for _, idx := range indices[start : start+count] {
+			clips[idx].Clip.FadeInSeconds = fadeIn
+			clips[idx].Clip.FadeOutSeconds = fadeOut
+		}
+
+		// Also apply to interleave clips if the interleave entry has no fade of its own.
+		if entry.Interleave != nil {
+			ilIndices := byCollection[entry.Interleave.Collection]
+			ilStart := consumed[entry.Interleave.Collection]
+			ilCount := len(ilIndices) - ilStart
+			if ilCount > count {
+				ilCount = count
+			}
+			consumed[entry.Interleave.Collection] = ilStart + ilCount
+		}
+	}
 }
 
 func writeCollectionRenderJSON(cmd *cobra.Command, projectRoot string, clips []project.CollectionClip, results []render.Result) error {

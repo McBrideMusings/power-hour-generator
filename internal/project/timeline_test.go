@@ -88,8 +88,8 @@ func TestResolveTimeline(t *testing.T) {
 			},
 		},
 		{
-			name: "interleave every 1 equal count",
-			// 4 songs, 4 interstitials, every=1
+			name: "interleave every 1 equal count placement after",
+			// 4 songs, 4 interstitials, every=1, placement=after
 			// Expected: song1, inter1, song2, inter2, song3, inter3, song4, inter4
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
@@ -98,6 +98,7 @@ func TestResolveTimeline(t *testing.T) {
 						Interleave: &config.InterleaveConfig{
 							Collection: "interstitials",
 							Every:      1,
+							Placement:  "after",
 						},
 					},
 				},
@@ -115,8 +116,8 @@ func TestResolveTimeline(t *testing.T) {
 		},
 		{
 			name: "interleave cycling fewer interstitials than insertion points",
-			// 3 songs, 2 interstitials, every=1
-			// Expected: song1, inter1, song2, inter2, song3, inter1 (cycles)
+			// 3 songs, 2 interstitials, every=1, default placement (between)
+			// Expected: song1, inter1, song2, inter2, song3 (no trailing — between skips last)
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
 					{
@@ -135,12 +136,12 @@ func TestResolveTimeline(t *testing.T) {
 			want: []entry{
 				{coll: "songs", idx: 1}, {coll: "interstitials", idx: 1},
 				{coll: "songs", idx: 2}, {coll: "interstitials", idx: 2},
-				{coll: "songs", idx: 3}, {coll: "interstitials", idx: 1},
+				{coll: "songs", idx: 3},
 			},
 		},
 		{
-			name: "interleave every 2",
-			// 6 songs, 3 interstitials, every=2
+			name: "interleave every 2 placement after",
+			// 6 songs, 3 interstitials, every=2, placement=after
 			// Expected: song1, song2, inter1, song3, song4, inter2, song5, song6, inter3
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
@@ -149,6 +150,7 @@ func TestResolveTimeline(t *testing.T) {
 						Interleave: &config.InterleaveConfig{
 							Collection: "interstitials",
 							Every:      2,
+							Placement:  "after",
 						},
 					},
 				},
@@ -164,8 +166,8 @@ func TestResolveTimeline(t *testing.T) {
 			},
 		},
 		{
-			name: "multiple sequence entries intro songs interleave outro",
-			// intro (2) → songs+interleave (3 songs, every=1) → outro (1)
+			name: "multiple sequence entries intro songs interleave outro placement after",
+			// intro (2) → songs+interleave (3 songs, every=1, placement=after) → outro (1)
 			// Expected: intro1, intro2, song1, inter1, song2, inter2, song3, inter3, outro1
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
@@ -175,6 +177,7 @@ func TestResolveTimeline(t *testing.T) {
 						Interleave: &config.InterleaveConfig{
 							Collection: "interstitials",
 							Every:      1,
+							Placement:  "after",
 						},
 					},
 					{Collection: "outro"},
@@ -323,6 +326,165 @@ func TestResolveTimeline(t *testing.T) {
 				{coll: "songs", idx: 1, seq: 1},
 				{coll: "songs", idx: 2, seq: 2},
 				{coll: "songs", idx: 3, seq: 3},
+			},
+		},
+		{
+			name: "placement between default 3 songs every 1",
+			// 3 songs, 3 interstitials, every=1, no placement (default=between)
+			// Expected: song1, inter1, song2, inter2, song3 (no trailing inter3)
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "interstitials",
+							Every:      1,
+						},
+					},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":         makeCollectionWithRows("songs", 3),
+				"interstitials": makeCollectionWithRows("interstitials", 3),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1}, {coll: "interstitials", idx: 1},
+				{coll: "songs", idx: 2}, {coll: "interstitials", idx: 2},
+				{coll: "songs", idx: 3},
+			},
+		},
+		{
+			name: "placement between explicit 3 songs every 1",
+			// Same as above but with explicit placement=between
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "interstitials",
+							Every:      1,
+							Placement:  "between",
+						},
+					},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":         makeCollectionWithRows("songs", 3),
+				"interstitials": makeCollectionWithRows("interstitials", 3),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1}, {coll: "interstitials", idx: 1},
+				{coll: "songs", idx: 2}, {coll: "interstitials", idx: 2},
+				{coll: "songs", idx: 3},
+			},
+		},
+		{
+			name: "placement between every 2 incomplete last group",
+			// 5 songs, 3 interstitials, every=2, placement=between
+			// Groups: [S1,S2], [S3,S4], [S5] (incomplete)
+			// Expected: S1 S2 I1 S3 S4 I2 S5 (no trailing, same as after for incomplete group)
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "interstitials",
+							Every:      2,
+							Placement:  "between",
+						},
+					},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":         makeCollectionWithRows("songs", 5),
+				"interstitials": makeCollectionWithRows("interstitials", 3),
+			},
+			want: []entry{
+				{coll: "songs", idx: 1}, {coll: "songs", idx: 2}, {coll: "interstitials", idx: 1},
+				{coll: "songs", idx: 3}, {coll: "songs", idx: 4}, {coll: "interstitials", idx: 2},
+				{coll: "songs", idx: 5},
+			},
+		},
+		{
+			name: "placement before 3 songs every 1",
+			// 3 songs, 3 interstitials, every=1, placement=before
+			// Expected: inter1, song1, inter2, song2, inter3, song3
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "interstitials",
+							Every:      1,
+							Placement:  "before",
+						},
+					},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":         makeCollectionWithRows("songs", 3),
+				"interstitials": makeCollectionWithRows("interstitials", 3),
+			},
+			want: []entry{
+				{coll: "interstitials", idx: 1}, {coll: "songs", idx: 1},
+				{coll: "interstitials", idx: 2}, {coll: "songs", idx: 2},
+				{coll: "interstitials", idx: 3}, {coll: "songs", idx: 3},
+			},
+		},
+		{
+			name: "placement around 3 songs every 1",
+			// 3 songs, 3 interstitials, every=1, placement=around
+			// Expected: inter1, song1, inter2, song2, inter3, song3, inter1 (trail cycles)
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "interstitials",
+							Every:      1,
+							Placement:  "around",
+						},
+					},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":         makeCollectionWithRows("songs", 3),
+				"interstitials": makeCollectionWithRows("interstitials", 3),
+			},
+			want: []entry{
+				{coll: "interstitials", idx: 1}, {coll: "songs", idx: 1},
+				{coll: "interstitials", idx: 2}, {coll: "songs", idx: 2},
+				{coll: "interstitials", idx: 3}, {coll: "songs", idx: 3},
+				{coll: "interstitials", idx: 1},
+			},
+		},
+		{
+			name: "placement between with inline file before and after block",
+			// intro file, songs+between interleave (3 songs), intermission file
+			// Default (between): no drink before intermission
+			timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{File: "intro.mp4"},
+					{
+						Collection: "songs",
+						Interleave: &config.InterleaveConfig{
+							Collection: "drinks",
+							Every:      1,
+						},
+					},
+					{File: "intermission.mp4"},
+				},
+			},
+			collections: map[string]Collection{
+				"songs":  makeCollectionWithRows("songs", 3),
+				"drinks": makeCollectionWithRows("drinks", 3),
+			},
+			want: []entry{
+				{sourceFile: "intro.mp4"},
+				{coll: "songs", idx: 1}, {coll: "drinks", idx: 1},
+				{coll: "songs", idx: 2}, {coll: "drinks", idx: 2},
+				{coll: "songs", idx: 3},
+				{sourceFile: "intermission.mp4"},
 			},
 		},
 		{
