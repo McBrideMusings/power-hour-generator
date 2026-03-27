@@ -38,12 +38,13 @@ type Options struct {
 
 // Segment encapsulates the information required to render a clip.
 type Segment struct {
-	Clip       project.Clip
-	Overlays   []config.OverlayEntry
-	SourcePath string
-	CachedPath string
-	Entry      cache.Entry
-	OutputPath string // Optional: if set, overrides default path calculation
+	Clip        project.Clip
+	Overlays    []config.OverlayEntry
+	SourcePath  string
+	CachedPath  string
+	Entry       cache.Entry
+	OutputPath  string // Optional: if set, overrides default path calculation
+	StoredHash  string // Hash from render state; if set, used for change detection
 }
 
 // Result captures the outcome of a render attempt.
@@ -210,13 +211,13 @@ func (s *Service) renderOne(ctx context.Context, seg Segment, force bool, report
 	result.OutputPath = outputPath
 
 	if !force {
-		if exists, err := paths.FileExists(outputPath); err != nil {
-			result.Err = fmt.Errorf("stat segment output: %w", err)
-			return result
-		} else if exists {
-			result.Skipped = true
-			s.printf("segment %03d already exists, skipping: %s\n", row.Index, outputPath)
-			return result
+		currentHash := SegmentInputHash(seg, s.Config.SegmentFilenameTemplate())
+		if seg.StoredHash != "" && seg.StoredHash == currentHash {
+			if exists, err := paths.FileExists(outputPath); err == nil && exists {
+				result.Skipped = true
+				s.printf("segment %03d up to date, skipping: %s\n", row.Index, outputPath)
+				return result
+			}
 		}
 	}
 

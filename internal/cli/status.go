@@ -18,6 +18,7 @@ import (
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/state"
+	"powerhour/pkg/csvplan"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -31,11 +32,13 @@ func newStatusCmd() *cobra.Command {
 
 // timelineEntryOutput is the JSON-serializable form of a resolved timeline entry.
 type timelineEntryOutput struct {
-	Sequence    int    `json:"sequence"`
-	Collection  string `json:"collection"`
-	Index       int    `json:"index"`
-	SegmentPath string `json:"segment_path"`
-	SourceFile  string `json:"source_file,omitempty"` // set for inline file entries
+	Sequence     int    `json:"sequence"`
+	Collection   string `json:"collection"`
+	Index        int    `json:"index"`
+	SegmentPath  string `json:"segment_path"`
+	SourceFile   string `json:"source_file,omitempty"` // set for inline file entries
+	StoredHash   string `json:"stored_hash,omitempty"`
+	ComputedHash string `json:"computed_hash,omitempty"`
 }
 
 // rowStatus captures per-row cache and render status.
@@ -46,6 +49,8 @@ type rowStatus struct {
 	CacheStatus  string `json:"cache_status"`
 	RenderStatus string `json:"render_status"`
 	RenderReason string `json:"render_reason,omitempty"`
+	StoredHash   string `json:"stored_hash,omitempty"`
+	ComputedHash string `json:"computed_hash,omitempty"`
 }
 
 // collectionSummary aggregates row statuses for a collection.
@@ -146,7 +151,31 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 				if !filepath.IsAbs(sourcePath) {
 					sourcePath = filepath.Join(pp.Root, sourcePath)
 				}
-				out.SegmentPath = render.InlineSegmentPath(pp.SegmentsDir, fileSeqIdx[e.SourceFile], sourcePath)
+				seqIdx := fileSeqIdx[e.SourceFile]
+				out.SegmentPath = render.InlineSegmentPath(pp.SegmentsDir, seqIdx, sourcePath)
+
+				// Compute inline file hashes for change detection display.
+				entry := cfg.Timeline.Sequence[seqIdx]
+				fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
+				inlineSeg := render.Segment{
+					Clip: project.Clip{
+						Sequence:       seqIdx + 1,
+						ClipType:       project.ClipType("__inline__"),
+						TypeIndex:      seqIdx,
+						SourceKind:     project.SourceKindPlan,
+						FadeInSeconds:  fadeIn,
+						FadeOutSeconds: fadeOut,
+						Row: csvplan.Row{
+							Index: seqIdx + 1,
+							Link:  sourcePath,
+						},
+					},
+					OutputPath: out.SegmentPath,
+				}
+				out.ComputedHash = state.SegmentInputHash(inlineSeg, tmpl)
+				if prior, ok := rs.Segments[out.SegmentPath]; ok {
+					out.StoredHash = prior.InputHash
+				}
 			} else {
 				out.SegmentPath = e.SegmentPath
 			}
@@ -225,6 +254,7 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 
 			// Build segment for render status
 			collCfg := cfg.Collections[collName]
+			fadeIn, fadeOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
 			clip := project.Clip{
 				Sequence:        r.Index,
 				ClipType:        project.ClipType(collName),
@@ -232,6 +262,8 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 				Row:             r,
 				SourceKind:      project.SourceKindPlan,
 				DurationSeconds: r.DurationSeconds,
+				FadeInSeconds:   fadeIn,
+				FadeOutSeconds:  fadeOut,
 			}
 
 			clip.Row.DurationSeconds = clip.DurationSeconds
@@ -253,12 +285,14 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 			// Render status
 			renderStatus := "missing"
 			renderReason := ""
+			currentHash := state.SegmentInputHash(seg, tmpl)
+			storedHash := ""
 			if prior, exists := rs.Segments[seg.OutputPath]; exists {
+				storedHash = prior.InputHash
 				if configChanged {
 					renderStatus = "stale"
 					renderReason = "config changed"
 				} else {
-					currentHash := state.SegmentInputHash(seg, tmpl)
 					if currentHash != prior.InputHash {
 						renderStatus = "stale"
 						renderReason = "input changed"
@@ -298,6 +332,8 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 				CacheStatus:  cacheStatus,
 				RenderStatus: renderStatus,
 				RenderReason: renderReason,
+				StoredHash:   storedHash,
+				ComputedHash: currentHash,
 			})
 		}
 
@@ -428,6 +464,11 @@ func printStatusResult(projectPath string, collections map[string]project.Collec
 				cacheLabel,
 				renderLabel,
 			)
+			if r.StoredHash != "" && r.StoredHash != r.ComputedHash {
+				red := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Inline(true)
+				fmt.Printf("        %s stored:   %s\n", faint.Render("│"), red.Render(r.StoredHash))
+				fmt.Printf("        %s computed: %s\n", faint.Render("│"), red.Render(r.ComputedHash))
+			}
 		}
 		fmt.Println()
 	}
@@ -447,16 +488,28 @@ func printStatusResult(projectPath string, collections map[string]project.Collec
 		style := collStyles[e.Collection]
 		seg := ""
 		if e.SourceFile != "" {
-			// Inline file: show source file and whether the rendered segment exists.
+			// Inline file: show source file and render status with hash comparison.
+			fileExists := false
 			if _, err := os.Stat(e.SegmentPath); err == nil {
-				seg = "  " + green.Render("✓ rendered")
-			} else {
+				fileExists = true
+			}
+			if !fileExists {
 				seg = "  " + red.Render("not rendered")
+			} else if e.StoredHash != "" && e.StoredHash == e.ComputedHash {
+				seg = "  " + green.Render("✓ rendered")
+			} else if e.StoredHash != "" {
+				seg = "  " + yellow.Render("stale")
+			} else {
+				seg = "  " + green.Render("✓ rendered")
 			}
 		} else if e.SegmentPath != "" {
 			seg = "  " + green.Render("✓") + " " + filepath.Base(e.SegmentPath)
 		}
 		fmt.Printf("  %4d  %s%s\n", e.Sequence, style.Render(label), seg)
+		if e.SourceFile != "" && e.StoredHash != "" && e.StoredHash != e.ComputedHash {
+			fmt.Printf("        %s stored:   %s\n", faint.Render("│"), red.Render(e.StoredHash))
+			fmt.Printf("        %s computed: %s\n", faint.Render("│"), red.Render(e.ComputedHash))
+		}
 	}
 }
 
