@@ -23,6 +23,9 @@ type CollectionConfig struct {
 	File           string         `yaml:"file,omitempty"`
 	Duration       int            `yaml:"duration,omitempty"`
 	OutputDir      string         `yaml:"output_dir"`
+	Fade           float64        `yaml:"fade,omitempty"`
+	FadeIn         float64        `yaml:"fade_in,omitempty"`
+	FadeOut        float64        `yaml:"fade_out,omitempty"`
 	Overlays       []OverlayEntry `yaml:"overlays,omitempty"`
 	LinkHeader     string         `yaml:"link_header"`
 	StartHeader    string         `yaml:"start_header"`
@@ -41,12 +44,38 @@ type SequenceEntry struct {
 	Count      int               `yaml:"count,omitempty"` // 0 = play all; only valid with Collection
 	File       string            `yaml:"file,omitempty"`  // inline file path; mutually exclusive with Collection
 	Interleave *InterleaveConfig `yaml:"interleave,omitempty"` // only valid with Collection
+	Fade       float64           `yaml:"fade,omitempty"`
+	FadeIn     float64           `yaml:"fade_in,omitempty"`
+	FadeOut    float64           `yaml:"fade_out,omitempty"`
+}
+
+// ResolveFade computes effective fade-in and fade-out durations from the three
+// fade fields. fade is a shorthand that splits evenly; individual values
+// override the split when set.
+func ResolveFade(fade, fadeIn, fadeOut float64) (in, out float64) {
+	in, out = fadeIn, fadeOut
+	if fade > 0 {
+		if in == 0 {
+			in = fade / 2
+		}
+		if out == 0 {
+			out = fade / 2
+		}
+	}
+	return
 }
 
 // InterleaveConfig describes how to splice a second collection into a sequence entry.
 type InterleaveConfig struct {
 	Collection string `yaml:"collection"`
 	Every      int    `yaml:"every"`
+	// Placement controls where interstitials appear relative to the primary clip groups.
+	// Valid values: "between" (default), "after", "before", "around".
+	//   between - interstitials play between groups, not before the first or after the last
+	//   after   - interstitials play after every Nth group, including the last (legacy behavior)
+	//   before  - interstitials play before every Nth group, including the first
+	//   around  - interstitials play before every group AND after the last primary
+	Placement string `yaml:"placement,omitempty"`
 }
 
 var allowedVideoPresets = map[string]struct{}{

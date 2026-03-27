@@ -165,6 +165,7 @@ func (r *CollectionResolver) BuildCollectionClips(collections map[string]Collect
 		collCfg := coll.Config
 
 		// Build clips from collection rows
+		fadeIn, fadeOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
 		for _, collRow := range coll.Rows {
 			sequence++
 			row := collRow.ToRow()
@@ -176,6 +177,8 @@ func (r *CollectionResolver) BuildCollectionClips(collections map[string]Collect
 				Row:             row,
 				SourceKind:      SourceKindPlan,
 				DurationSeconds: row.DurationSeconds,
+				FadeInSeconds:   fadeIn,
+				FadeOutSeconds:  fadeOut,
 			}
 
 			collClip := CollectionClip{
