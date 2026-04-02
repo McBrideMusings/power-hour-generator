@@ -21,15 +21,15 @@ import (
 type rowState int
 
 const (
-	rowRendered  rowState = iota // segment exists on disk
-	rowNotRendered               // cached but segment not rendered
-	rowNotCached                 // source not in cache
+	rowRendered    rowState = iota // segment exists on disk
+	rowNotRendered                 // cached but segment not rendered
+	rowNotCached                   // source not in cache
 )
 
 var rowStateStyles = map[rowState]lipgloss.Style{
-	rowRendered:    lipgloss.NewStyle(),                                        // default
-	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),        // yellow
-	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")),        // red
+	rowRendered:    lipgloss.NewStyle(),                                 // default
+	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("3")), // yellow
+	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")), // red
 }
 
 // collectionColumn describes a dynamic column in the collection table.
@@ -64,18 +64,16 @@ type collectionView struct {
 	termHeight int
 }
 
-// Fields that get special treatment — always shown in a fixed order when present,
-// with specific fixed widths. Everything else is flex.
+// Known fields are shown first when present. Width is computed dynamically for
+// all columns so the table stays schema-flexible.
 var knownFieldOrder = []struct {
 	field string
-	width int
-	fixed bool
 }{
-	{"title", 0, false},
-	{"artist", 0, false},
-	{"name", 0, false},
-	{"start_time", 8, true},
-	{"duration", 5, true},
+	{"title"},
+	{"artist"},
+	{"name"},
+	{"start_time"},
+	{"duration"},
 }
 
 func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
@@ -100,8 +98,6 @@ func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
 			cols = append(cols, collectionColumn{
 				header: strings.ToUpper(kf.field),
 				field:  kf.field,
-				width:  kf.width,
-				fixed:  kf.fixed,
 			})
 			seen[kf.field] = true
 		}
@@ -195,52 +191,42 @@ func (v collectionView) view() string {
 		strings.ToUpper(v.name), v.planPath, len(v.rows), fadeStr)))
 	b.WriteByte('\n')
 
-	// Compute column widths. Fixed columns use their set width.
-	// Flex columns split remaining space equally.
+	// Compute column widths. All data columns are flexible and split the
+	// available table width equally, leaving a small right-side terminal buffer.
 	idxWidth := 4 // # column
 	separatorWidth := 2
 	totalSeps := len(v.columns) * separatorWidth // gaps between all columns including #
-	fixedTotal := idxWidth + totalSeps
-	flexCount := 0
+	baseWidth := idxWidth + totalSeps
 	widths := make([]int, len(v.columns))
+	flexCount := len(v.columns)
 
-	for i, col := range v.columns {
-		if col.fixed {
-			w := col.width
-			if w < len(col.header) {
-				w = len(col.header)
-			}
-			widths[i] = w
-			fixedTotal += w
-		} else {
-			flexCount++
-		}
+	tableWidth := v.termWidth - 10
+	if tableWidth < baseWidth {
+		tableWidth = baseWidth
 	}
 
-	maxFlexWidth := 45
 	flexWidth := 10
-	if flexCount > 0 && v.termWidth > fixedTotal+flexCount*5 {
-		flexWidth = (v.termWidth - fixedTotal) / flexCount
-		if flexWidth > maxFlexWidth {
-			flexWidth = maxFlexWidth
-		}
+	if flexCount > 0 && tableWidth > baseWidth+flexCount*5 {
+		flexWidth = (tableWidth - baseWidth) / flexCount
 	}
 	for i, col := range v.columns {
-		if !col.fixed {
-			widths[i] = flexWidth
+		widths[i] = flexWidth
+		if widths[i] < len(col.header) {
+			widths[i] = len(col.header)
 		}
 	}
 
-	// Column headers.
+	// Column headers. The row index is a synthetic gutter, so give it extra
+	// breathing room and separate it from real plan fields.
 	headerParts := []string{colHeader.Render(fmt.Sprintf("%-*s", idxWidth, "#"))}
 	for i, col := range v.columns {
-		if col.fixed && (col.field == "start_time" || col.field == "duration") {
-			headerParts = append(headerParts, colHeader.Render(fmt.Sprintf("%*s", widths[i], col.header)))
-		} else {
-			headerParts = append(headerParts, colHeader.Render(fmt.Sprintf("%-*s", widths[i], col.header)))
-		}
+		headerParts = append(headerParts, colHeader.Render(fmt.Sprintf("%-*s", widths[i], col.header)))
 	}
-	b.WriteString(strings.Join(headerParts, "  "))
+	b.WriteString(headerParts[0])
+	if len(headerParts) > 1 {
+		b.WriteString("   │  ")
+		b.WriteString(strings.Join(headerParts[1:], "  "))
+	}
 	b.WriteByte('\n')
 
 	// Visible rows.
@@ -292,31 +278,23 @@ func (v collectionView) view() string {
 			// Inline edit: highlight other fields on the edit row.
 			if isEditRow {
 				val = tui.TruncateWithEllipsis(val, w)
-				if col.fixed && (col.field == "start_time" || col.field == "duration") {
-					parts = append(parts, editRowStyle.Render(fmt.Sprintf("%*s", w, val)))
-				} else {
-					parts = append(parts, editRowStyle.Render(fmt.Sprintf("%-*s", w, val)))
-				}
+				parts = append(parts, editRowStyle.Render(fmt.Sprintf("%-*s", w, val)))
 				continue
 			}
 
 			if state != rowRendered {
-				if col.fixed && (col.field == "start_time" || col.field == "duration") {
-					val = tui.TruncateWithEllipsis(val, w)
-					parts = append(parts, stateStyle.Render(fmt.Sprintf("%*s", w, val)))
-				} else {
-					parts = append(parts, stateStyle.Render(fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w))))
-				}
-			} else if col.fixed && (col.field == "start_time" || col.field == "duration") {
-				val = tui.TruncateWithEllipsis(val, w)
-				parts = append(parts, faint.Render(fmt.Sprintf("%*s", w, val)))
+				parts = append(parts, stateStyle.Render(fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w))))
 			} else if col.field == "title" {
 				parts = append(parts, fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w)))
 			} else {
 				parts = append(parts, faint.Render(fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w))))
 			}
 		}
-		b.WriteString(strings.Join(parts, "  "))
+		b.WriteString(parts[0])
+		if len(parts) > 1 {
+			b.WriteString("   │  ")
+			b.WriteString(strings.Join(parts[1:], "  "))
+		}
 		b.WriteByte('\n')
 	}
 
