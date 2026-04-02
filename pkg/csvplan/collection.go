@@ -247,6 +247,43 @@ func parseCollectionRecord(record []string, header map[string]int, index, line i
 	return row, errs
 }
 
+// ReadHeaders reads just the first line of a CSV/TSV file and returns the raw
+// header names (normalized) and the detected delimiter. This is used by the
+// write-back path to preserve column order and delimiter.
+func ReadHeaders(path string) (headers []string, delimiter rune, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read file: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, 0, errors.New("plan file is empty")
+	}
+
+	delimiter, err = detectDelimiter(data)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	reader := csv.NewReader(bytes.NewReader(data))
+	reader.Comma = delimiter
+	reader.FieldsPerRecord = -1
+
+	record, err := reader.Read()
+	if err != nil {
+		return nil, 0, fmt.Errorf("read header: %w", err)
+	}
+
+	headers = make([]string, 0, len(record))
+	for _, raw := range record {
+		name := normalizeHeader(raw)
+		if name != "" {
+			headers = append(headers, name)
+		}
+	}
+
+	return headers, delimiter, nil
+}
+
 // ToRow converts a CollectionRow to a standard Row for compatibility with existing systems.
 func (cr CollectionRow) ToRow() Row {
 	return Row{

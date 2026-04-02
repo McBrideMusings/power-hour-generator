@@ -18,6 +18,9 @@ type Collection struct {
 	Config     config.CollectionConfig
 	Rows       []csvplan.CollectionRow
 	PlanErrors csvplan.ValidationErrors
+	Headers    []string // Raw CSV headers (normalized), for write-back
+	Delimiter  rune     // CSV delimiter (comma or tab), for write-back
+	PlanFormat string   // "csv" or "yaml", for write-back
 }
 
 // CollectionResolver loads and resolves collections from configuration.
@@ -85,14 +88,20 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		}
 
 		var (
-			rows []csvplan.CollectionRow
-			err  error
+			rows       []csvplan.CollectionRow
+			err        error
+			headers    []string
+			delimiter  rune
+			planFormat string
 		)
 		ext := strings.ToLower(filepath.Ext(planPath))
 		if ext == ".yaml" || ext == ".yml" {
+			planFormat = "yaml"
 			rows, err = csvplan.LoadCollectionYAML(planPath, opts)
 		} else {
+			planFormat = "csv"
 			rows, err = csvplan.LoadCollection(planPath, opts)
+			headers, delimiter, _ = csvplan.ReadHeaders(planPath)
 		}
 		var planErrs csvplan.ValidationErrors
 		if err != nil {
@@ -112,6 +121,9 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			Config:     collCfg,
 			Rows:       rows,
 			PlanErrors: planErrs,
+			Headers:    headers,
+			Delimiter:  delimiter,
+			PlanFormat: planFormat,
 		}
 	}
 
