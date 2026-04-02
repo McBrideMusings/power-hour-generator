@@ -56,6 +56,7 @@ func newRootCmd() *cobra.Command {
 		newFetchCmd(),
 		newRenderCmd(),
 		newConcatCmd(),
+		newTuiCmd(),
 	)
 
 	addTo("inspect",

@@ -13,3 +13,6 @@ powerhour-*/*
 /powerhour
 /admin
 tmp/
+.worktrees
+.superpowers/
+docs/superpowers/
