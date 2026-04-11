@@ -1132,6 +1132,9 @@ func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
 	if m.doctorOverlay == nil || m.doctorOverlay.requerying {
 		return m, nil
 	}
+	if m.doctorOverlay.cursor < 0 || m.doctorOverlay.cursor >= len(m.doctorOverlay.findings) {
+		return m, nil
+	}
 	item := m.doctorOverlay.findings[m.doctorOverlay.cursor]
 	source := item.entry.Source
 	if source == "" && len(item.entry.Links) > 0 {

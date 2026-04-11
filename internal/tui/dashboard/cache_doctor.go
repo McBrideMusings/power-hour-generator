@@ -105,13 +105,6 @@ func (o *cacheDoctorOverlay) setActiveCursor(cur int) {
 	}
 }
 
-func (o *cacheDoctorOverlay) skipCurrent() {
-	if o.cursor < len(o.findings)-1 {
-		o.cursor++
-		o.loadCurrentEntry()
-	}
-}
-
 func (o *cacheDoctorOverlay) applyRequery(info cache.RemoteIDInfo, normCfg cache.NormalizationConfig) {
 	if o.cursor < 0 || o.cursor >= len(o.findings) {
 		o.requerying = false
