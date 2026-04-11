@@ -11,6 +11,7 @@ import (
 
 // cacheEntry is a flattened cache entry for display.
 type cacheEntry struct {
+	Identifier string
 	Title      string
 	Artist     string
 	Source     string
@@ -23,6 +24,8 @@ type cacheView struct {
 	allEntries      []cacheEntry
 	filteredEntries []cacheEntry
 	showAll         bool // false = filtered to project, true = all cached
+	activity        string
+	rowStatus       map[string]string
 	cursor          int
 	scrollTop       int
 
@@ -71,6 +74,7 @@ func newCacheView(idx *cache.Index, collectionLinks map[string]string) cacheView
 			}
 
 			ce := cacheEntry{
+				Identifier: entry.Identifier,
 				Title:      title,
 				Artist:     entry.Artist,
 				Source:     entry.Source,
@@ -88,6 +92,7 @@ func newCacheView(idx *cache.Index, collectionLinks map[string]string) cacheView
 	return cacheView{
 		allEntries:      allEntries,
 		filteredEntries: filteredEntries,
+		rowStatus:       make(map[string]string),
 	}
 }
 
@@ -120,10 +125,15 @@ func (v cacheView) view() string {
 	if v.showAll {
 		filterLabel = "all cached"
 	}
-	b.WriteString(sectionLabel.Render(fmt.Sprintf("CACHE · %d sources · %s  [f to toggle]", len(entries), filterLabel)))
+	header := fmt.Sprintf("CACHE · %d sources · %s  [f to toggle]", len(entries), filterLabel)
+	if strings.TrimSpace(v.activity) != "" {
+		header += " · " + v.activity
+	}
+	b.WriteString(sectionLabel.Render(header))
 	b.WriteByte('\n')
 
-	fixedWidth := 4 + 14 + 4*2
+	statusWidth := 10
+	fixedWidth := 4 + statusWidth + 14 + 5*2
 	flexWidth := 0
 	if v.termWidth > fixedWidth+30 {
 		flexWidth = (v.termWidth - fixedWidth) / 3
@@ -132,8 +142,8 @@ func (v cacheView) view() string {
 	}
 
 	b.WriteString(colHeader.Render(
-		fmt.Sprintf("%-4s  %-*s  %-*s  %-14s  %-*s",
-			"#", flexWidth, "TITLE", flexWidth, "ARTIST", "COLLECTION", flexWidth, "FILE")))
+		fmt.Sprintf("%-4s  %-*s  %-*s  %-*s  %-14s  %-*s",
+			"#", statusWidth, "STATUS", flexWidth, "TITLE", flexWidth, "ARTIST", "COLLECTION", flexWidth, "FILE")))
 	b.WriteByte('\n')
 
 	visible := v.visibleRowCount()
@@ -166,10 +176,16 @@ func (v cacheView) view() string {
 		if coll == "" {
 			coll = faint.Render("—")
 		}
+		status := tui.TruncateWithEllipsis(v.rowStatus[e.Identifier], statusWidth)
+		if status == "" {
+			status = faint.Render("—")
+		} else {
+			status = faint.Render(status)
+		}
 		file := tui.TruncateWithEllipsis(filepath.Base(e.CachedPath), flexWidth)
 
-		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %-14s  %-*s",
-			cursor, idx, flexWidth, title, flexWidth, faint.Render(artist), coll, flexWidth, faint.Render(file)))
+		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %-*s  %-14s  %-*s",
+			cursor, idx, statusWidth, status, flexWidth, title, flexWidth, faint.Render(artist), coll, flexWidth, faint.Render(file)))
 		b.WriteByte('\n')
 	}
 
