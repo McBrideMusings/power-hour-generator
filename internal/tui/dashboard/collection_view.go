@@ -27,9 +27,9 @@ const (
 )
 
 var rowStateStyles = map[rowState]lipgloss.Style{
-	rowRendered:    lipgloss.NewStyle(),                                 // default
-	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("3")), // yellow
-	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("1")), // red
+	rowRendered:    lipgloss.NewStyle(),                                   // default
+	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("214")), // amber
+	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("9")),   // bright red
 }
 
 // collectionColumn describes a dynamic column in the collection table.
@@ -48,6 +48,9 @@ type collectionView struct {
 	collCfg   project.Collection
 	columns   []collectionColumn
 	states    []rowState // per-row cache/render state
+	rowStatus map[int]string
+	activity  string
+	tick      int
 	cursor    int
 	scrollTop int
 
@@ -125,12 +128,13 @@ func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
 func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index) collectionView {
 	states := computeRowStates(coll, pp, cfg, idx)
 	return collectionView{
-		name:     coll.Name,
-		planPath: coll.Plan,
-		rows:     coll.Rows,
-		collCfg:  coll,
-		columns:  discoverColumns(coll.Rows),
-		states:   states,
+		name:      coll.Name,
+		planPath:  coll.Plan,
+		rows:      coll.Rows,
+		collCfg:   coll,
+		columns:   discoverColumns(coll.Rows),
+		states:    states,
+		rowStatus: make(map[int]string),
 	}
 }
 
@@ -187,20 +191,31 @@ func (v collectionView) view() string {
 	if v.collCfg.Config.Fade > 0 {
 		fadeStr = fmt.Sprintf(" · fade: %.1f", v.collCfg.Config.Fade)
 	}
-	b.WriteString(sectionLabel.Render(fmt.Sprintf("%s · %s · %d rows%s",
-		strings.ToUpper(v.name), v.planPath, len(v.rows), fadeStr)))
+	header := fmt.Sprintf("%s · %s · %d rows%s",
+		strings.ToUpper(v.name), v.planPath, len(v.rows), fadeStr)
+	if strings.TrimSpace(v.activity) != "" {
+		header += " · " + busySpinner(v.tick) + " " + v.activity
+	}
+	b.WriteString(sectionLabel.Render(header))
 	b.WriteByte('\n')
 
-	// Compute column widths. All data columns are flexible and split the
-	// available table width equally, leaving a small right-side terminal buffer.
+	// Compute column widths. The left gutter holds the row number plus a compact
+	// status token; data columns split the remaining width.
 	idxWidth := 4 // # column
-	separatorWidth := 2
-	totalSeps := len(v.columns) * separatorWidth // gaps between all columns including #
-	baseWidth := idxWidth + totalSeps
+	statusWidth := 5
+	gutterWidth := idxWidth + statusWidth + 1
+	columnGapWidth := 2
+	gutterGapWidth := 4
+	totalGaps := 0
+	if len(v.columns) > 0 {
+		totalGaps += gutterGapWidth
+		totalGaps += (len(v.columns) - 1) * columnGapWidth
+	}
+	baseWidth := gutterWidth + totalGaps
 	widths := make([]int, len(v.columns))
 	flexCount := len(v.columns)
 
-	tableWidth := v.termWidth - 10
+	tableWidth := v.termWidth - 20
 	if tableWidth < baseWidth {
 		tableWidth = baseWidth
 	}
@@ -216,16 +231,15 @@ func (v collectionView) view() string {
 		}
 	}
 
-	// Column headers. The row index is a synthetic gutter, so give it extra
-	// breathing room and separate it from real plan fields.
-	headerParts := []string{colHeader.Render(fmt.Sprintf("%-*s", idxWidth, "#"))}
+	// Column headers. The row index/status gutter sits to the left of the data.
+	headerParts := make([]string, 0, len(v.columns))
 	for i, col := range v.columns {
 		headerParts = append(headerParts, colHeader.Render(fmt.Sprintf("%-*s", widths[i], col.header)))
 	}
-	b.WriteString(headerParts[0])
-	if len(headerParts) > 1 {
-		b.WriteString("   │  ")
-		b.WriteString(strings.Join(headerParts[1:], "  "))
+	b.WriteString(colHeader.Render(fmt.Sprintf("%-*s", gutterWidth, "#")))
+	if len(headerParts) > 0 {
+		b.WriteString(strings.Repeat(" ", gutterGapWidth))
+		b.WriteString(strings.Join(headerParts, "  "))
 	}
 	b.WriteByte('\n')
 
@@ -263,7 +277,9 @@ func (v collectionView) view() string {
 
 		isEditRow := v.editing && i == v.cursor
 
-		parts := []string{fmt.Sprintf("%s%-*s", cursor, idxWidth-2, idx)}
+		status := compactRowStatus(v.rowStatus[row.Index], v.tick)
+		gutter := fmt.Sprintf("%s%-*s %-*s", cursor, idxWidth-2, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
+		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])
 			w := widths[j]
@@ -292,7 +308,7 @@ func (v collectionView) view() string {
 		}
 		b.WriteString(parts[0])
 		if len(parts) > 1 {
-			b.WriteString("   │  ")
+			b.WriteString(strings.Repeat(" ", gutterGapWidth))
 			b.WriteString(strings.Join(parts[1:], "  "))
 		}
 		b.WriteByte('\n')
@@ -309,4 +325,32 @@ func (v collectionView) view() string {
 	}
 
 	return b.String()
+}
+
+func compactRowStatus(raw string, tick int) string {
+	status := strings.TrimSpace(raw)
+	switch {
+	case status == "":
+		return ""
+	case status == "queued":
+		return "~"
+	case status == "cached":
+		return "C"
+	case status == "rendered":
+		return "OK"
+	case status == "error":
+		return "X"
+	case status == "fetching":
+		return "F " + busySpinner(tick)
+	case status == "rendering":
+		return "R " + busySpinner(tick)
+	case strings.HasPrefix(status, "rendering "):
+		pct := strings.TrimSpace(strings.TrimPrefix(status, "rendering "))
+		return "R " + pct
+	case strings.HasPrefix(status, "fetching "):
+		pct := strings.TrimSpace(strings.TrimPrefix(status, "fetching "))
+		return "F " + pct
+	default:
+		return status
+	}
 }

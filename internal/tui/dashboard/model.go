@@ -1,10 +1,14 @@
 package dashboard
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -12,10 +16,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"powerhour/internal/cache"
+	"powerhour/internal/cachedoctor"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
+	"powerhour/internal/render"
 	"powerhour/internal/render/state"
+	renderstate "powerhour/internal/render/state"
 	"powerhour/pkg/csvplan"
 )
 
@@ -25,10 +32,10 @@ type tickMsg time.Time
 type interactionMode int
 
 const (
-	modeNormal interactionMode = iota
-	modeInput                  // text input active
-	modeConfirmDelete          // waiting for y/n
-	modeInlineEdit             // editing a row's fields inline
+	modeNormal        interactionMode = iota
+	modeInput                         // text input active
+	modeConfirmDelete                 // waiting for y/n
+	modeInlineEdit                    // editing a row's fields inline
 )
 
 // Model is the top-level bubbletea model for the dashboard.
@@ -84,12 +91,48 @@ type Model struct {
 	editOriginal string // original value before edit started
 
 	// Overlay state.
-	overlay      overlayKind
-	toolStatuses []ToolStatus
+	overlay       overlayKind
+	toolStatuses  []ToolStatus
+	doctorOverlay *cacheDoctorOverlay
 
 	// VLC state.
-	vlcPath    string
-	vlcFound   bool
+	vlcPath  string
+	vlcFound bool
+
+	job dashboardJobState
+}
+
+type dashboardJobState struct {
+	active bool
+	label  string
+	events chan dashboardJobEvent
+}
+
+type dashboardJobEvent interface{}
+
+type jobRowStatusEvent struct {
+	collectionIdx int
+	rowIndex      int
+	status        string
+}
+
+type jobCollectionStatusEvent struct {
+	collectionIdx int
+	status        string
+}
+
+type jobCacheRowStatusEvent struct {
+	identifier string
+	status     string
+}
+
+type jobCacheStatusEvent struct {
+	status string
+}
+
+type jobCompletedEvent struct {
+	label string
+	err   error
 }
 
 type collectionSummary struct {
@@ -122,17 +165,6 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 		collViews[i] = newCollectionView(collections[name], pp, cfg, idx)
 	}
 
-	// Build collection link map for cache view (link → collection name).
-	collLinks := make(map[string]string)
-	for name, coll := range collections {
-		for _, row := range coll.Rows {
-			link := strings.TrimSpace(row.Link)
-			if link != "" {
-				collLinks[link] = name
-			}
-		}
-	}
-
 	// Build summaries and cache status.
 	summaries := buildSummaries(collections, names, idx, pp)
 	cacheStatus := buildCacheStatus(collections, idx, pp)
@@ -152,7 +184,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 		cacheStatus:     cacheStatus,
 		toolWarning:     toolWarning,
 		toolStatuses:    toolStatuses,
-		cacheView:       newCacheView(idx, collLinks),
+		cacheView:       newCacheView(idx, buildCollectionLinks(collections)),
 		toolsView:       newToolsView(toolStatuses),
 	}
 
@@ -205,19 +237,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i := range m.collectionViews {
 			m.collectionViews[i].termWidth = msg.Width
 			m.collectionViews[i].termHeight = msg.Height
+			m.collectionViews[i].tick = m.tick
 		}
 		m.cacheView.termWidth = msg.Width
 		m.cacheView.termHeight = msg.Height
 		m.toolsView.termWidth = msg.Width
+		if m.doctorOverlay != nil {
+			m.doctorOverlay.termWidth = msg.Width
+			m.doctorOverlay.termHeight = msg.Height
+		}
 		return m, nil
 
 	case tickMsg:
 		m.tick++
+		for i := range m.collectionViews {
+			m.collectionViews[i].tick = m.tick
+		}
+		if m.doctorOverlay != nil {
+			m.doctorOverlay.tick = m.tick
+		}
+		m = m.drainJobEvents()
 		return m, scheduleDashTick()
 
 	case renderDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Render error: %v", msg.err)
+		} else if msg.status != "" {
+			m.statusMsg = msg.status
 		}
 		m = reloadState(m)
 		return m, nil
@@ -228,6 +274,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m = reloadState(m)
 		m.timelineView.concatPath, m.timelineView.concatExists, m.timelineView.concatSize = findConcatOutput(m.pp.Root)
+		return m, nil
+
+	case fetchDoneMsg:
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("Fetch error: %v", msg.err)
+		} else {
+			m.statusMsg = msg.status
+		}
+		m = reloadState(m)
 		return m, nil
 
 	case metadataProbeMsg:
@@ -262,6 +317,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case doctorRequeryDoneMsg:
+		if m.doctorOverlay != nil {
+			if msg.err != nil {
+				m.doctorOverlay.requerying = false
+				m.statusMsg = fmt.Sprintf("Requery failed: %v", msg.err)
+			} else {
+				normCfg := cache.LoadNormalizationConfig()
+				m.doctorOverlay.applyRequery(msg.info, normCfg)
+			}
+		}
+		return m, nil
+
 	case editorDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Editor error: %v", msg.err)
@@ -278,13 +345,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Clear transient status on any keypress.
-	m.statusMsg = ""
+	if !m.job.active {
+		m.statusMsg = ""
+	}
 
-	// Overlay dismiss.
+	// Overlay input handling.
 	if m.overlay != overlayNone {
+		if m.overlay == overlayDoctor && m.doctorOverlay != nil {
+			if isRequeryKey(msg) && !m.doctorOverlay.requerying {
+				return m.startDoctorRequery()
+			}
+			done, applyNow := m.doctorOverlay.handleKey(msg)
+			if applyNow {
+				m = m.applyCurrentDoctorEntry()
+			}
+			if done {
+				m.overlay = overlayNone
+				m.doctorOverlay = nil
+			}
+			return m, nil
+		}
 		key := msg.String()
 		switch key {
-		case "escape", "esc", "?", "q":
+		case "escape", "esc", "?":
 			m.overlay = overlayNone
 		}
 		return m, nil
@@ -300,20 +383,25 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleInlineEditKey(msg)
 	}
 
+	if m.job.active {
+		key := msg.String()
+		switch key {
+		case "ctrl+c", "esc":
+			return m, tea.Quit
+		default:
+			return m, nil
+		}
+	}
+
 	key := msg.String()
 
 	// Global keys.
 	switch key {
-	case "q", "ctrl+c":
+	case "ctrl+c", "esc":
 		return m, tea.Quit
 	case "?":
 		m.overlay = overlayHelp
 		return m, nil
-	case "r":
-		c := execCommand("powerhour", "render", "--project", m.pp.Root)
-		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			return renderDoneMsg{err: err}
-		})
 	case "c":
 		c := execCommand("powerhour", "concat", "--project", m.pp.Root)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
@@ -526,7 +614,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 	// If the plan was opened externally (Shift+E), reload data on navigation keys.
 	if v.needsReload {
 		switch key {
-		case "up", "k", "down", "j", "J", "K", "e", "E", "a", "d", "v", "V":
+		case "up", "k", "down", "j", "J", "K", "e", "E", "a", "d", "f", "F", "v", "V":
 			m = reloadCollection(m, cvIdx)
 			m.collectionViews[cvIdx].needsReload = false
 			v = m.collectionViews[cvIdx]
@@ -574,7 +662,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 
 	case "a":
 		m.mode = modeInput
-		m.input = newTextInput("Add clip (URL or path):")
+		m.input = newMultilineInput("Add rows: paste YAML/CSV/TSV or a single URL/path. Ctrl+S submits, Esc cancels.")
 		return m, nil
 
 	case "d":
@@ -618,6 +706,26 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		m.collectionViews[cvIdx].needsReload = true
 		m.statusMsg = fmt.Sprintf("Opened %s — data reloads on next navigation", filepath.Base(coll.Plan))
 		return m, nil
+
+	case "f":
+		if len(v.rows) == 0 {
+			return m, nil
+		}
+		row := v.rows[v.cursor]
+		return m.startCollectionFetchJob(cvIdx, []csvplan.CollectionRow{row}, false), nil
+
+	case "F":
+		return m.startCollectionFetchJob(cvIdx, append([]csvplan.CollectionRow(nil), v.rows...), true), nil
+
+	case "r":
+		if len(v.rows) == 0 {
+			return m, nil
+		}
+		row := v.rows[v.cursor]
+		return m.startCollectionRenderJob(cvIdx, []csvplan.CollectionRow{row}, false), nil
+
+	case "R":
+		return m.startCollectionRenderJob(cvIdx, append([]csvplan.CollectionRow(nil), v.rows...), true), nil
 
 	case "v":
 		if !m.vlcFound {
@@ -686,6 +794,12 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 	key := msg.String()
 
 	switch key {
+	case "r":
+		c := execCommand("powerhour", "render", "--project", m.pp.Root)
+		return m, tea.ExecProcess(c, func(err error) tea.Msg {
+			return renderDoneMsg{err: err}
+		})
+
 	case "up", "k":
 		if v.concatFocus {
 			v.concatFocus = false
@@ -893,6 +1007,26 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		v.toggle()
+	case "d":
+		if len(entries) == 0 {
+			m.cacheView = v
+			return m, nil
+		}
+		entry := entries[v.cursor]
+		if strings.TrimSpace(entry.Identifier) == "" {
+			m.statusMsg = "No cache identifier for selected entry"
+			m.cacheView = v
+			return m, nil
+		}
+		m.cacheView = v
+		return m.openDoctorOverlay([]cacheEntry{entry}), nil
+	case "D":
+		if len(entries) == 0 {
+			m.cacheView = v
+			return m, nil
+		}
+		m.cacheView = v
+		return m.openDoctorOverlay(append([]cacheEntry(nil), entries...)), nil
 	case "v":
 		if !m.vlcFound {
 			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
@@ -951,6 +1085,117 @@ func (v *cacheView) autoScroll() {
 	}
 }
 
+func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
+	idx, err := cache.Load(m.pp)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Cache load error: %v", err)
+		return m
+	}
+	normCfg := cache.LoadNormalizationConfig()
+	knownArtists := cachedoctor.BuildKnownArtists(idx, normCfg)
+
+	var items []doctorItem
+	for _, viewEntry := range entries {
+		identifier := strings.TrimSpace(viewEntry.Identifier)
+		if identifier == "" {
+			continue
+		}
+		entry, ok := idx.GetByIdentifier(identifier)
+		if !ok {
+			continue
+		}
+		finding, needsFix, err := cachedoctor.InspectEntry(context.Background(), nil, normCfg, knownArtists, entry, false)
+		if err != nil {
+			continue
+		}
+		if !needsFix {
+			continue
+		}
+		items = append(items, doctorItem{entry: entry, finding: finding})
+	}
+	if len(items) == 0 {
+		m.statusMsg = "All entries look clean"
+		return m
+	}
+	overlay := newCacheDoctorOverlay(items, knownArtists, m.termWidth, m.termHeight)
+	m.doctorOverlay = &overlay
+	m.overlay = overlayDoctor
+	return m
+}
+
+type doctorRequeryDoneMsg struct {
+	info cache.RemoteIDInfo
+	err  error
+}
+
+func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
+	if m.doctorOverlay == nil || m.doctorOverlay.requerying {
+		return m, nil
+	}
+	item := m.doctorOverlay.findings[m.doctorOverlay.cursor]
+	source := item.entry.Source
+	if source == "" && len(item.entry.Links) > 0 {
+		source = item.entry.Links[0]
+	}
+	if source == "" || !strings.Contains(source, "://") {
+		m.statusMsg = "No URL to requery"
+		return m, nil
+	}
+	m.doctorOverlay.requerying = true
+	pp := m.pp
+	return m, func() tea.Msg {
+		ctx := context.Background()
+		logger := log.New(io.Discard, "", 0)
+		svc, err := cache.NewService(ctx, pp, logger, nil)
+		if err != nil {
+			return doctorRequeryDoneMsg{err: err}
+		}
+		info, err := svc.QueryRemoteID(ctx, source)
+		return doctorRequeryDoneMsg{info: info, err: err}
+	}
+}
+
+func (m Model) applyCurrentDoctorEntry() Model {
+	if m.doctorOverlay == nil {
+		return m
+	}
+	o := m.doctorOverlay
+	if o.cursor < 0 || o.cursor >= len(o.findings) {
+		return m
+	}
+	identifier := o.findings[o.cursor].finding.Identifier
+	title := strings.TrimSpace(o.editTitle)
+	artist := strings.TrimSpace(o.editArtist)
+
+	idx, err := cache.Load(m.pp)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Cache load error: %v", err)
+		return m
+	}
+	entry, ok := idx.GetByIdentifier(identifier)
+	if !ok {
+		m.statusMsg = "Entry not found in cache"
+		return m
+	}
+	entry.Title = title
+	entry.Artist = artist
+	idx.SetEntry(entry)
+	if err := cache.Save(m.pp, idx); err != nil {
+		m.statusMsg = fmt.Sprintf("Save error: %v", err)
+		return m
+	}
+	o.applied++
+	m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+	m = reloadState(m)
+
+	// Advance to next entry.
+	if o.cursor < len(o.findings)-1 {
+		o.cursor++
+		o.loadCurrentEntry()
+	}
+	return m
+}
+
 func (v *timelineView) autoScrollSeq() {
 	visible := v.seqPanelHeight()
 	if v.seqCursor < v.seqScrollTop {
@@ -982,16 +1227,20 @@ func (m Model) View() string {
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 
-	// Content.
-	switch m.viewKind(m.activeView) {
-	case "timeline":
-		b.WriteString(m.timelineView.view(m.cacheStatus))
-	case "collection":
-		b.WriteString(m.collectionViews[m.collectionViewIndex()].view())
-	case "cache":
-		b.WriteString(m.cacheView.view())
-	case "tools":
-		b.WriteString(m.toolsView.view())
+	// Content — doctor overlay replaces the content area when active.
+	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
+		b.WriteString(m.doctorOverlay.view())
+	} else {
+		switch m.viewKind(m.activeView) {
+		case "timeline":
+			b.WriteString(m.timelineView.view(m.cacheStatus))
+		case "collection":
+			b.WriteString(m.collectionViews[m.collectionViewIndex()].view())
+		case "cache":
+			b.WriteString(m.cacheView.view())
+		case "tools":
+			b.WriteString(m.toolsView.view())
+		}
 	}
 
 	// Blank line before status/footer area.
@@ -999,27 +1248,34 @@ func (m Model) View() string {
 
 	// Status line (always present — shows action feedback or stays empty).
 	if m.statusMsg != "" {
-		b.WriteString(countYellow.Render(m.statusMsg))
+		if m.job.active {
+			b.WriteString(countYellow.Render(busySpinner(m.tick) + " " + m.statusMsg))
+		} else {
+			b.WriteString(countYellow.Render(m.statusMsg))
+		}
 	}
 	b.WriteByte('\n')
 
 	// Footer / input / confirm.
-	switch m.mode {
-	case modeInput:
-		b.WriteString(m.input.view())
-	case modeConfirmDelete:
-		b.WriteString(footerStyle.Render(fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)))
-	case modeInlineEdit:
-		b.WriteString(footerStyle.Render("←/→ field  ↑/↓ row  Enter save  Esc cancel  Tab next field"))
-	default:
-		b.WriteString(renderFooter(m))
+	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
+		b.WriteString(m.doctorOverlay.doctorFooter())
+	} else {
+		switch m.mode {
+		case modeInput:
+			b.WriteString(m.input.view())
+		case modeConfirmDelete:
+			b.WriteString(footerStyle.Render(fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)))
+		case modeInlineEdit:
+			b.WriteString(footerStyle.Render("←/→ field  ↑/↓ row  Enter save  Esc cancel  Tab next field"))
+		default:
+			b.WriteString(renderFooter(m))
+		}
 	}
 
 	result := b.String()
 
-	// Overlay renders on top.
-	switch m.overlay {
-	case overlayHelp:
+	// Full-screen overlays render on top.
+	if m.overlay == overlayHelp {
 		return renderHelpOverlay(m.activeView, m.termWidth, m.termHeight)
 	}
 
@@ -1033,8 +1289,15 @@ type editorDoneMsg struct {
 	collectionIdx int
 }
 
-type renderDoneMsg struct{ err error }
+type renderDoneMsg struct {
+	err    error
+	status string
+}
 type concatDoneMsg struct{ err error }
+type fetchDoneMsg struct {
+	err    error
+	status string
+}
 
 // metadataProbeMsg carries yt-dlp metadata for a newly added row.
 type metadataProbeMsg struct {
@@ -1047,6 +1310,423 @@ type metadataProbeMsg struct {
 
 func execCommand(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)
+}
+
+func (m Model) drainJobEvents() Model {
+	if !m.job.active || m.job.events == nil {
+		return m
+	}
+	for {
+		select {
+		case raw, ok := <-m.job.events:
+			if !ok {
+				m.job = dashboardJobState{}
+				return m
+			}
+			switch evt := raw.(type) {
+			case jobRowStatusEvent:
+				if evt.collectionIdx >= 0 && evt.collectionIdx < len(m.collectionViews) {
+					if m.collectionViews[evt.collectionIdx].rowStatus == nil {
+						m.collectionViews[evt.collectionIdx].rowStatus = make(map[int]string)
+					}
+					if strings.TrimSpace(evt.status) == "" {
+						delete(m.collectionViews[evt.collectionIdx].rowStatus, evt.rowIndex)
+					} else {
+						m.collectionViews[evt.collectionIdx].rowStatus[evt.rowIndex] = evt.status
+					}
+				}
+			case jobCollectionStatusEvent:
+				if evt.collectionIdx >= 0 && evt.collectionIdx < len(m.collectionViews) {
+					m.collectionViews[evt.collectionIdx].activity = evt.status
+				}
+			case jobCacheRowStatusEvent:
+				if m.cacheView.rowStatus == nil {
+					m.cacheView.rowStatus = make(map[string]string)
+				}
+				if strings.TrimSpace(evt.status) == "" {
+					delete(m.cacheView.rowStatus, evt.identifier)
+				} else {
+					m.cacheView.rowStatus[evt.identifier] = evt.status
+				}
+			case jobCacheStatusEvent:
+				m.cacheView.activity = evt.status
+			case jobCompletedEvent:
+				if evt.err != nil {
+					m.statusMsg = fmt.Sprintf("%s failed: %v", evt.label, evt.err)
+				} else {
+					m.statusMsg = evt.label
+				}
+				for i := range m.collectionViews {
+					m.collectionViews[i].activity = ""
+					m.collectionViews[i].rowStatus = make(map[int]string)
+				}
+				m.cacheView.activity = ""
+				m.cacheView.rowStatus = make(map[string]string)
+				m.job = dashboardJobState{}
+				m = reloadState(m)
+				return m
+			}
+		default:
+			return m
+		}
+	}
+}
+
+func (m Model) startCollectionFetchJob(cvIdx int, rows []csvplan.CollectionRow, all bool) Model {
+	if m.job.active {
+		return m
+	}
+	collName := m.collectionNames[cvIdx]
+	label := "Fetch"
+	if all {
+		m.collectionViews[cvIdx].activity = "fetching all"
+		label = fmt.Sprintf("Fetch %s", collName)
+	} else if len(rows) > 0 {
+		m.collectionViews[cvIdx].rowStatus[rows[0].Index] = "fetching"
+		label = fmt.Sprintf("Fetch %s row %d", collName, rows[0].Index)
+	}
+	m.statusMsg = label + "..."
+	events := make(chan dashboardJobEvent, max(16, len(rows)*4))
+	m.job = dashboardJobState{active: true, label: label, events: events}
+	go runDashboardFetchJob(m.pp, cvIdx, rows, all, events)
+	return m
+}
+
+func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.CollectionRow, all bool, events chan<- dashboardJobEvent) {
+	defer close(events)
+	ctx := context.Background()
+	logger := log.New(io.Discard, "", 0)
+	svc, err := cache.NewService(ctx, pp, logger, nil)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Fetch", err: err}
+		return
+	}
+	idx, err := cache.Load(pp)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Fetch", err: err}
+		return
+	}
+	dirty := false
+	if all {
+		events <- jobCollectionStatusEvent{collectionIdx: cvIdx, status: "fetching all"}
+		for _, row := range rows {
+			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "queued"}
+		}
+	}
+	for _, row := range rows {
+		events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "fetching"}
+		result, err := svc.Resolve(ctx, idx, row.ToRow(), cache.ResolveOptions{})
+		if err != nil {
+			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "error"}
+			events <- jobCompletedEvent{label: "Fetch", err: err}
+			return
+		}
+		dirty = dirty || result.Updated
+		finalStatus := "OK"
+		switch result.Status {
+		case cache.ResolveStatusCached, cache.ResolveStatusMatched:
+			finalStatus = "cached"
+		case cache.ResolveStatusMissing:
+			finalStatus = "error"
+		}
+		events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: finalStatus}
+	}
+	if dirty {
+		if err := cache.Save(pp, idx); err != nil {
+			events <- jobCompletedEvent{label: "Fetch", err: err}
+			return
+		}
+	}
+	events <- jobCompletedEvent{label: "Fetch", err: nil}
+}
+
+func (m Model) startCollectionRenderJob(cvIdx int, rows []csvplan.CollectionRow, all bool) Model {
+	if m.job.active {
+		return m
+	}
+	collName := m.collectionNames[cvIdx]
+	label := "Render"
+	if all {
+		m.collectionViews[cvIdx].activity = "rendering all"
+		label = fmt.Sprintf("Render %s", collName)
+	} else if len(rows) > 0 {
+		m.collectionViews[cvIdx].rowStatus[rows[0].Index] = "queued"
+		label = fmt.Sprintf("Render %s row %d", collName, rows[0].Index)
+	}
+	m.statusMsg = label + "..."
+	events := make(chan dashboardJobEvent, max(32, len(rows)*8))
+	m.job = dashboardJobState{active: true, label: label, events: events}
+	go runDashboardRenderJob(m.pp, m.cfg, m.collectionNames[cvIdx], m.collections[m.collectionNames[cvIdx]], cvIdx, rows, all, events)
+	return m
+}
+
+func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, cvIdx int, rows []csvplan.CollectionRow, all bool, events chan<- dashboardJobEvent) {
+	defer close(events)
+	ctx := context.Background()
+	if err := pp.EnsureCollectionDirs(cfg); err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	idx, err := cache.Load(pp)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	resolver, err := project.NewCollectionResolver(cfg, pp)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	targetColl := coll
+	targetColl.Rows = append([]csvplan.CollectionRow(nil), rows...)
+	collections := map[string]project.Collection{collName: targetColl}
+	collectionClips, err := resolver.BuildCollectionClips(collections)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	applySequenceEntryFadesLocal(cfg, collectionClips)
+	svc, err := render.NewService(ctx, pp, cfg, nil)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	rs, err := renderstate.Load(pp.RenderStateFile)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	filenameTemplate := cfg.SegmentFilenameTemplate()
+	segments := make([]render.Segment, 0, len(collectionClips))
+	for _, cc := range collectionClips {
+		seg, err := buildCollectionRenderSegmentLocal(pp, cfg, idx, cc)
+		if err != nil {
+			events <- jobCompletedEvent{label: "Render", err: err}
+			return
+		}
+		if prior, ok := rs.Segments[seg.OutputPath]; ok {
+			seg.StoredHash = prior.InputHash
+		}
+		segments = append(segments, seg)
+	}
+	actions := renderstate.DetectChanges(rs, segments, cfg, filenameTemplate, false)
+	toRender := make([]render.Segment, 0, len(segments))
+	for i, action := range actions {
+		rowIndex := segments[i].Clip.Row.Index
+		switch action.Action {
+		case renderstate.ActionSkip:
+			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: rowIndex, status: "cached"}
+		default:
+			toRender = append(toRender, segments[i])
+			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: rowIndex, status: "queued"}
+		}
+	}
+	if all {
+		events <- jobCollectionStatusEvent{collectionIdx: cvIdx, status: "rendering all"}
+	}
+	reporter := &dashboardRenderReporter{collectionIdx: cvIdx, events: events}
+	results := svc.Render(ctx, toRender, render.Options{
+		Concurrency: max(1, min(runtime.NumCPU(), 2)),
+		Force:       false,
+		Reporter:    reporter,
+	})
+	segByPath := make(map[string]render.Segment, len(segments))
+	for _, seg := range segments {
+		segByPath[seg.OutputPath] = seg
+	}
+	for _, res := range results {
+		if res.Err != nil {
+			events <- jobCompletedEvent{label: "Render", err: res.Err}
+			return
+		}
+		if !res.Skipped && res.OutputPath != "" {
+			if seg, ok := segByPath[res.OutputPath]; ok {
+				rs.Segments[res.OutputPath] = renderstate.SegmentState{
+					InputHash:  renderstate.SegmentInputHash(seg, filenameTemplate),
+					RenderedAt: time.Now(),
+					SourcePath: seg.CachedPath,
+					DurationS:  float64(seg.Clip.DurationSeconds),
+				}
+			}
+		}
+	}
+	currentKeys := make(map[string]bool, len(segments))
+	for _, seg := range segments {
+		currentKeys[seg.OutputPath] = true
+	}
+	renderstate.Prune(rs, currentKeys)
+	if err := rs.Save(pp.RenderStateFile); err != nil {
+		events <- jobCompletedEvent{label: "Render", err: err}
+		return
+	}
+	events <- jobCompletedEvent{label: "Render", err: nil}
+}
+
+type dashboardRenderReporter struct {
+	collectionIdx int
+	events        chan<- dashboardJobEvent
+}
+
+func (r *dashboardRenderReporter) Start(seg render.Segment) {
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: seg.Clip.Row.Index, status: "rendering"}
+}
+
+func (r *dashboardRenderReporter) Progress(seg render.Segment, pct float64) {
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: seg.Clip.Row.Index, status: fmt.Sprintf("rendering %d%%", int(pct*100))}
+}
+
+func (r *dashboardRenderReporter) Complete(res render.Result) {
+	status := "rendered"
+	if res.Skipped {
+		status = "cached"
+	}
+	if res.Err != nil {
+		status = "error"
+	}
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: res.TypeIndex, status: status}
+}
+
+func buildCollectionRenderSegmentLocal(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, collClip project.CollectionClip) (render.Segment, error) {
+	clip := collClip.Clip
+	clip.Row.DurationSeconds = clip.DurationSeconds
+	if clip.Row.Index <= 0 {
+		clip.Row.Index = clip.TypeIndex
+		if clip.Row.Index <= 0 {
+			clip.Row.Index = clip.Sequence
+		}
+	}
+
+	segment := render.Segment{
+		Clip:     clip,
+		Overlays: collClip.Overlays,
+	}
+
+	outputDir := collClip.OutputDir
+	if !filepath.IsAbs(outputDir) {
+		outputDir = filepath.Join(pp.SegmentsDir, outputDir)
+	}
+	baseName := render.SegmentBaseName(cfg.SegmentFilenameTemplate(), segment)
+	segment.OutputPath = filepath.Join(outputDir, baseName+".mp4")
+
+	link := clip.Row.Link
+	isURL := strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu")
+	if !isURL {
+		link = strings.Trim(link, "'\"")
+		sourcePath := link
+		if !filepath.IsAbs(sourcePath) {
+			sourcePath = filepath.Join(pp.Root, link)
+		}
+		if _, err := os.Stat(sourcePath); err != nil {
+			return segment, err
+		}
+		segment.SourcePath = sourcePath
+		segment.CachedPath = sourcePath
+		return segment, nil
+	}
+
+	entry, ok, err := resolveDashboardEntryForRow(pp, idx, clip.Row)
+	if err != nil {
+		return segment, err
+	}
+	if !ok {
+		return segment, fmt.Errorf("video not downloaded; may be unavailable or region-locked")
+	}
+	segment.Entry = entry
+	segment.SourcePath = entry.CachedPath
+	segment.CachedPath = entry.CachedPath
+	return segment, nil
+}
+
+func applySequenceEntryFadesLocal(cfg config.Config, clips []project.CollectionClip) {
+	byCollection := make(map[string][]int)
+	for i, cc := range clips {
+		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], i)
+	}
+	for _, indices := range byCollection {
+		sort.Slice(indices, func(a, b int) bool {
+			return clips[indices[a]].Clip.Row.Index < clips[indices[b]].Clip.Row.Index
+		})
+	}
+
+	consumed := make(map[string]int)
+	for _, entry := range cfg.Timeline.Sequence {
+		if entry.Collection == "" {
+			continue
+		}
+		indices := byCollection[entry.Collection]
+		if len(indices) == 0 {
+			continue
+		}
+		start := consumed[entry.Collection]
+		if start >= len(indices) {
+			continue
+		}
+		count := len(indices) - start
+		if entry.Count > 0 && entry.Count < count {
+			count = entry.Count
+		}
+		if count < 0 {
+			count = 0
+		}
+		consumed[entry.Collection] = start + count
+		if entry.Fade == 0 && entry.FadeIn == 0 && entry.FadeOut == 0 {
+			continue
+		}
+		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
+		for _, idx := range indices[start : start+count] {
+			clips[idx].Clip.FadeInSeconds = fadeIn
+			clips[idx].Clip.FadeOutSeconds = fadeOut
+		}
+		if entry.Interleave != nil {
+			ilIndices := byCollection[entry.Interleave.Collection]
+			ilStart := consumed[entry.Interleave.Collection]
+			ilCount := len(ilIndices) - ilStart
+			if ilCount > count {
+				ilCount = count
+			}
+			if ilCount < 0 {
+				ilCount = 0
+			}
+			consumed[entry.Interleave.Collection] = ilStart + ilCount
+		}
+	}
+}
+
+func resolveDashboardEntryForRow(pp paths.ProjectPaths, idx *cache.Index, row csvplan.Row) (cache.Entry, bool, error) {
+	if idx == nil {
+		return cache.Entry{}, false, fmt.Errorf("row %03d: cache index is nil", row.Index)
+	}
+
+	link := strings.TrimSpace(row.Link)
+	if link == "" {
+		return cache.Entry{}, false, fmt.Errorf("row %03d missing link", row.Index)
+	}
+
+	if isURL(link) {
+		key, exists := idx.LookupLink(link)
+		if !exists {
+			return cache.Entry{}, false, nil
+		}
+		entry, ok := idx.GetByIdentifier(key)
+		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
+			return cache.Entry{}, false, nil
+		}
+		return entry, true, nil
+	}
+
+	path := link
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(pp.Root, link)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return cache.Entry{}, false, err
+	}
+	entry, ok := idx.GetByIdentifier(abs)
+	if !ok || strings.TrimSpace(entry.CachedPath) == "" {
+		return cache.Entry{}, false, nil
+	}
+	return entry, true, nil
 }
 
 // processAddTimelineEntry adds a new sequence entry to the timeline.
@@ -1154,12 +1834,31 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Clean YouTube URLs.
-	value = cleanYouTubeURL(value)
-
 	v := m.collectionViews[cvIdx]
 	collName := m.collectionNames[cvIdx]
 	coll := m.collections[collName]
+
+	if looksLikeBatchImport(value) {
+		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Import failed: %v", err)
+			return m, nil
+		}
+
+		coll = project.AppendCollectionRows(coll, rows)
+		if err := project.WriteCollectionPlan(coll); err != nil {
+			m.statusMsg = fmt.Sprintf("Write error: %v", err)
+			return m, nil
+		}
+
+		m.collections[collName] = coll
+		m = reloadCollection(m, cvIdx)
+		m.statusMsg = fmt.Sprintf("Imported %d rows from %s", len(rows), format)
+		return m, nil
+	}
+
+	// Clean YouTube URLs.
+	value = cleanYouTubeURL(value)
 
 	defaultDur := 60
 	if coll.Config.Duration > 0 {
@@ -1181,8 +1880,13 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 	if startHeader == "" {
 		startHeader = "start_time"
 	}
+	durationHeader := coll.Config.DurationHeader
+	if durationHeader == "" {
+		durationHeader = "duration"
+	}
 	newRow.CustomFields[linkHeader] = value
 	newRow.CustomFields[startHeader] = "0:00"
+	newRow.CustomFields[durationHeader] = fmt.Sprintf("%d", defaultDur)
 
 	v.rows = append(v.rows, newRow)
 	v.cursor = len(v.rows) - 1
@@ -1199,6 +1903,28 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func looksLikeBatchImport(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false
+	}
+
+	lines := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == '\n' || r == '\r'
+	})
+	if len(lines) > 1 {
+		return true
+	}
+	if strings.HasPrefix(trimmed, "- ") {
+		return true
+	}
+	firstLine := trimmed
+	if len(lines) == 1 {
+		firstLine = strings.TrimSpace(lines[0])
+	}
+	return strings.Contains(firstLine, ",") || strings.Contains(firstLine, "\t")
 }
 
 // processDeleteRow deletes the row at the cursor in the active collection.
@@ -1248,26 +1974,16 @@ func writeCollection(m Model, cvIdx int) Model {
 	coll := m.collections[collName]
 	v := m.collectionViews[cvIdx]
 
-	var err error
-	if coll.PlanFormat == "yaml" {
-		err = csvplan.WriteYAML(coll.Plan, v.rows)
-	} else {
-		headers := coll.Headers
-		if len(headers) == 0 {
-			headers = []string{"title", "artist", "link", "start_time", "duration"}
-		}
-		delimiter := coll.Delimiter
-		if delimiter == 0 {
-			delimiter = ','
-		}
-		err = csvplan.WriteCSV(coll.Plan, headers, v.rows, delimiter)
+	coll.Rows = v.rows
+	if coll.PlanFormat != "yaml" {
+		coll.Headers = csvplan.MergeHeaders(coll.Headers, v.rows)
 	}
+	err := project.WriteCollectionPlan(coll)
 
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Write error: %v", err)
 	}
 
-	coll.Rows = v.rows
 	m.collections[collName] = coll
 
 	// Recompute row states after mutation.
@@ -1290,6 +2006,10 @@ func reResolve(m Model) Model {
 
 	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp)
 	m.cacheStatus = buildCacheStatus(m.collections, m.cacheIdx, m.pp)
+	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
+	m.cacheView = newCacheView(m.cacheIdx, buildCollectionLinks(m.collections))
+	m.cacheView.termWidth = oldW
+	m.cacheView.termHeight = oldH
 	return m
 }
 
@@ -1333,8 +2053,17 @@ func reloadState(m Model) Model {
 	rs, _ := state.Load(m.pp.RenderStateFile)
 	m.cacheIdx = idx
 	m.renderState = rs
+	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
+	m.cacheView = newCacheView(idx, buildCollectionLinks(m.collections))
+	m.cacheView.termWidth = oldW
+	m.cacheView.termHeight = oldH
 	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp)
 	m.cacheStatus = buildCacheStatus(m.collections, idx, m.pp)
+	for i := range m.collectionNames {
+		collName := m.collectionNames[i]
+		coll := m.collections[collName]
+		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, idx)
+	}
 	return m
 }
 
@@ -1376,6 +2105,8 @@ func reloadCollection(m Model, cvIdx int) Model {
 	coll.Rows = rows
 	m.collections[collName] = coll
 	m.collectionViews[cvIdx].rows = rows
+	m.collectionViews[cvIdx].columns = discoverColumns(rows)
+	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx)
 	if m.collectionViews[cvIdx].cursor >= len(rows) {
 		m.collectionViews[cvIdx].cursor = max(0, len(rows)-1)
 	}
@@ -1442,6 +2173,19 @@ func buildCacheStatus(collections map[string]project.Collection, idx *cache.Inde
 		}
 	}
 	return status
+}
+
+func buildCollectionLinks(collections map[string]project.Collection) map[string]string {
+	collLinks := make(map[string]string)
+	for name, coll := range collections {
+		for _, row := range coll.Rows {
+			link := strings.TrimSpace(row.Link)
+			if link != "" {
+				collLinks[link] = name
+			}
+		}
+	}
+	return collLinks
 }
 
 func checkFileExists(path, root string) bool {
