@@ -1231,23 +1231,32 @@ func (m Model) View() string {
 	b.WriteByte('\n')
 
 	// Content — doctor overlay replaces the content area when active.
+	var content string
 	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
-		b.WriteString(m.doctorOverlay.view())
+		content = m.doctorOverlay.view()
 	} else {
 		switch m.viewKind(m.activeView) {
 		case "timeline":
-			b.WriteString(m.timelineView.view(m.cacheStatus))
+			content = m.timelineView.view(m.cacheStatus)
 		case "collection":
-			b.WriteString(m.collectionViews[m.collectionViewIndex()].view())
+			content = m.collectionViews[m.collectionViewIndex()].view()
 		case "cache":
-			b.WriteString(m.cacheView.view())
+			content = m.cacheView.view()
 		case "tools":
-			b.WriteString(m.toolsView.view())
+			content = m.toolsView.view()
 		}
 	}
 
-	// Blank line before status/footer area.
-	b.WriteByte('\n')
+	// Pad content to fill the available space so the status/footer stay fixed
+	// at the bottom regardless of which view is active.
+	// Chrome: header(1) + blank(1) + [content] + blank(1) + status(1) + footer(1) = 5 lines.
+	targetLines := m.termHeight - 5
+	contentLines := strings.Count(content, "\n")
+	b.WriteString(content)
+	for contentLines < targetLines {
+		b.WriteByte('\n')
+		contentLines++
+	}
 
 	// Status line (always present — shows action feedback or stays empty).
 	if m.statusMsg != "" {
