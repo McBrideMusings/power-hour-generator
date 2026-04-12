@@ -20,6 +20,19 @@ import (
 )
 
 func newCacheCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "cache",
+		Short: "Manage project cache entries",
+		RunE:  runCacheLegacyAdd,
+	}
+
+	cmd.AddCommand(newCacheAddCmd())
+	cmd.AddCommand(newCacheRemoveCmd())
+	cmd.AddCommand(newCacheDoctorCmd())
+	return cmd
+}
+
+func newCacheAddCmd() *cobra.Command {
 	var (
 		urlFlag    string
 		titleFlag  string
@@ -29,7 +42,7 @@ func newCacheCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "cache <file-or-id>",
+		Use:   "add <file-or-id>",
 		Short: "Register a video into the project cache",
 		Long: `Register a local video file or download a video by YouTube ID into
 the project cache so it can be used during render.
@@ -69,6 +82,18 @@ Examples:
 	cmd.Flags().BoolVar(&noProbe, "no-probe", false, "Skip ffprobe metadata extraction")
 
 	return cmd
+}
+
+func runCacheLegacyAdd(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+	add := newCacheAddCmd()
+	add.SetContext(cmd.Context())
+	add.SetArgs(args)
+	add.SetOut(cmd.OutOrStdout())
+	add.SetErr(cmd.ErrOrStderr())
+	return add.Execute()
 }
 
 // runCacheDownload downloads a video by YouTube ID and registers it in the cache.
@@ -211,7 +236,10 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 
 	// Resolve identity
 	status.Update("Querying video metadata...")
-	var identifier, extractor, videoID, title, artist string
+	var (
+		identifier, extractor, videoID, title, artist string
+		remoteInfo                                    cache.RemoteIDInfo
+	)
 
 	remoteInfo, queryErr := svc.QueryRemoteID(ctx, rawURL)
 	if queryErr == nil {
@@ -262,6 +290,17 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 	} else if artist == "" {
 		artist = planArtist
 	}
+
+	normalized := cache.NormalizeMetadata(cache.LoadNormalizationConfig(), cache.NormalizationInput{
+		Title:    title,
+		Artist:   artist,
+		Track:    remoteInfo.Track,
+		Album:    remoteInfo.Album,
+		Uploader: remoteInfo.Uploader,
+		Channel:  remoteInfo.Channel,
+	})
+	title = normalized.Title
+	artist = normalized.Artist
 
 	// Determine cache filename
 	baseName := cache.SanitizeSegment(videoID)
@@ -329,6 +368,10 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 		Probe:       probe,
 		Title:       title,
 		Artist:      artist,
+		Uploader:    remoteInfo.Uploader,
+		Channel:     remoteInfo.Channel,
+		Track:       remoteInfo.Track,
+		Album:       remoteInfo.Album,
 		Notes:       []string{"manually cached"},
 		Links:       []string{rawURL},
 		LastUsedAt:  now,
