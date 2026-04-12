@@ -61,7 +61,6 @@ type ResolveStatus string
 const (
 	ResolveStatusCached     ResolveStatus = "cached"
 	ResolveStatusDownloaded ResolveStatus = "downloaded"
-	ResolveStatusCopied     ResolveStatus = "copied"
 	ResolveStatusMatched    ResolveStatus = "matched"
 	ResolveStatusMissing    ResolveStatus = "missing"
 )
@@ -272,7 +271,12 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		if src.Title != "" {
 			entry.Title = src.Title
 		}
-		entry.Artist = resolveArtist(src)
+		if src.Uploader != "" {
+			entry.Uploader = src.Uploader
+		}
+		if src.Channel != "" {
+			entry.Channel = src.Channel
+		}
 		if src.Track != "" {
 			entry.Track = src.Track
 		}
@@ -285,10 +289,22 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 		if src.Description != "" {
 			entry.Description = src.Description
 		}
+		normalized := NormalizeMetadata(LoadNormalizationConfig(), NormalizationInput{
+			Title:    entry.Title,
+			Artist:   src.Artist,
+			Track:    entry.Track,
+			Album:    entry.Album,
+			Uploader: entry.Uploader,
+			Channel:  entry.Channel,
+		})
+		entry.Title = normalized.Title
+		entry.Artist = normalized.Artist
 	} else {
 		entry.ID = ""
 		entry.Extractor = ""
 		entry.Links = nil
+		entry.Uploader = ""
+		entry.Channel = ""
 	}
 	entry.LastUsedAt = now
 	result.Identifier = entry.Identifier
@@ -296,8 +312,36 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 
 	metaChanged := hasMetadataChanged(existing, entry)
 
+	// Local files are never copied into the cache — CachedPath points directly
+	// to the original file on disk. We still record an index entry for probe
+	// metadata but skip all cache-dir recovery and matching logic.
 	cached := false
-	if ok && !opts.Force && existing.CachedPath != "" && fileExists(existing.CachedPath) {
+	if src.Type == SourceTypeLocal {
+		info, statErr := os.Stat(src.LocalPath)
+		if statErr != nil {
+			return ResolveResult{
+				Status:     ResolveStatusMissing,
+				Identifier: src.LocalPath,
+				Entry:      Entry{Source: src.LocalPath, SourceType: SourceTypeLocal},
+			}, nil
+		}
+		entry.CachedPath = src.LocalPath
+		entry.SizeBytes = info.Size()
+		if ok && existing.CachedPath == src.LocalPath {
+			entry.RetrievedAt = existing.RetrievedAt
+			entry.Notes = existing.Notes
+			entry.LastProbeAt = existing.LastProbeAt
+			entry.Probe = existing.Probe
+			result.Status = ResolveStatusCached
+		} else {
+			entry.RetrievedAt = now
+			result.Status = ResolveStatusCached
+			result.Updated = true
+		}
+		cached = true
+	}
+
+	if !cached && ok && !opts.Force && existing.CachedPath != "" && fileExists(existing.CachedPath) {
 		cached = true
 		result.Status = ResolveStatusCached
 		entry.CachedPath = existing.CachedPath
@@ -355,28 +399,16 @@ func (s *Service) Resolve(ctx context.Context, idx *Index, row csvplan.Row, opts
 	}
 
 	if !cached {
-		if src.Type == SourceTypeURL {
-			fetchRes, fetchErr := s.fetchURL(ctx, row, names.Remote, src)
-			if fetchErr != nil {
-				return ResolveResult{}, fetchErr
-			}
-			entry.CachedPath = fetchRes.Path
-			entry.SizeBytes = fetchRes.SizeBytes
-			entry.ETag = fetchRes.ETag
-			entry.RetrievedAt = now
-			entry.Notes = fetchRes.Notes
-			result.Status = ResolveStatusDownloaded
-		} else {
-			copyRes, copyErr := s.fetchLocal(ctx, row, names.Local, src)
-			if copyErr != nil {
-				return ResolveResult{}, copyErr
-			}
-			entry.CachedPath = copyRes.Path
-			entry.SizeBytes = copyRes.SizeBytes
-			entry.RetrievedAt = now
-			entry.Notes = copyRes.Notes
-			result.Status = ResolveStatusCopied
+		fetchRes, fetchErr := s.fetchURL(ctx, row, names.Remote, src)
+		if fetchErr != nil {
+			return ResolveResult{}, fetchErr
 		}
+		entry.CachedPath = fetchRes.Path
+		entry.SizeBytes = fetchRes.SizeBytes
+		entry.ETag = fetchRes.ETag
+		entry.RetrievedAt = now
+		entry.Notes = fetchRes.Notes
+		result.Status = ResolveStatusDownloaded
 		result.Updated = true
 	}
 
@@ -705,18 +737,6 @@ func sourceInfoFromEntry(row csvplan.Row, entry Entry, identifier string) source
 	return info
 }
 
-// resolveArtist picks the best artist value from yt-dlp metadata.
-// Priority: artist → uploader → channel.
-func resolveArtist(src sourceInfo) string {
-	if src.Artist != "" {
-		return src.Artist
-	}
-	if src.Uploader != "" {
-		return src.Uploader
-	}
-	return src.Channel
-}
-
 func sourceDisplayValue(src sourceInfo) string {
 	if src.Type == SourceTypeLocal {
 		if src.LocalPath != "" {
@@ -753,6 +773,24 @@ func hasMetadataChanged(existing, updated Entry) bool {
 		return true
 	}
 	if strings.TrimSpace(existing.Extractor) != strings.TrimSpace(updated.Extractor) {
+		return true
+	}
+	if strings.TrimSpace(existing.Uploader) != strings.TrimSpace(updated.Uploader) {
+		return true
+	}
+	if strings.TrimSpace(existing.Channel) != strings.TrimSpace(updated.Channel) {
+		return true
+	}
+	if strings.TrimSpace(existing.Title) != strings.TrimSpace(updated.Title) {
+		return true
+	}
+	if strings.TrimSpace(existing.Artist) != strings.TrimSpace(updated.Artist) {
+		return true
+	}
+	if strings.TrimSpace(existing.Track) != strings.TrimSpace(updated.Track) {
+		return true
+	}
+	if strings.TrimSpace(existing.Album) != strings.TrimSpace(updated.Album) {
 		return true
 	}
 	if len(existing.Links) != len(updated.Links) {

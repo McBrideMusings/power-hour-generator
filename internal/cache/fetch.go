@@ -3,7 +3,6 @@ package cache
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -241,46 +240,6 @@ func (s *Service) logWriter(base io.Writer) io.Writer {
 	return io.MultiWriter(base, s.logOutput)
 }
 
-func (s *Service) fetchLocal(_ context.Context, row csvplan.Row, baseName string, src sourceInfo) (fetchResult, error) {
-	if err := os.MkdirAll(s.Paths.CacheDir, 0o755); err != nil {
-		return fetchResult{}, fmt.Errorf("ensure cache dir: %w", err)
-	}
-
-	ext := filepath.Ext(src.LocalPath)
-	targetPath := filepath.Join(s.Paths.CacheDir, baseName+ext)
-
-	s.logf("cache copy row=%d source=%s target=%s", row.Index, src.LocalPath, targetPath)
-
-	if err := os.Remove(targetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fetchResult{}, fmt.Errorf("remove existing cache file: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fetchResult{}, fmt.Errorf("ensure target dir: %w", err)
-	}
-
-	hardLinked, err := TryLinkOrCopy(src.LocalPath, targetPath)
-	if err != nil {
-		return fetchResult{}, err
-	}
-
-	info, err := os.Stat(targetPath)
-	if err != nil {
-		return fetchResult{}, fmt.Errorf("stat cached copy: %w", err)
-	}
-
-	note := "copied from %s"
-	if hardLinked {
-		note = "hardlinked from %s"
-	}
-
-	res := fetchResult{
-		Path:      targetPath,
-		SizeBytes: info.Size(),
-		Notes:     []string{fmt.Sprintf(note, src.LocalPath)},
-	}
-	return res, nil
-}
 
 func TryLinkOrCopy(src, dest string) (bool, error) {
 	if err := os.Link(src, dest); err == nil {

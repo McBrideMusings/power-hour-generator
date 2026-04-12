@@ -145,8 +145,6 @@ func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.Projec
 			switch result.Status {
 			case cache.ResolveStatusDownloaded:
 				counts.Downloaded++
-			case cache.ResolveStatusCopied:
-				counts.Copied++
 			case cache.ResolveStatusMatched:
 				counts.Matched++
 			case cache.ResolveStatusMissing:
