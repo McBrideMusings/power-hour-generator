@@ -68,6 +68,7 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteByte('\n')
 	b.WriteString(bold.Render("Cache View"))
 	b.WriteByte('\n')
+	b.WriteString("  x            Remove selected cache entry\n")
 	b.WriteString("  d            Doctor selected entry (interactive)\n")
 	b.WriteString("  D            Doctor all visible entries (interactive)\n")
 

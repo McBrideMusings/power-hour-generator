@@ -464,8 +464,11 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfirmDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	switch key {
-	case "y", "Y":
+	case "y", "Y", "enter":
 		m.mode = modeNormal
+		if m.viewKind(m.activeView) == "cache" {
+			return m.processDeleteCacheEntry()
+		}
 		if m.activeView == 0 {
 			return m.processDeleteTimelineEntry()
 		}
@@ -1027,6 +1030,20 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.cacheView = v
 		return m.openDoctorOverlay(append([]cacheEntry(nil), entries...)), nil
+	case "x":
+		if len(entries) == 0 || v.cursor >= len(entries) {
+			m.cacheView = v
+			return m, nil
+		}
+		entry := entries[v.cursor]
+		title := entry.Title
+		if title == "" {
+			title = filepath.Base(entry.CachedPath)
+		}
+		m.deleteDesc = fmt.Sprintf("cache entry %q", title)
+		m.mode = modeConfirmDelete
+		m.cacheView = v
+		return m, nil
 	case "v":
 		if !m.vlcFound {
 			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
@@ -1968,6 +1985,59 @@ func (m Model) processDeleteRow() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// processDeleteCacheEntry removes the cache entry at the cursor.
+func (m Model) processDeleteCacheEntry() (tea.Model, tea.Cmd) {
+	if m.cacheIdx == nil {
+		return m, nil
+	}
+
+	entries := m.cacheView.entries()
+	if m.cacheView.cursor >= len(entries) {
+		return m, nil
+	}
+
+	entry := entries[m.cacheView.cursor]
+	idxEntry, ok := m.cacheIdx.GetByIdentifier(entry.Identifier)
+	if !ok {
+		m.statusMsg = "Entry not found in index"
+		return m, nil
+	}
+
+	// Delete the cached file for URL-sourced entries only.
+	if idxEntry.SourceType == cache.SourceTypeURL && idxEntry.CachedPath != "" {
+		if err := os.Remove(idxEntry.CachedPath); err != nil && !os.IsNotExist(err) {
+			m.statusMsg = fmt.Sprintf("Remove file: %v", err)
+			return m, nil
+		}
+	}
+
+	// Remove from index and all referencing links.
+	m.cacheIdx.DeleteEntry(entry.Identifier)
+	for link, target := range m.cacheIdx.Links {
+		if target == entry.Identifier {
+			m.cacheIdx.DeleteLink(link)
+		}
+	}
+
+	if err := cache.Save(m.pp, m.cacheIdx); err != nil {
+		m.statusMsg = fmt.Sprintf("Save index: %v", err)
+		return m, nil
+	}
+
+	title := entry.Title
+	if title == "" {
+		title = filepath.Base(entry.CachedPath)
+	}
+	m.statusMsg = fmt.Sprintf("Removed: %s", title)
+
+	m = reloadState(m)
+	if m.cacheView.cursor >= len(m.cacheView.entries()) && m.cacheView.cursor > 0 {
+		m.cacheView.cursor--
+	}
+
+	return m, nil
+}
+
 // reindexAndWriteCollection re-indexes rows and writes the plan file.
 func reindexAndWriteCollection(m Model, cvIdx int) Model {
 	v := m.collectionViews[cvIdx]
@@ -2019,9 +2089,11 @@ func reResolve(m Model) Model {
 	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp)
 	m.cacheStatus = buildCacheStatus(m.collections, m.cacheIdx, m.pp)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
+	oldShowAll := m.cacheView.showAll
 	m.cacheView = newCacheView(m.cacheIdx, buildCollectionLinks(m.collections))
 	m.cacheView.termWidth = oldW
 	m.cacheView.termHeight = oldH
+	m.cacheView.showAll = oldShowAll
 	return m
 }
 
@@ -2066,9 +2138,11 @@ func reloadState(m Model) Model {
 	m.cacheIdx = idx
 	m.renderState = rs
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
+	oldShowAll := m.cacheView.showAll
 	m.cacheView = newCacheView(idx, buildCollectionLinks(m.collections))
 	m.cacheView.termWidth = oldW
 	m.cacheView.termHeight = oldH
+	m.cacheView.showAll = oldShowAll
 	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp)
 	m.cacheStatus = buildCacheStatus(m.collections, idx, m.pp)
 	for i := range m.collectionNames {

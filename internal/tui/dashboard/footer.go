@@ -22,7 +22,7 @@ func renderFooter(m Model) string {
 	case "collection":
 		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  d del  f/F fetch/all  ") + vlc + footerStyle.Render("  e/E edit/ext  r/R render/all  ? help  Esc quit")
 	case "cache":
-		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  d doctor  D all  ") + vlc + footerStyle.Render("  ? help  Esc quit")
+		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  x del  d doctor  D all  ") + vlc + footerStyle.Render("  ? help  Esc quit")
 	case "tools":
 		return footerStyle.Render("←/→ views  ? help  Esc quit")
 	}
