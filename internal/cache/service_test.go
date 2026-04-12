@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"powerhour/internal/paths"
+	"powerhour/internal/tools"
 	"powerhour/pkg/csvplan"
 )
 
@@ -89,6 +90,20 @@ func (f *fakeRunner) Run(_ context.Context, command string, args []string, opts 
 	}
 }
 
+type fakeRunnerWithMetadata struct {
+	fakeRunner
+	idProbe string
+}
+
+func (f *fakeRunnerWithMetadata) Run(ctx context.Context, command string, args []string, opts RunOptions) (RunResult, error) {
+	for _, arg := range args {
+		if arg == "--dump-json" && strings.TrimSpace(f.idProbe) != "" {
+			return RunResult{Stdout: []byte(f.idProbe)}, nil
+		}
+	}
+	return f.fakeRunner.Run(ctx, command, args, opts)
+}
+
 func testPaths(t *testing.T) paths.ProjectPaths {
 	t.Helper()
 	root := t.TempDir()
@@ -159,6 +174,74 @@ func TestServiceResolveDownload(t *testing.T) {
 	}
 }
 
+func TestNormalizeMetadataAppliesArtistAliasAndTrack(t *testing.T) {
+	cfg := NormalizationConfig{
+		ArtistAliases: map[string]string{
+			aliasKey("ASAPROCKYUPTOWN"): "A$AP Rocky",
+		},
+	}
+
+	got := NormalizeMetadata(cfg, NormalizationInput{
+		Title:    "A$AP Rocky - L$D (Official Video)",
+		Track:    "L$D",
+		Uploader: "ASAPROCKYUPTOWN",
+	})
+
+	if got.Artist != "A$AP Rocky" {
+		t.Fatalf("artist = %q, want %q", got.Artist, "A$AP Rocky")
+	}
+	if got.Title != "L$D" {
+		t.Fatalf("title = %q, want %q", got.Title, "L$D")
+	}
+	if got.Confidence != "high" {
+		t.Fatalf("confidence = %q, want high", got.Confidence)
+	}
+}
+
+func TestServiceResolveStoresNormalizedMetadata(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := tools.SaveMetadataNormalizationConfig(tools.MetadataNormalizationConfig{
+		ArtistAliases: map[string]string{
+			aliasKey("ASAPROCKYUPTOWN"): "A$AP Rocky",
+		},
+	}); err != nil {
+		t.Fatalf("save metadata config: %v", err)
+	}
+
+	pp := testPaths(t)
+	idx, err := Load(pp)
+	if err != nil {
+		t.Fatalf("load index: %v", err)
+	}
+
+	runner := &fakeRunnerWithMetadata{
+		idProbe: `{"id":"videoid","extractor_key":"youtube","title":"A$AP Rocky - L$D (Official Video)","track":"L$D","uploader":"ASAPROCKYUPTOWN","channel":"ASAPROCKYUPTOWN"}`,
+	}
+	svc := &Service{
+		Paths:            pp,
+		Logger:           log.New(io.Discard, "", 0),
+		Runner:           runner,
+		ytDLP:            "yt-dlp",
+		ffprobe:          "ffprobe",
+		filenameTemplate: "$ID",
+	}
+
+	row := csvplan.Row{Index: 1, Link: "https://example.com/video"}
+	res, err := svc.Resolve(context.Background(), idx, row, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.Entry.Artist != "A$AP Rocky" {
+		t.Fatalf("artist = %q, want %q", res.Entry.Artist, "A$AP Rocky")
+	}
+	if res.Entry.Title != "L$D" {
+		t.Fatalf("title = %q, want %q", res.Entry.Title, "L$D")
+	}
+	if res.Entry.Uploader != "ASAPROCKYUPTOWN" {
+		t.Fatalf("uploader = %q", res.Entry.Uploader)
+	}
+}
+
 func TestServiceResolveNoDownload(t *testing.T) {
 	pp := testPaths(t)
 	idx, err := Load(pp)
@@ -203,6 +286,8 @@ func TestServiceResolveNoDownload(t *testing.T) {
 		t.Fatal("expected no-download to avoid writing to index")
 	}
 
+	// Local files are never downloaded, so NoDownload has no effect — they
+	// resolve as cached by pointing directly at the source file.
 	localPath := filepath.Join(pp.Root, "clip.mp4")
 	if err := os.WriteFile(localPath, []byte("data"), 0o644); err != nil {
 		t.Fatalf("write local file: %v", err)
@@ -212,17 +297,11 @@ func TestServiceResolveNoDownload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve dry run local: %v", err)
 	}
-	if resLocal.Status != ResolveStatusMissing {
-		t.Fatalf("expected missing status, got %s", resLocal.Status)
+	if resLocal.Status != ResolveStatusCached {
+		t.Fatalf("expected cached status for local file, got %s", resLocal.Status)
 	}
-	if resLocal.Updated {
-		t.Fatal("expected dry run local to leave entry unchanged")
-	}
-	if resLocal.Probed {
-		t.Fatal("expected dry run local to skip probe")
-	}
-	if _, ok := idx.GetByIdentifier(resLocal.Entry.Identifier); ok {
-		t.Fatal("expected no-download local to avoid writing to index")
+	if resLocal.Entry.CachedPath != localPath {
+		t.Fatalf("expected CachedPath to point at original file %s, got %s", localPath, resLocal.Entry.CachedPath)
 	}
 }
 
@@ -299,8 +378,11 @@ func TestServiceResolveLocalReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first resolve: %v", err)
 	}
-	if first.Status != ResolveStatusCopied {
-		t.Fatalf("expected copied status, got %s", first.Status)
+	if first.Status != ResolveStatusCached {
+		t.Fatalf("expected cached status, got %s", first.Status)
+	}
+	if first.Entry.CachedPath != source {
+		t.Fatalf("expected CachedPath to point at original file %s, got %s", source, first.Entry.CachedPath)
 	}
 	if runner.probeCalls != 1 {
 		t.Fatalf("expected probe call on first run, got %d", runner.probeCalls)

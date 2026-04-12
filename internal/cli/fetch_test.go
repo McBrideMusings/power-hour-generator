@@ -22,7 +22,7 @@ func TestWriteFetchJSON(t *testing.T) {
 		SizeBytes:  1234,
 		Probed:     true,
 	}}
-	counts := fetchCounts{Copied: 1, Probed: 1}
+	counts := fetchCounts{Reused: 1, Probed: 1}
 
 	if err := writeFetchJSON(cmd, "/project", rows, counts); err != nil {
 		t.Fatalf("writeFetchJSON: %v", err)
@@ -32,8 +32,8 @@ func TestWriteFetchJSON(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte("\"project\"")) {
 		t.Fatalf("expected project field in output: %s", got)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("copied")) {
-		t.Fatalf("expected status in json output: %s", got)
+	if !bytes.Contains(buf.Bytes(), []byte("reused")) {
+		t.Fatalf("expected reused in json output: %s", got)
 	}
 	if !bytes.Contains(buf.Bytes(), []byte("\"missing\"")) {
 		t.Fatalf("expected missing field in json output: %s", got)

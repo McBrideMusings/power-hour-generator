@@ -227,7 +227,6 @@ type fetchRowResult struct {
 
 type fetchCounts struct {
 	Downloaded int `json:"downloaded"`
-	Copied     int `json:"copied"`
 	Matched    int `json:"matched"`
 	Reused     int `json:"reused"`
 	Missing    int `json:"missing"`
@@ -246,8 +245,8 @@ func writeFetchFailures(cmd *cobra.Command, rows []fetchRowResult) {
 }
 
 func printFetchSummary(w io.Writer, counts fetchCounts) {
-	fmt.Fprintf(w, "Downloaded: %d, Copied: %d, Matched: %d, Reused: %d, Missing: %d, Probed: %d, Failed: %d\n",
-		counts.Downloaded, counts.Copied, counts.Matched, counts.Reused, counts.Missing, counts.Probed, counts.Failed,
+	fmt.Fprintf(w, "Downloaded: %d, Matched: %d, Reused: %d, Missing: %d, Probed: %d, Failed: %d\n",
+		counts.Downloaded, counts.Matched, counts.Reused, counts.Missing, counts.Probed, counts.Failed,
 	)
 }
 
