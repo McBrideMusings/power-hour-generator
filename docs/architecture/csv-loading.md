@@ -44,7 +44,7 @@ All CSV columns — standard or custom — are captured in a `CustomFields` map 
 
 ## YAML Plan Loader (`yaml_plan.go`)
 
-Loads plan files in YAML format as an alternative to CSV/TSV. Each entry is a map with normalized field names. Required fields (`link`, `start_time`, `duration`) are validated, and all additional fields are captured as custom fields for template tokens.
+Loads plan files in YAML format as an alternative to CSV/TSV. The structured format uses a `columns:` key (defining the schema) and a `rows:` key (containing the data). Bare YAML lists are supported for backward compatibility and pasted imports. `LoadCollectionYAML` returns a `YAMLResult` with both `Columns` and `Rows`. Required fields (`link`, `start_time`) are validated, and all additional fields are captured as custom fields for template tokens.
 
 ## Permissive Import (`permissive_import.go`)
 

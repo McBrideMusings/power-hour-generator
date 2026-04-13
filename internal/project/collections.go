@@ -97,7 +97,10 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		ext := strings.ToLower(filepath.Ext(planPath))
 		if ext == ".yaml" || ext == ".yml" {
 			planFormat = "yaml"
-			rows, err = csvplan.LoadCollectionYAML(planPath, opts)
+			result, yamlErr := csvplan.LoadCollectionYAML(planPath, opts)
+			rows = result.Rows
+			headers = result.Columns
+			err = yamlErr
 		} else {
 			planFormat = "csv"
 			rows, err = csvplan.LoadCollection(planPath, opts)

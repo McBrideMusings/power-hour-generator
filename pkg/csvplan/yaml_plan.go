@@ -11,68 +11,130 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadCollectionYAML reads a YAML plan file and returns CollectionRows.
-// Each YAML entry is a map of field names to values. Keys are normalized to
-// lowercase. The link and start fields are required; duration defaults to
-// opts.DefaultDuration when absent.
-func LoadCollectionYAML(path string, opts CollectionOptions) ([]CollectionRow, error) {
-	opts.LinkHeader = normalizeHeader(opts.LinkHeader)
-	opts.StartHeader = normalizeHeader(opts.StartHeader)
-	if opts.DurationHeader != "" {
-		opts.DurationHeader = normalizeHeader(opts.DurationHeader)
-	}
+// YAMLResult holds the parsed result of a YAML plan file, including declared
+// column names and parsed rows.
+type YAMLResult struct {
+	Columns []string
+	Rows    []CollectionRow
+}
 
-	if opts.LinkHeader == "" {
-		opts.LinkHeader = "link"
-	}
-	if opts.StartHeader == "" {
-		opts.StartHeader = "start_time"
-	}
-	if opts.DurationHeader == "" {
-		opts.DurationHeader = "duration"
-	}
-	if opts.DefaultDuration <= 0 {
-		opts.DefaultDuration = 60
-	}
-
+// LoadCollectionYAML reads a YAML plan file and returns a YAMLResult with
+// columns and rows. The file can be either the structured format (mapping with
+// "columns" and "rows" keys) or a bare YAML list for backward compatibility.
+func LoadCollectionYAML(path string, opts CollectionOptions) (YAMLResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
+		return YAMLResult{}, fmt.Errorf("read file: %w", err)
 	}
+
+	if len(data) == 0 {
+		return YAMLResult{}, errors.New("plan file is empty")
+	}
+
+	return loadCollectionYAMLStructured(data, opts)
+}
+
+// LoadCollectionYAMLData reads a bare YAML list from raw bytes. This is used
+// for importing pasted YAML snippets (not plan files).
+func LoadCollectionYAMLData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
 	if len(data) == 0 {
 		return nil, errors.New("plan file is empty")
 	}
+	return loadCollectionYAMLBareList(data, opts)
+}
+
+// yamlPlan is the structured YAML plan format with explicit column schema.
+type yamlPlan struct {
+	Columns []string                 `yaml:"columns"`
+	Rows    []map[string]interface{} `yaml:"rows"`
+}
+
+// loadCollectionYAMLStructured handles the structured format (columns + rows
+// mapping) used by plan files. Falls back to bare list for backward compat.
+func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResult, error) {
+	opts = normalizeYAMLOpts(opts)
+
+	var plan yamlPlan
+	if err := yaml.Unmarshal(data, &plan); err == nil && plan.Columns != nil {
+		for i, c := range plan.Columns {
+			plan.Columns[i] = normalizeHeader(c)
+		}
+		rows, errs := parseYAMLRows(plan.Rows, opts)
+		result := YAMLResult{Columns: plan.Columns, Rows: rows}
+		if len(errs) > 0 {
+			return result, errs
+		}
+		return result, nil
+	}
+
+	rows, err := loadCollectionYAMLBareList(data, opts)
+	return YAMLResult{Rows: rows}, err
+}
+
+// loadCollectionYAMLBareList handles the legacy bare-list format (a YAML list
+// of maps) used for importing pasted snippets and old plan files.
+func loadCollectionYAMLBareList(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
+	opts = normalizeYAMLOpts(opts)
 
 	var rawRows []map[string]interface{}
 	if err := yaml.Unmarshal(data, &rawRows); err != nil {
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
 
-	// yaml.Unmarshal returns nil slice for empty/comment-only files
 	if len(rawRows) == 0 {
 		return nil, errors.New("no data rows found")
 	}
 
+	rows, errs := parseYAMLRows(rawRows, opts)
+	if len(rows) == 0 {
+		return nil, errors.New("no data rows found")
+	}
+	if len(errs) > 0 {
+		return rows, errs
+	}
+	return rows, nil
+}
+
+func normalizeYAMLOpts(opts CollectionOptions) CollectionOptions {
+	// Normalize header names
+	if n := normalizeHeader(opts.LinkHeader); n != "" {
+		opts.LinkHeader = n
+	} else {
+		opts.LinkHeader = "link"
+	}
+
+	if n := normalizeHeader(opts.StartHeader); n != "" {
+		opts.StartHeader = n
+	} else {
+		opts.StartHeader = "start_time"
+	}
+
+	if n := normalizeHeader(opts.DurationHeader); n != "" {
+		opts.DurationHeader = n
+	} else {
+		opts.DurationHeader = "duration"
+	}
+
+	// Set default duration
+	if opts.DefaultDuration <= 0 {
+		opts.DefaultDuration = 60
+	}
+
+	return opts
+}
+
+func parseYAMLRows(rawRows []map[string]interface{}, opts CollectionOptions) ([]CollectionRow, ValidationErrors) {
 	var (
 		rows []CollectionRow
 		errs ValidationErrors
 	)
-
 	for i, raw := range rawRows {
 		rowIndex := i + 1
 		row, rowErrs := parseYAMLRow(raw, rowIndex, opts)
 		errs = append(errs, rowErrs...)
 		rows = append(rows, row)
 	}
-
-	if len(rows) == 0 {
-		return nil, errors.New("no data rows found")
-	}
-
-	if len(errs) > 0 {
-		return rows, errs
-	}
-	return rows, nil
+	return rows, errs
 }
 
 func parseYAMLRow(raw map[string]interface{}, index int, opts CollectionOptions) (CollectionRow, []ValidationError) {

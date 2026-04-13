@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -12,23 +13,36 @@ import (
 )
 
 const (
-	songsPlanYAML = `# Add your songs here. Each entry needs a link and a start_time.
-# - title: Song Title
-#   artist: Artist Name
-#   start_time: "1:30"
-#   link: https://youtube.com/watch?v=...
-#   name: Person Name
-#   duration: 60
+	songsPlanYAML = `columns: [title, artist, start_time, duration, link]
+rows: []
 `
-	interstitialsPlanYAML = `# Add interstitial clips here.
-# - link: path/to/clip.mp4
-#   start_time: "0:00"
-#   duration: 7
+	interstitialsPlanYAML = `columns: [link, start_time, duration]
+rows: []
 `
+	songsPlanCSV         = "title,artist,start_time,duration,link\n"
+	songsPlanTSV         = "title\tartist\tstart_time\tduration\tlink\n"
+	interstitialsPlanCSV = "link,start_time,duration\n"
+	interstitialsPlanTSV = "link\tstart_time\tduration\n"
+)
+
+var initPlanFormat string
+
+func renderDefaultConfigYAML(planFormat string) string {
+	songsPlan := "songs.yaml"
+	interstitialsPlan := "interstitials.yaml"
+	switch planFormat {
+	case "csv":
+		songsPlan = "songs.csv"
+		interstitialsPlan = "interstitials.csv"
+	case "tsv":
+		songsPlan = "songs.tsv"
+		interstitialsPlan = "interstitials.tsv"
+	}
+
 	// defaultConfigYAML is the raw template written by init. Using a string
 	// constant (rather than config.Default().Marshal()) allows embedding YAML
 	// comments for documentation and examples.
-	defaultConfigYAML = `version: 1
+	return fmt.Sprintf(`version: 1
 video:
     width: 1920
     height: 1080
@@ -48,7 +62,7 @@ audio:
         lra_db: 11
 collections:
     songs:
-        plan: songs.yaml
+        plan: %s
         output_dir: songs
         fade: 1.0
         overlays:
@@ -57,7 +71,7 @@ collections:
         start_header: start_time
         duration_header: duration
     interstitials:
-        plan: interstitials.yaml
+        plan: %s
         output_dir: interstitials
         fade: 1.0
         overlays:
@@ -97,8 +111,8 @@ downloads:
     filename_template: $ID
 library: {}
 segments_base_dir: segments
-`
-)
+`, songsPlan, interstitialsPlan)
+}
 
 func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -107,6 +121,7 @@ func newInitCmd() *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE:  runInit,
 	}
+	cmd.Flags().StringVar(&initPlanFormat, "plan-format", "yaml", "Collection plan storage format: yaml, csv, or tsv")
 
 	return cmd
 }
@@ -160,6 +175,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	planFormat := strings.ToLower(strings.TrimSpace(initPlanFormat))
+	switch planFormat {
+	case "", "yaml":
+		planFormat = "yaml"
+	case "csv", "tsv":
+	default:
+		return fmt.Errorf("unsupported plan format %q (expected yaml, csv, or tsv)", initPlanFormat)
+	}
+
 	if err := pp.EnsureRoot(); err != nil {
 		return err
 	}
@@ -176,15 +200,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	created := make([]string, 0, 4)
 
-	if err := ensureSongsPlan(pp, &created, logger); err != nil {
+	if err := ensureSongsPlan(pp, planFormat, &created, logger); err != nil {
 		return err
 	}
 
-	if err := ensureInterstitialsPlan(pp, &created, logger); err != nil {
+	if err := ensureInterstitialsPlan(pp, planFormat, &created, logger); err != nil {
 		return err
 	}
 
-	if err := ensureConfig(pp, &created, logger); err != nil {
+	if err := ensureConfig(pp, planFormat, &created, logger); err != nil {
 		return err
 	}
 
@@ -201,8 +225,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func ensureSongsPlan(pp paths.ProjectPaths, created *[]string, logger Logger) error {
-	planPath := filepath.Join(pp.Root, "songs.yaml")
+func ensureSongsPlan(pp paths.ProjectPaths, planFormat string, created *[]string, logger Logger) error {
+	filename, contents := initPlanTemplate("songs", planFormat)
+	planPath := filepath.Join(pp.Root, filename)
 	exists, err := paths.FileExists(planPath)
 	if err != nil {
 		return fmt.Errorf("check songs plan: %w", err)
@@ -212,16 +237,17 @@ func ensureSongsPlan(pp paths.ProjectPaths, created *[]string, logger Logger) er
 		return nil
 	}
 
-	if err := os.WriteFile(planPath, []byte(songsPlanYAML), 0o644); err != nil {
+	if err := os.WriteFile(planPath, []byte(contents), 0o644); err != nil {
 		return fmt.Errorf("write songs plan: %w", err)
 	}
 	logger.Printf("created songs plan: %s", planPath)
-	*created = append(*created, "songs.yaml")
+	*created = append(*created, filename)
 	return nil
 }
 
-func ensureInterstitialsPlan(pp paths.ProjectPaths, created *[]string, logger Logger) error {
-	planPath := filepath.Join(pp.Root, "interstitials.yaml")
+func ensureInterstitialsPlan(pp paths.ProjectPaths, planFormat string, created *[]string, logger Logger) error {
+	filename, contents := initPlanTemplate("interstitials", planFormat)
+	planPath := filepath.Join(pp.Root, filename)
 	exists, err := paths.FileExists(planPath)
 	if err != nil {
 		return fmt.Errorf("check interstitials plan: %w", err)
@@ -231,15 +257,15 @@ func ensureInterstitialsPlan(pp paths.ProjectPaths, created *[]string, logger Lo
 		return nil
 	}
 
-	if err := os.WriteFile(planPath, []byte(interstitialsPlanYAML), 0o644); err != nil {
+	if err := os.WriteFile(planPath, []byte(contents), 0o644); err != nil {
 		return fmt.Errorf("write interstitials plan: %w", err)
 	}
 	logger.Printf("created interstitials plan: %s", planPath)
-	*created = append(*created, "interstitials.yaml")
+	*created = append(*created, filename)
 	return nil
 }
 
-func ensureConfig(pp paths.ProjectPaths, created *[]string, logger Logger) error {
+func ensureConfig(pp paths.ProjectPaths, planFormat string, created *[]string, logger Logger) error {
 	exists, err := paths.FileExists(pp.ConfigFile)
 	if err != nil {
 		return fmt.Errorf("check config: %w", err)
@@ -249,12 +275,37 @@ func ensureConfig(pp paths.ProjectPaths, created *[]string, logger Logger) error
 		return nil
 	}
 
-	if err := os.WriteFile(pp.ConfigFile, []byte(defaultConfigYAML), 0o644); err != nil {
+	if err := os.WriteFile(pp.ConfigFile, []byte(renderDefaultConfigYAML(planFormat)), 0o644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
 	logger.Printf("created config: %s", pp.ConfigFile)
 	*created = append(*created, "powerhour.yaml")
 	return nil
+}
+
+func initPlanTemplate(collectionName, planFormat string) (string, string) {
+	switch collectionName {
+	case "songs":
+		switch planFormat {
+		case "csv":
+			return "songs.csv", songsPlanCSV
+		case "tsv":
+			return "songs.tsv", songsPlanTSV
+		default:
+			return "songs.yaml", songsPlanYAML
+		}
+	case "interstitials":
+		switch planFormat {
+		case "csv":
+			return "interstitials.csv", interstitialsPlanCSV
+		case "tsv":
+			return "interstitials.tsv", interstitialsPlanTSV
+		default:
+			return "interstitials.yaml", interstitialsPlanYAML
+		}
+	default:
+		return "", ""
+	}
 }
 
 // Logger keeps the subset of log.Logger used locally, enabling easy testing.

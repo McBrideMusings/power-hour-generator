@@ -480,7 +480,8 @@ func resolveFromPlans(filePath string) (*planMatch, error) {
 				var rows []csvplan.CollectionRow
 				ext := strings.ToLower(filepath.Ext(planPath))
 				if ext == ".yaml" || ext == ".yml" {
-					rows, _ = csvplan.LoadCollectionYAML(planPath, opts)
+					result, _ := csvplan.LoadCollectionYAML(planPath, opts)
+					rows = result.Rows
 				} else {
 					rows, _ = csvplan.LoadCollection(planPath, opts)
 				}
