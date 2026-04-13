@@ -83,6 +83,27 @@ func TestLoadTSVUnicode(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsDotSeparatedStartTime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "powerhour.csv")
+	data := "title,artist,start_time,duration,name,link\n" +
+		"Song Title,Artist Name,0.35,60,Friend,https://example.com\n"
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	rows, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Start != 35*time.Second {
+		t.Fatalf("unexpected start duration: got %v want %v", rows[0].Start, 35*time.Second)
+	}
+}
+
 func TestLoadAggregatesErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "powerhour.csv")

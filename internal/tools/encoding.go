@@ -27,11 +27,16 @@ type GlobalDownloads struct {
 	SourceAddress string `yaml:"source_address,omitempty"`
 }
 
+type MetadataNormalizationConfig struct {
+	ArtistAliases map[string]string `yaml:"artist_aliases,omitempty"`
+}
+
 // GlobalConfig is the unified global configuration stored at ~/.powerhour/config.yaml.
 // Encoding fields live at the top level for compatibility; downloads is a nested section.
 type GlobalConfig struct {
 	EncodingDefaults `yaml:",inline"`
-	Downloads        GlobalDownloads `yaml:"downloads,omitempty"`
+	Downloads        GlobalDownloads             `yaml:"downloads,omitempty"`
+	Metadata         MetadataNormalizationConfig `yaml:"metadata_normalization,omitempty"`
 }
 
 // CodecFamily groups related encoders by technology.
@@ -303,6 +308,23 @@ func LoadEncodingDefaults() EncodingDefaults {
 func SaveEncodingDefaults(defaults EncodingDefaults) error {
 	cfg := LoadGlobalConfig()
 	cfg.EncodingDefaults = defaults
+	return SaveGlobalConfig(cfg)
+}
+
+func LoadMetadataNormalizationConfig() MetadataNormalizationConfig {
+	cfg := LoadGlobalConfig()
+	if cfg.Metadata.ArtistAliases == nil {
+		cfg.Metadata.ArtistAliases = map[string]string{}
+	}
+	return cfg.Metadata
+}
+
+func SaveMetadataNormalizationConfig(meta MetadataNormalizationConfig) error {
+	if meta.ArtistAliases == nil {
+		meta.ArtistAliases = map[string]string{}
+	}
+	cfg := LoadGlobalConfig()
+	cfg.Metadata = meta
 	return SaveGlobalConfig(cfg)
 }
 

@@ -4,7 +4,7 @@ outline: deep
 
 # Collections
 
-Collections organize multiple types of clips (songs, interstitials, bumpers, outros, etc.) with customizable CSV headers and independent output directories. When `collections` is defined in your config, the tool processes all collections instead of using the legacy `clips.song` configuration.
+Collections organize multiple types of clips (songs, interstitials, bumpers, outros, etc.) with customizable plan headers and independent output directories. Plans may be stored as YAML, CSV, or TSV. When `collections` is defined in your config, the tool processes all collections instead of using the legacy `clips.song` configuration.
 
 ## Basic Setup
 
@@ -32,7 +32,7 @@ Each collection supports:
 
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `plan` | Yes | — | Path to CSV/TSV file (relative to project root or absolute) |
+| `plan` | Yes | — | Path to YAML, CSV, or TSV file (relative to project root or absolute) |
 | `output_dir` | No | collection name | Output directory relative to `segments_base_dir` |
 | `profile` | No | — | Overlay profile name; omit to skip overlays |
 | `link_header` | No | `"link"` | CSV column name for video link |
@@ -43,8 +43,8 @@ Each collection supports:
 
 ```
 project-root/
-  powerhour.csv           # Songs plan
-  bumpers.csv             # Interstitials plan
+  songs.yaml              # Songs plan
+  interstitials.yaml      # Interstitials plan
   powerhour.yaml          # Configuration
   cache/                  # Shared cache for all collections
   segments/
@@ -59,7 +59,7 @@ All collections share the same `cache/` directory to prevent re-downloading iden
 
 ## Dynamic Field Support
 
-All CSV columns automatically become available as template tokens:
+All plan fields automatically become available as template tokens:
 
 - **Segment filenames**: <code v-pre>$COLUMN_NAME</code> and <code v-pre>$SAFE_COLUMN_NAME</code>
 - **Overlay templates**: `{column_name}` (case-insensitive)
@@ -91,7 +91,7 @@ profiles:
 
 ## Protected Header Names
 
-These header names are reserved and cannot be used in your CSV:
+These header names are reserved and cannot be used in your collection schema:
 
 | Header | Reason |
 |--------|--------|
@@ -117,4 +117,9 @@ powerhour render --project myproject --collection interstitials
 
 # Filter by index within a collection
 powerhour fetch --project myproject --collection songs --index 1-5
+
+# Add one row or batch import rows into a collection
+powerhour add --project myproject --collection songs "https://youtu.be/example"
+powerhour add --project myproject --collection songs --file rows.csv
+cat rows.yaml | powerhour add --project myproject --collection songs
 ```

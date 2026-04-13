@@ -21,8 +21,8 @@ The project is in active development. This document describes the planned capabi
 
 ## Workflow overview
 
-1. Create a project directory and add a `powerhour.csv` (or TSV) describing the clips in playback order.
-2. (Optional) Add a `powerhour.yaml` to override fonts, colors, overlay timing, or encoding defaults.
+1. Create a project directory with `powerhour init`. By default it scaffolds YAML collection plans; use `--plan-format csv` or `--plan-format tsv` to start with delimiter-based plans instead.
+2. Fill in your collection plan files and adjust `powerhour.yaml` as needed for overlays, timing, or encoding defaults.
 3. Run the CLI pointing at the project directory; the tool will download sources into `cache/`, render segments into `segments/`, write logs under `logs/`, and maintain metadata in `.powerhour/index.json`.
 4. Import the generated segment files into your preferred editor to build the final compilation.
 
@@ -30,7 +30,7 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 
 ### CLI commands
 
-- `powerhour init --project <dir>` – create the project directory, starter CSV, and default YAML.
+- `powerhour init --project <dir> [--plan-format yaml|csv|tsv]` – create the project directory, default config, and starter collection plan files. YAML is the default storage format.
 - `powerhour check --project <dir> [--strict]` – verify configuration and external tool availability (fails on missing tools when `--strict` is set).
 - `powerhour config show --project <dir>` – print the effective configuration (defaults applied) as YAML.
 - `powerhour config edit --project <dir>` – open the project configuration in `$EDITOR`, creating a starter file when missing.
@@ -41,10 +41,12 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour tools list [--json]` – report resolved tool versions and locations.
 - `powerhour tools install [tool|all] [--version <v>] [--force] [--json]` – install or update managed tools in the local cache.
 - `powerhour tools encoding` – interactively configure global encoding defaults (video codec, resolution, FPS, CRF, preset, bitrate, container, audio codec/bitrate, sample rate, channels, loudnorm) via a TUI carousel. Probes available hardware encoders on each invocation.
+- `powerhour cache doctor [--all] [--write] [--yes] [--requery] [--artist <name>] [--index <n|n-m>] [--json]` – inspect and repair cached title/artist metadata, including malformed uploader-derived artist names. Interactive by default in a TTY; non-interactive in report mode unless `--write` is provided.
 - `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
 - `powerhour sample <time> [--index <n>] [--collection <name>] [--output <path>]` – extract a single frame for previewing overlays. Without `--index`, the time is an absolute position in the concatenated timeline. With `--index`, the time is relative to that clip. Add `--collection` to narrow `--index` to a specific collection's rows.
 - `powerhour concat --project <dir> [--output <path>] [--dry-run]` – concatenate rendered segments into a final video following the timeline sequence. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
 - `powerhour convert --project <dir> [--output <path>] [--dry-run]` – convert a CSV/TSV plan file to YAML format with permissive column detection.
+- `powerhour add --project <dir> --collection <name> [--file <path>] [text]` – add a single URL/path row or append YAML, CSV, or TSV rows into an existing collection. Without `text` or `--file`, reads the input block from stdin.
 - `powerhour cache add <url> <file-path> [--title "..."] [--artist "..."] [--dry-run] [--no-probe]` – register a manually-downloaded video into the project cache. Useful for age-restricted or geo-blocked content that yt-dlp cannot fetch automatically. Attempts yt-dlp metadata query first; falls back to URL parsing or interactive prompts when metadata is unavailable.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
@@ -80,8 +82,9 @@ CHAMBEA	BAD BUNNY	1:50	65	pierce	https://youtu.be/gpIBmED4oss
 
 ```
 project-root/
-  powerhour.csv
-  powerhour.yaml   # optional configuration
+  songs.yaml
+  interstitials.yaml
+  powerhour.yaml
   cache/           # cached source downloads
   segments/        # rendered clip outputs
   logs/            # per-clip render logs
@@ -146,7 +149,7 @@ clips:
   overlay_profile: song-main
   song:
     source:
-      plan: powerhour.csv
+      plan: songs.yaml
       default_duration_s: 60
     render:
       fade_in_s: 0.5
@@ -154,7 +157,7 @@ clips:
     overlays:
       profile: song-main
 files:
-  plan: powerhour.csv
+      plan: songs.yaml
   cookies: cookies.txt
 downloads:
   filename_template: "$INDEX_$ID"
@@ -169,6 +172,8 @@ tools:
     minimum_version: latest
     proxy: socks5://127.0.0.1:9050
 ```
+
+Global per-user settings live in `~/.powerhour/config.yaml`. Besides encoding defaults and download settings, you can define reusable artist aliases under `metadata_normalization.artist_aliases` so uploader/channel names normalize consistently during fetch and `cache doctor`.
 
 Each segment inherits properties from its profile’s `default_style` and can override font, colors, spacing, or even choose a different font file. `transform` supports `uppercase` or `lowercase`, letting you tweak casing without touching the source CSV. Timing anchors accept `from_start`, `from_end`, `absolute`, or `persistent`, and fades apply per segment. Position helpers (`origin`, `offset_x`, `offset_y`) compute sensible `drawtext` expressions, but you can always provide explicit `x`/`y` expressions for advanced layouts.
 
@@ -357,7 +362,7 @@ The CLI is being implemented in Go. Planned development workflow:
 
 - `gofmt -w $(find cmd internal -name '*.go')` – ensures all Go sources stay canonically formatted before builds.
 - `go build ./...` – compiles every package to confirm the CLI scaffolding and dependencies link cleanly.
-- `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the cache/logs/segments directories, `.powerhour/index.json`, the default CSV/YAML, and logging the run.
+- `go run ./cmd/powerhour init --project sample_project` – smoke-tests project initialization, generating the cache/logs/segments directories, `.powerhour/index.json`, the default config and collection plans, and logging the run.
 - `go run ./cmd/powerhour check --project sample_project --strict` – exercises configuration loading, external tool probes, and fails when required tooling is missing or outdated.
 - `go run ./cmd/powerhour fetch --project sample_project --force --reprobe` – populates the source cache and refreshes probe data for every row.
 - `go run ./cmd/powerhour status --project sample_project --json` – parses `powerhour.csv`, prints the formatted table, and emits machine-readable output for automated checks.
