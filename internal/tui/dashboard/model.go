@@ -309,7 +309,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if rowFound {
 					m.collectionViews[cvIdx] = v
-					m.collectionViews[cvIdx].columns = discoverColumns(v.rows)
+					collName := m.collectionNames[cvIdx]
+					m.collectionViews[cvIdx].columns = discoverColumns(v.rows, m.collections[collName].Headers)
 					m = writeCollection(m, cvIdx)
 					m.statusMsg = fmt.Sprintf("Probed: %s – %s", msg.title, msg.artist)
 				}
@@ -2178,7 +2179,10 @@ func reloadCollection(m Model, cvIdx int) Model {
 	var rows []csvplan.CollectionRow
 	var err error
 	if coll.PlanFormat == "yaml" {
-		rows, err = csvplan.LoadCollectionYAML(coll.Plan, opts)
+		result, yamlErr := csvplan.LoadCollectionYAML(coll.Plan, opts)
+		rows = result.Rows
+		coll.Headers = result.Columns
+		err = yamlErr
 	} else {
 		rows, err = csvplan.LoadCollection(coll.Plan, opts)
 	}
@@ -2191,7 +2195,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	coll.Rows = rows
 	m.collections[collName] = coll
 	m.collectionViews[cvIdx].rows = rows
-	m.collectionViews[cvIdx].columns = discoverColumns(rows)
+	m.collectionViews[cvIdx].columns = discoverColumns(rows, coll.Headers)
 	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx)
 	if m.collectionViews[cvIdx].cursor >= len(rows) {
 		m.collectionViews[cvIdx].cursor = max(0, len(rows)-1)

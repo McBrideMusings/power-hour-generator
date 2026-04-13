@@ -114,10 +114,31 @@ func TestWriteCSV_TabDelimiter(t *testing.T) {
 	}
 }
 
+func TestLoadCollectionAllowsDotSeparatedStartTime(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "songs.csv")
+	content := "title,artist,link,start_time,duration\nSong,Band,https://example.com,0.35,60\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	rows, err := LoadCollection(path, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollection: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].Start != 35*time.Second {
+		t.Fatalf("unexpected start duration: got %v want %v", rows[0].Start, 35*time.Second)
+	}
+}
+
 func TestWriteYAML_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "songs.yaml")
 
+	columns := []string{"title", "artist", "link", "start_time", "duration"}
 	rows := []CollectionRow{
 		{
 			Index: 1, Link: "https://youtube.com/watch?v=abc",
@@ -137,27 +158,66 @@ func TestWriteYAML_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := WriteYAML(path, rows); err != nil {
+	if err := WriteYAML(path, columns, rows); err != nil {
 		t.Fatalf("WriteYAML: %v", err)
 	}
 
-	loaded, err := LoadCollectionYAML(path, CollectionOptions{DefaultDuration: 60})
+	result, err := LoadCollectionYAML(path, CollectionOptions{DefaultDuration: 60})
 	if err != nil {
 		t.Fatalf("LoadCollectionYAML: %v", err)
 	}
 
-	if len(loaded) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(loaded))
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d", len(result.Rows))
 	}
 
-	if loaded[0].CustomFields["title"] != "YAML Song" {
-		t.Errorf("row 1 title = %q, want %q", loaded[0].CustomFields["title"], "YAML Song")
+	if result.Rows[0].CustomFields["title"] != "YAML Song" {
+		t.Errorf("row 1 title = %q, want %q", result.Rows[0].CustomFields["title"], "YAML Song")
 	}
-	if loaded[1].Link != "https://youtube.com/watch?v=def" {
-		t.Errorf("row 2 link = %q", loaded[1].Link)
+	if result.Rows[1].Link != "https://youtube.com/watch?v=def" {
+		t.Errorf("row 2 link = %q", result.Rows[1].Link)
 	}
-	if loaded[1].DurationSeconds != 45 {
-		t.Errorf("row 2 duration = %d, want 45", loaded[1].DurationSeconds)
+	if result.Rows[1].DurationSeconds != 45 {
+		t.Errorf("row 2 duration = %d, want 45", result.Rows[1].DurationSeconds)
+	}
+
+	// Verify columns are preserved.
+	if len(result.Columns) != len(columns) {
+		t.Fatalf("expected %d columns, got %d", len(columns), len(result.Columns))
+	}
+	for i, col := range result.Columns {
+		if col != columns[i] {
+			t.Errorf("column[%d] = %q, want %q", i, col, columns[i])
+		}
+	}
+}
+
+func TestWriteYAML_EmptyRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "songs.yaml")
+
+	columns := []string{"title", "artist", "start_time", "duration", "link"}
+
+	if err := WriteYAML(path, columns, nil); err != nil {
+		t.Fatalf("WriteYAML: %v", err)
+	}
+
+	result, err := LoadCollectionYAML(path, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollectionYAML: %v", err)
+	}
+
+	if len(result.Rows) != 0 {
+		t.Fatalf("expected 0 rows, got %d", len(result.Rows))
+	}
+
+	if len(result.Columns) != len(columns) {
+		t.Fatalf("expected %d columns, got %d", len(columns), len(result.Columns))
+	}
+	for i, col := range result.Columns {
+		if col != columns[i] {
+			t.Errorf("column[%d] = %q, want %q", i, col, columns[i])
+		}
 	}
 }
 
@@ -171,9 +231,9 @@ func TestWriteCSV_SpecialCharacters(t *testing.T) {
 			Index: 1, Link: "https://example.com",
 			StartRaw: "0:00", DurationSeconds: 60,
 			CustomFields: map[string]string{
-				"title": `Song with "quotes" and, commas`,
+				"title":  `Song with "quotes" and, commas`,
 				"artist": "O'Brien",
-				"link": "https://example.com", "start_time": "0:00",
+				"link":   "https://example.com", "start_time": "0:00",
 			},
 		},
 	}

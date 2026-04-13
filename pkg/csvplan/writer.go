@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -67,8 +68,11 @@ func WriteCSV(path string, headers []string, rows []CollectionRow, delimiter run
 }
 
 // WriteYAML writes collection rows back to a YAML plan file using atomic write.
-// Each row becomes a map with all non-empty custom fields.
-func WriteYAML(path string, rows []CollectionRow) error {
+// The output uses the structured format with explicit columns and rows.
+// Columns are merged with any new fields discovered in the row data.
+func WriteYAML(path string, columns []string, rows []CollectionRow) error {
+	columns = MergeHeaders(columns, rows)
+
 	entries := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
 		entry := make(map[string]interface{}, len(row.CustomFields))
@@ -81,7 +85,15 @@ func WriteYAML(path string, rows []CollectionRow) error {
 		entries = append(entries, entry)
 	}
 
-	data, err := yaml.Marshal(entries)
+	plan := struct {
+		Columns []string                 `yaml:"columns"`
+		Rows    []map[string]interface{} `yaml:"rows"`
+	}{
+		Columns: columns,
+		Rows:    entries,
+	}
+
+	data, err := yaml.Marshal(plan)
 	if err != nil {
 		return fmt.Errorf("marshal yaml: %w", err)
 	}
@@ -110,4 +122,35 @@ func WriteYAML(path string, rows []CollectionRow) error {
 	}
 
 	return nil
+}
+
+// MergeHeaders preserves the existing CSV header order while appending any new
+// normalized fields present in the provided rows.
+func MergeHeaders(headers []string, rows []CollectionRow) []string {
+	seen := make(map[string]bool)
+
+	// Add existing headers in order
+	merged := make([]string, 0, len(headers))
+	for _, header := range headers {
+		normalized := normalizeHeader(header)
+		if normalized != "" && !seen[normalized] {
+			seen[normalized] = true
+			merged = append(merged, normalized)
+		}
+	}
+
+	// Collect and sort new fields from rows
+	var extras []string
+	for _, row := range rows {
+		for field := range row.CustomFields {
+			normalized := normalizeHeader(field)
+			if normalized != "" && !seen[normalized] {
+				seen[normalized] = true
+				extras = append(extras, normalized)
+			}
+		}
+	}
+	sort.Strings(extras)
+
+	return append(merged, extras...)
 }

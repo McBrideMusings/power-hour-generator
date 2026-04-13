@@ -79,9 +79,12 @@ var knownFieldOrder = []struct {
 	{"duration"},
 }
 
-func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
+func discoverColumns(rows []csvplan.CollectionRow, declaredColumns []string) []collectionColumn {
 	// Gather all field keys that have at least one non-empty value.
 	fieldPresent := make(map[string]bool)
+	for _, col := range declaredColumns {
+		fieldPresent[col] = true
+	}
 	for _, row := range rows {
 		for k, v := range row.CustomFields {
 			if strings.TrimSpace(v) != "" {
@@ -90,14 +93,12 @@ func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
 		}
 	}
 
-	hiddenFields := map[string]bool{}
-
 	var cols []collectionColumn
 	seen := make(map[string]bool)
 
 	// Add known fields first, in order, if present.
 	for _, kf := range knownFieldOrder {
-		if fieldPresent[kf.field] && !hiddenFields[kf.field] {
+		if fieldPresent[kf.field] {
 			cols = append(cols, collectionColumn{
 				header: strings.ToUpper(kf.field),
 				field:  kf.field,
@@ -106,19 +107,19 @@ func discoverColumns(rows []csvplan.CollectionRow) []collectionColumn {
 		}
 	}
 
-	// Add remaining fields alphabetically.
+	// Collect and sort remaining fields alphabetically.
 	var extras []string
 	for k := range fieldPresent {
-		if !seen[k] && !hiddenFields[k] {
+		if !seen[k] {
 			extras = append(extras, k)
 		}
 	}
 	sort.Strings(extras)
+
 	for _, k := range extras {
 		cols = append(cols, collectionColumn{
 			header: strings.ToUpper(k),
 			field:  k,
-			fixed:  false,
 		})
 	}
 
@@ -132,7 +133,7 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 		planPath:  coll.Plan,
 		rows:      coll.Rows,
 		collCfg:   coll,
-		columns:   discoverColumns(coll.Rows),
+		columns:   discoverColumns(coll.Rows, coll.Headers),
 		states:    states,
 		rowStatus: make(map[int]string),
 	}

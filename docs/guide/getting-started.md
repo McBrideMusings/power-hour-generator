@@ -30,16 +30,27 @@ go run ./cmd/powerhour
 powerhour init --project my-power-hour
 ```
 
-This creates the project directory with a starter CSV, default YAML config, and the standard directory layout.
+This creates the project directory with YAML collection plans by default, a default config, and the standard directory layout. If you prefer delimiter-based plans from the start, use `powerhour init --project my-power-hour --plan-format csv` or `--plan-format tsv`.
 
-### 3. Edit your CSV plan
+### 3. Edit your collection plan
 
-Open `my-power-hour/powerhour.csv` and add your clips:
+Open `my-power-hour/songs.yaml` and add your clips:
 
-```tsv
-title	artist	start_time	duration	name	link
-CHAMBEA	BAD BUNNY	1:50	65	pierce	https://youtu.be/gpIBmED4oss
-Bohemian Rhapsody	Queen	0:50	60	alex	https://youtu.be/fJ9rUzIMcZQ
+```yaml
+columns: [title, artist, start_time, duration, name, link]
+rows:
+  - title: CHAMBEA
+    artist: BAD BUNNY
+    start_time: "1:50"
+    duration: 65
+    name: pierce
+    link: https://youtu.be/gpIBmED4oss
+  - title: Bohemian Rhapsody
+    artist: Queen
+    start_time: "0:50"
+    duration: 60
+    name: alex
+    link: https://youtu.be/fJ9rUzIMcZQ
 ```
 
 ### 4. Fetch source videos
@@ -76,8 +87,9 @@ Assembles all rendered segments into a single output video following the timelin
 
 ```
 my-power-hour/
-  powerhour.csv          # Clip plan (CSV or TSV)
-  powerhour.yaml         # Optional configuration
+  songs.yaml             # Song collection plan (default)
+  interstitials.yaml     # Interstitial collection plan (default)
+  powerhour.yaml         # Project configuration
   cache/                 # Cached source downloads
   segments/              # Rendered clip outputs
   logs/                  # Per-clip render logs

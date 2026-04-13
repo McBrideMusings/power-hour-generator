@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -82,4 +83,54 @@ func TestNextAvailableDir(t *testing.T) {
 			t.Fatalf("got %s, want %s", dir, want)
 		}
 	})
+}
+
+func TestInitPlanTemplate(t *testing.T) {
+	tests := []struct {
+		collection string
+		format     string
+		wantFile   string
+		wantBody   string
+	}{
+		{collection: "songs", format: "yaml", wantFile: "songs.yaml", wantBody: songsPlanYAML},
+		{collection: "songs", format: "csv", wantFile: "songs.csv", wantBody: songsPlanCSV},
+		{collection: "songs", format: "tsv", wantFile: "songs.tsv", wantBody: songsPlanTSV},
+		{collection: "interstitials", format: "yaml", wantFile: "interstitials.yaml", wantBody: interstitialsPlanYAML},
+		{collection: "interstitials", format: "csv", wantFile: "interstitials.csv", wantBody: interstitialsPlanCSV},
+		{collection: "interstitials", format: "tsv", wantFile: "interstitials.tsv", wantBody: interstitialsPlanTSV},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.collection+"-"+tt.format, func(t *testing.T) {
+			gotFile, gotBody := initPlanTemplate(tt.collection, tt.format)
+			if gotFile != tt.wantFile {
+				t.Fatalf("file = %q, want %q", gotFile, tt.wantFile)
+			}
+			if gotBody != tt.wantBody {
+				t.Fatalf("body = %q, want %q", gotBody, tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestRenderDefaultConfigYAMLUsesRequestedPlanFormat(t *testing.T) {
+	cases := []struct {
+		format string
+		want   []string
+	}{
+		{format: "yaml", want: []string{"plan: songs.yaml", "plan: interstitials.yaml"}},
+		{format: "csv", want: []string{"plan: songs.csv", "plan: interstitials.csv"}},
+		{format: "tsv", want: []string{"plan: songs.tsv", "plan: interstitials.tsv"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.format, func(t *testing.T) {
+			rendered := renderDefaultConfigYAML(tc.format)
+			for _, want := range tc.want {
+				if !strings.Contains(rendered, want) {
+					t.Fatalf("rendered config missing %q", want)
+				}
+			}
+		})
+	}
 }
