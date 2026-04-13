@@ -418,6 +418,24 @@ func parseStartTime(value string) (time.Duration, error) {
 		return 0, errors.New("start_time is required")
 	}
 
+	// Accept dot-separated legacy shorthand (for example "0.35" => "0:35")
+	// when the value does not already use colon-based time separators.
+	if !strings.Contains(value, ":") && strings.Count(value, ".") >= 1 && strings.Count(value, ".") <= 2 {
+		dotParts := strings.Split(value, ".")
+		valid := len(dotParts) == 2 || len(dotParts) == 3
+		if valid {
+			for _, part := range dotParts {
+				if strings.TrimSpace(part) == "" {
+					valid = false
+					break
+				}
+			}
+		}
+		if valid {
+			value = strings.Join(dotParts, ":")
+		}
+	}
+
 	parts := strings.Split(value, ":")
 	if len(parts) != 2 && len(parts) != 3 {
 		return 0, fmt.Errorf("invalid start_time %q", value)

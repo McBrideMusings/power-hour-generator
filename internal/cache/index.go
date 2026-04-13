@@ -53,6 +53,8 @@ type Entry struct {
 	Artist      string    `json:"artist,omitempty"`
 	Album       string    `json:"album,omitempty"`
 	Track       string    `json:"track,omitempty"`
+	Uploader    string    `json:"uploader,omitempty"`
+	Channel     string    `json:"channel,omitempty"`
 	UploadDate  string    `json:"upload_date,omitempty"`
 	Description string    `json:"description,omitempty"`
 	LastUsedAt  time.Time `json:"last_used_at,omitempty"`

@@ -53,6 +53,7 @@ func newRootCmd() *cobra.Command {
 
 	addTo("workflow",
 		newInitCmd(),
+		newAddCmd(),
 		newFetchCmd(),
 		newRenderCmd(),
 		newConcatCmd(),

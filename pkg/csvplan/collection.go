@@ -32,6 +32,19 @@ type CollectionRow struct {
 
 // LoadCollection reads a CSV with configurable headers for a collection.
 func LoadCollection(path string, opts CollectionOptions) ([]CollectionRow, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+	return loadCollectionData(data, opts)
+}
+
+// LoadCollectionData reads a collection plan from raw CSV/TSV bytes.
+func LoadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
+	return loadCollectionData(data, opts)
+}
+
+func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
 	// Normalize header names
 	opts.LinkHeader = normalizeHeader(opts.LinkHeader)
 	opts.StartHeader = normalizeHeader(opts.StartHeader)
@@ -60,11 +73,6 @@ func LoadCollection(path string, opts CollectionOptions) ([]CollectionRow, error
 	}
 	if opts.DefaultDuration <= 0 {
 		opts.DefaultDuration = 60
-	}
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read file: %w", err)
 	}
 
 	if len(data) == 0 {

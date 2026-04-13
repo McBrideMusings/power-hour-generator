@@ -6,11 +6,11 @@ All commands accept a `--project <dir>` flag to specify the project directory an
 
 ### `powerhour init`
 
-Create a project directory with starter CSV, default YAML config, and standard directories.
+Create a project directory with starter collection plans, default YAML config, and standard directories. YAML plans are the default; pass `--plan-format csv` or `--plan-format tsv` to scaffold delimiter-based plans instead.
 
 ```bash
-powerhour init --project <dir>
-go run ./cmd/powerhour init --project <dir>
+powerhour init --project <dir> [--plan-format yaml|csv|tsv]
+go run ./cmd/powerhour init --project <dir> [--plan-format yaml|csv|tsv]
 ```
 
 ### `powerhour check`
@@ -49,6 +49,16 @@ Open the project configuration in `$EDITOR`, creating a starter file when missin
 ```bash
 powerhour config edit --project <dir>
 go run ./cmd/powerhour config edit --project <dir>
+```
+
+### `powerhour add`
+
+Add a single URL/path row or append YAML, CSV, or TSV rows into an existing collection. The input can be passed directly as a quoted argument, with `--file`, or piped over stdin, and the destination collection keeps its existing on-disk storage format.
+
+```bash
+powerhour add --project <dir> --collection songs "https://youtu.be/example"
+powerhour add --project <dir> --collection songs --file rows.csv
+cat rows.yaml | go run ./cmd/powerhour add --project <dir> --collection songs
 ```
 
 ## Fetch & Render
