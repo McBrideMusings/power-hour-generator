@@ -45,14 +45,14 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  c            Concatenate final video\n")
 	b.WriteString("  o            Open project in file manager\n")
 	b.WriteString("  ?            This help\n")
-	b.WriteString("  Esc / Ctrl+C Quit\n")
+	b.WriteString("  q / Esc / Ctrl+C Quit\n")
 	b.WriteByte('\n')
 
 	b.WriteString(bold.Render("Navigation"))
 	b.WriteByte('\n')
 	b.WriteString("  ↑/↓ or j/k       Move cursor\n")
 	b.WriteString("  J/K              Reorder item\n")
-	b.WriteString("  a                Add row or paste import block\n")
+	b.WriteString("  a                Focus Add Clip slot (paste link/path/CSV)\n")
 	b.WriteString("  d                Delete entry/row\n")
 	b.WriteString("  v                Play in VLC\n")
 	b.WriteString("  V                Play all in VLC\n")
@@ -74,7 +74,7 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  D            Doctor all visible entries (interactive)\n")
 
 	b.WriteByte('\n')
-	b.WriteString(faint.Render("[Esc] Close"))
+	b.WriteString(faint.Render("[?] Close  [q/Esc] Quit"))
 
 	content := overlayBorder.Render(b.String())
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, content)

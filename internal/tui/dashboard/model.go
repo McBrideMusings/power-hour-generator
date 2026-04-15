@@ -36,6 +36,7 @@ const (
 	modeInput                         // text input active
 	modeConfirmDelete                 // waiting for y/n
 	modeInlineEdit                    // editing a row's fields inline
+	modeAddClip                       // add-clip slot focused (paste link/path/CSV)
 )
 
 // Model is the top-level bubbletea model for the dashboard.
@@ -89,6 +90,10 @@ type Model struct {
 	editFieldIdx int    // which column is being edited (index into collectionView.columns)
 	editValue    string // current edit buffer
 	editOriginal string // original value before edit started
+
+	// Add-clip slot state.
+	addBuffer string // paste/typed buffer for the active add-clip slot
+	addCvIdx  int    // which collection view owns the active add slot
 
 	// Overlay state.
 	overlay       overlayKind
@@ -366,9 +371,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Non-input overlay (help). q/Esc/Ctrl+C quit so the root-level
+		// contract holds anywhere text input is not active; `?` closes it.
 		key := msg.String()
 		switch key {
-		case "escape", "esc", "?":
+		case "ctrl+c", "esc", "escape", "q":
+			return m, tea.Quit
+		case "?":
 			m.overlay = overlayNone
 		}
 		return m, nil
@@ -382,12 +391,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmDeleteKey(msg)
 	case modeInlineEdit:
 		return m.handleInlineEditKey(msg)
+	case modeAddClip:
+		return m.handleAddClipKey(msg)
 	}
 
 	if m.job.active {
 		key := msg.String()
 		switch key {
-		case "ctrl+c", "esc":
+		case "ctrl+c", "esc", "q":
 			return m, tea.Quit
 		default:
 			return m, nil
@@ -398,7 +409,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Global keys.
 	switch key {
-	case "ctrl+c", "esc":
+	case "ctrl+c", "esc", "q":
 		return m, tea.Quit
 	case "?":
 		m.overlay = overlayHelp
@@ -615,6 +626,178 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleAddClipKey drives the persistent Add Clip slot. Paste events (detected
+// via bubbletea's bracketed-paste flag) auto-dispatch immediately so the user
+// never sees a giant blob of text in the slot.
+func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	cvIdx := m.addCvIdx
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		m.mode = modeNormal
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyEscape:
+		return m.cancelAddClip(), nil
+
+	case tea.KeyEnter:
+		return m.dispatchAddBuffer(cvIdx, m.addBuffer)
+
+	case tea.KeyBackspace:
+		if len(m.addBuffer) > 0 {
+			r := []rune(m.addBuffer)
+			m.addBuffer = string(r[:len(r)-1])
+		}
+		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		return m, nil
+
+	case tea.KeyRunes:
+		m.addBuffer += string(msg.Runes)
+		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		return m, nil
+
+	case tea.KeySpace:
+		m.addBuffer += " "
+		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// cancelAddClip returns to normal mode, clearing the slot focus.
+func (m Model) cancelAddClip() Model {
+	if m.addCvIdx >= 0 && m.addCvIdx < len(m.collectionViews) {
+		m.collectionViews[m.addCvIdx].addFocus = false
+		m.collectionViews[m.addCvIdx].addBuffer = ""
+	}
+	m.addBuffer = ""
+	m.mode = modeNormal
+	return m
+}
+
+// dispatchAddBuffer inspects the buffered text and routes it to the appropriate
+// import path: multi-line / CSV-ish → batch import; single URL or single line → one new row.
+func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return m.cancelAddClip(), nil
+	}
+
+	collName := m.collectionNames[cvIdx]
+	coll := m.collections[collName]
+
+	// Multi-line or CSV/TSV/YAML batch import.
+	if looksLikeBatchImport(value) {
+		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Import failed: %v", err)
+			m.collectionViews[cvIdx].addBuffer = ""
+			m.addBuffer = ""
+			return m, nil
+		}
+		coll = project.AppendCollectionRows(coll, rows)
+		if err := project.WriteCollectionPlan(coll); err != nil {
+			m.statusMsg = fmt.Sprintf("Write error: %v", err)
+			m.collectionViews[cvIdx].addBuffer = ""
+			m.addBuffer = ""
+			return m, nil
+		}
+		m.collections[collName] = coll
+		m = reloadCollection(m, cvIdx)
+		m.statusMsg = fmt.Sprintf("Imported %d rows from %s", len(rows), format)
+		// Stay in modeAddClip with an empty buffer so another paste is ready.
+		m.addBuffer = ""
+		m.collectionViews[cvIdx].addFocus = true
+		m.collectionViews[cvIdx].addBuffer = ""
+		return m, nil
+	}
+
+	// Single-line entry: treat as URL/path.
+	value = cleanYouTubeURL(value)
+
+	defaultDur := 60
+	if coll.Config.Duration > 0 {
+		defaultDur = coll.Config.Duration
+	}
+
+	v := m.collectionViews[cvIdx]
+	newRow := csvplan.CollectionRow{
+		Index:           len(v.rows) + 1,
+		Link:            value,
+		StartRaw:        "0:00",
+		DurationSeconds: defaultDur,
+		CustomFields:    make(map[string]string),
+	}
+	linkHeader := coll.Config.LinkHeader
+	if linkHeader == "" {
+		linkHeader = "link"
+	}
+	startHeader := coll.Config.StartHeader
+	if startHeader == "" {
+		startHeader = "start_time"
+	}
+	durationHeader := coll.Config.DurationHeader
+	if durationHeader == "" {
+		durationHeader = "duration"
+	}
+	newRow.CustomFields[linkHeader] = value
+	newRow.CustomFields[startHeader] = "0:00"
+	newRow.CustomFields[durationHeader] = fmt.Sprintf("%d", defaultDur)
+
+	v.rows = append(v.rows, newRow)
+	v.cursor = len(v.rows) - 1
+	v.addFocus = false
+	v.addBuffer = ""
+	v.autoScroll()
+	m.collectionViews[cvIdx] = v
+
+	m = writeCollection(m, cvIdx)
+	m = reResolve(m)
+	m.addBuffer = ""
+
+	// Drop into inline edit on the new row so the user can adjust columns.
+	m = m.enterInlineEditOn(cvIdx, len(v.rows)-1, 0)
+
+	// Kick off async yt-dlp probe for URLs.
+	if isURL(value) {
+		m.statusMsg = "Probing metadata..."
+		return m, probeMetadata(value, cvIdx)
+	}
+
+	return m, nil
+}
+
+// enterInlineEditOn puts the model into modeInlineEdit on the given row + field.
+func (m Model) enterInlineEditOn(cvIdx, rowIdx, fieldIdx int) Model {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m
+	}
+	v := m.collectionViews[cvIdx]
+	if rowIdx < 0 || rowIdx >= len(v.rows) {
+		return m
+	}
+	cols := v.columns
+	if len(cols) == 0 {
+		return m
+	}
+	if fieldIdx < 0 || fieldIdx >= len(cols) {
+		fieldIdx = 0
+	}
+	v.cursor = rowIdx
+	v.autoScroll()
+	v.editing = true
+	v.editFieldIdx = fieldIdx
+	field := cols[fieldIdx].field
+	v.editValue = v.rows[rowIdx].CustomFields[field]
+	m.editFieldIdx = fieldIdx
+	m.editValue = v.editValue
+	m.editOriginal = v.editValue
+	m.collectionViews[cvIdx] = v
+	m.mode = modeInlineEdit
+	return m
+}
+
 func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	v := m.collectionViews[cvIdx]
 	key := msg.String()
@@ -669,8 +852,12 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		return m, nil
 
 	case "a":
-		m.mode = modeInput
-		m.input = newMultilineInput("Add rows: paste YAML/CSV/TSV or a single URL/path. Ctrl+S submits, Esc cancels.")
+		m.mode = modeAddClip
+		m.addBuffer = ""
+		m.addCvIdx = cvIdx
+		v.addFocus = true
+		v.addBuffer = ""
+		m.collectionViews[cvIdx] = v
 		return m, nil
 
 	case "d":
@@ -1301,6 +1488,8 @@ func (m Model) View() string {
 			b.WriteString(footerStyle.Render(fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)))
 		case modeInlineEdit:
 			b.WriteString(footerStyle.Render("←/→ field  ↑/↓ row  Enter save  Esc cancel  Tab next field"))
+		case modeAddClip:
+			b.WriteString(footerStyle.Render("paste link/path or CSV (multi-line auto-imports) · Enter submit · Esc cancel"))
 		default:
 			b.WriteString(renderFooter(m))
 		}
