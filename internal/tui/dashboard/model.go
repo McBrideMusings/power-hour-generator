@@ -408,6 +408,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
 			return concatDoneMsg{err: err}
 		})
+	case "o":
+		name, args := revealCommand(m.pp.Root)
+		_ = execCommand(name, args...).Start()
+		return m, nil
 	}
 
 	// Left/right arrow keys cycle through views.
@@ -1340,6 +1344,17 @@ type metadataProbeMsg struct {
 
 func execCommand(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)
+}
+
+func revealCommand(path string) (string, []string) {
+	switch runtime.GOOS {
+	case "darwin":
+		return "open", []string{path}
+	case "windows":
+		return "explorer", []string{path}
+	default:
+		return "xdg-open", []string{path}
+	}
 }
 
 func (m Model) drainJobEvents() Model {
