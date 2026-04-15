@@ -626,9 +626,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleAddClipKey drives the persistent Add Clip slot. Paste events (detected
-// via bubbletea's bracketed-paste flag) auto-dispatch immediately so the user
-// never sees a giant blob of text in the slot.
+// handleAddClipKey drives the persistent Add Clip slot.
 func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cvIdx := m.addCvIdx
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
@@ -648,30 +646,40 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			r := []rune(m.addBuffer)
 			m.addBuffer = string(r[:len(r)-1])
 		}
-		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		m.syncAddClipBuffer(cvIdx)
 		return m, nil
 
 	case tea.KeyRunes:
 		m.addBuffer += string(msg.Runes)
-		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		m.syncAddClipBuffer(cvIdx)
 		return m, nil
 
 	case tea.KeySpace:
 		m.addBuffer += " "
-		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+		m.syncAddClipBuffer(cvIdx)
 		return m, nil
 	}
 
 	return m, nil
 }
 
+func (m Model) syncAddClipBuffer(cvIdx int) {
+	if cvIdx >= 0 && cvIdx < len(m.collectionViews) {
+		m.collectionViews[cvIdx].addBuffer = m.addBuffer
+	}
+}
+
+func (m Model) resetAddClipInput(cvIdx int, keepFocus bool) {
+	m.addBuffer = ""
+	if cvIdx >= 0 && cvIdx < len(m.collectionViews) {
+		m.collectionViews[cvIdx].addFocus = keepFocus
+		m.collectionViews[cvIdx].addBuffer = ""
+	}
+}
+
 // cancelAddClip returns to normal mode, clearing the slot focus.
 func (m Model) cancelAddClip() Model {
-	if m.addCvIdx >= 0 && m.addCvIdx < len(m.collectionViews) {
-		m.collectionViews[m.addCvIdx].addFocus = false
-		m.collectionViews[m.addCvIdx].addBuffer = ""
-	}
-	m.addBuffer = ""
+	m.resetAddClipInput(m.addCvIdx, false)
 	m.mode = modeNormal
 	return m
 }
@@ -692,24 +700,20 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Import failed: %v", err)
-			m.collectionViews[cvIdx].addBuffer = ""
-			m.addBuffer = ""
+			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
 		coll = project.AppendCollectionRows(coll, rows)
 		if err := project.WriteCollectionPlan(coll); err != nil {
 			m.statusMsg = fmt.Sprintf("Write error: %v", err)
-			m.collectionViews[cvIdx].addBuffer = ""
-			m.addBuffer = ""
+			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
 		m.collections[collName] = coll
 		m = reloadCollection(m, cvIdx)
 		m.statusMsg = fmt.Sprintf("Imported %d rows from %s", len(rows), format)
 		// Stay in modeAddClip with an empty buffer so another paste is ready.
-		m.addBuffer = ""
-		m.collectionViews[cvIdx].addFocus = true
-		m.collectionViews[cvIdx].addBuffer = ""
+		m.resetAddClipInput(cvIdx, true)
 		return m, nil
 	}
 
@@ -853,11 +857,8 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 
 	case "a":
 		m.mode = modeAddClip
-		m.addBuffer = ""
 		m.addCvIdx = cvIdx
-		v.addFocus = true
-		v.addBuffer = ""
-		m.collectionViews[cvIdx] = v
+		m.resetAddClipInput(cvIdx, true)
 		return m, nil
 
 	case "d":
