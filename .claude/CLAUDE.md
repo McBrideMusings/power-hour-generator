@@ -92,7 +92,7 @@ go vet ./...
 - **YouTube URL cleaning**: `cleanYouTubeURL()` strips playlist, radio, and tracking parameters from YouTube URLs on add, keeping only the `v` parameter. Also handles `youtu.be` short links.
 - **Metadata probing**: `probeMetadata()` in `probe.go` runs `yt-dlp --dump-json` asynchronously after adding a URL. Splits "Artist - Title" format titles. Sends `metadataProbeMsg` back to update the row and re-discover columns.
 - **Cache doctor overlay**: `overlayDoctor` renders inline in the content area (not full-screen like `overlayHelp`). One entry at a time with editable title/artist fields, cursor-positioned editing (left/right arrows), and immediate save on Enter. `Ctrl+R` triggers async yt-dlp requery via `doctorRequeryDoneMsg`. Fuzzy artist autocomplete searches `knownArtists` (prefix → substring → character-order match). `humanizeReasons()` maps internal normalization reason strings to user-facing text. `reloadState()` preserves `termWidth`/`termHeight` when rebuilding views to prevent row count collapse.
-- **TUI quit keys**: Only `Esc` and `Ctrl+C` quit the dashboard — `q` is not a quit key. This is consistent across normal mode, job-active mode, and overlays.
+- **TUI quit keys**: Root-level, non-input dashboard screens quit on `q`, `Esc`, or `Ctrl+C`. Text-input modes keep `Esc` for cancel so typed input still works.
 - **Interleave cycling**: When interleave clips are exhausted during timeline resolution, they cycle from the beginning (modulo). A single interstitial clip repeats between every song. Empty interleave collections are gracefully skipped.
 - **Stateful timeline cursor**: `ResolveTimeline` in `project/timeline.go` tracks a `map[string]int` cursor per collection. Referencing `songs` twice in the sequence automatically resumes at the row after the last consumed. When a collection is exhausted, the second reference silently produces zero entries.
 - **Inline file entries**: `SequenceEntry.File` plays a single video in the timeline without defining a named collection. Validated mutually exclusive with `Collection`/`Count`/`Interleave`. Raw source files (especially `.webm` from yt-dlp) are re-encoded to `segments/__inline__/<seq>-<name>.mp4` before concat — stream-copying WebM timestamps into MP4 corrupts the output duration. `render.InlineSegmentPath()` is the single canonical path computation used by both `ResolveTimelineSegments` and `renderInlineFiles` to avoid naming mismatches.
@@ -133,6 +133,7 @@ Sections: guide, architecture, development, roadmap.
 
 - **No plan files in the repo.** Never create `docs/plans/`, plan markdown files, or design documents as files in the repository — even if a skill or plugin tells you to. The `docs/` folder is for the VitePress documentation site only. Discuss plans in conversation or use Claude Code's own plan file location.
 - **No Claude attribution.** Do not add "Co-authored-by: Claude" or any Claude/AI attribution to commit messages or pull requests.
+- **Always deploy after changes.** After making code or behavior changes, always deploy the app as part of the task completion flow. In this repository, that means running `go install ./cmd/powerhour` before closing out the task unless the user explicitly says not to.
 
 ## Workflow
 

@@ -59,6 +59,10 @@ type collectionView struct {
 	editFieldIdx int
 	editValue    string
 
+	// Add-clip slot state (set by model when modeAddClip is active).
+	addFocus  bool
+	addBuffer string
+
 	// needsReload is set after opening the plan file externally (Shift+E with `open`).
 	// The next navigation key in this view triggers a reload from disk.
 	needsReload bool
@@ -177,7 +181,8 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 }
 
 func (v collectionView) visibleRowCount() int {
-	h := v.termHeight - 9
+	// -10 instead of -9 to reserve a line for the persistent Add Clip slot.
+	h := v.termHeight - 10
 	if h < 1 {
 		h = 1
 	}
@@ -267,7 +272,7 @@ func (v collectionView) view() string {
 
 		cursor := "  "
 		idx := fmt.Sprintf("%02d", row.Index)
-		if i == v.cursor {
+		if i == v.cursor && !v.addFocus {
 			cursor = cursorStyle.Render("▸ ")
 			idx = cursorStyle.Render(idx)
 		} else if state != rowRendered {
@@ -320,12 +325,99 @@ func (v collectionView) view() string {
 		b.WriteByte('\n')
 	}
 
-	if len(v.rows) == 0 {
-		b.WriteString(faint.Render("  No rows. Press 'a' to add a clip."))
-		b.WriteByte('\n')
-	}
+	// Persistent "Add Clip" slot pinned below the data rows.
+	b.WriteString(v.renderAddSlot())
+	b.WriteByte('\n')
 
 	return b.String()
+}
+
+// renderAddSlot renders the persistent add-clip row at the bottom of the grid.
+// Single-line input is shown verbatim with a faint detection hint (· link / · path);
+// multi-line pastes collapse to a chip like `[CSV +52 lines]` so the buffer never
+// floods the UI. The user always commits with Enter.
+func (v collectionView) renderAddSlot() string {
+	cursor := "  "
+	marker := faint.Render("+ ")
+	if v.addFocus {
+		cursor = cursorStyle.Render("▸ ")
+		marker = cursorStyle.Render("+ ")
+	}
+
+	if !v.addFocus && v.addBuffer == "" {
+		hint := faint.Render("paste a link or CSV here, or type to add one manually")
+		if len(v.rows) == 0 {
+			hint = faint.Render("paste a link or CSV here · no rows yet — press 'a' to start")
+		}
+		return cursor + marker + hint
+	}
+
+	buf := v.addBuffer
+	body, detect := classifyAddBuffer(buf)
+
+	rendered := editStyle.Render(body)
+	if v.addFocus {
+		rendered += editStyle.Render("█")
+	}
+	if detect != "" {
+		rendered += "  " + faint.Render("· "+detect)
+	}
+	return cursor + marker + rendered
+}
+
+// classifyAddBuffer returns (displayBody, detectionHint).
+// displayBody is what to render in the slot — literal text for single lines,
+// a compact chip for multi-line pastes. detectionHint is a short label like
+// "link", "path", "CSV row", etc. that sits next to the body in faint.
+func classifyAddBuffer(buf string) (string, string) {
+	if buf == "" {
+		return "", ""
+	}
+	trimmed := strings.TrimSpace(buf)
+	if trimmed == "" {
+		return buf, ""
+	}
+
+	// Count lines (non-empty after trim).
+	lines := strings.Split(trimmed, "\n")
+	lineCount := len(lines)
+
+	hasTab := strings.Contains(trimmed, "\t")
+	hasComma := strings.Contains(trimmed, ",")
+	isYAML := strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "columns:") || strings.HasPrefix(trimmed, "rows:")
+
+	// Multi-line paste → chip.
+	if lineCount > 1 {
+		label := "Pasted"
+		switch {
+		case isYAML:
+			label = "YAML"
+		case hasTab:
+			label = "TSV"
+		case hasComma:
+			label = "CSV"
+		}
+		return fmt.Sprintf("[%s +%d lines]", label, lineCount), fmt.Sprintf("%d lines will be imported", lineCount)
+	}
+
+	// Single line — show verbatim with a type hint.
+	body := trimmed
+	if len(body) > 80 {
+		body = body[:77] + "…"
+	}
+
+	switch {
+	case isURL(trimmed):
+		return body, "link"
+	case hasTab:
+		return body, "TSV row"
+	case hasComma:
+		return body, "CSV row"
+	case strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "~") || strings.HasPrefix(trimmed, "./") || strings.HasPrefix(trimmed, "../"):
+		return body, "path"
+	default:
+		return body, ""
+	}
 }
 
 func compactRowStatus(raw string, tick int) string {

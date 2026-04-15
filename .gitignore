@@ -13,6 +13,7 @@ powerhour-*/*
 /powerhour
 /admin
 tmp/
+.gocache/
 .worktrees
 .superpowers/
 docs/superpowers/
