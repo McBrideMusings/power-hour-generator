@@ -18,9 +18,10 @@ type Collection struct {
 	Config     config.CollectionConfig
 	Rows       []csvplan.CollectionRow
 	PlanErrors csvplan.ValidationErrors
-	Headers    []string // Raw CSV headers (normalized), for write-back
-	Delimiter  rune     // CSV delimiter (comma or tab), for write-back
-	PlanFormat string   // "csv" or "yaml", for write-back
+	Headers    []string          // Raw CSV headers (normalized), for write-back
+	Defaults   map[string]string // YAML column defaults, for write-back and row creation
+	Delimiter  rune              // CSV delimiter (comma or tab), for write-back
+	PlanFormat string            // "csv" or "yaml", for write-back
 }
 
 // CollectionResolver loads and resolves collections from configuration.
@@ -80,17 +81,13 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 		}
 		planPath = resolveProjectPath(r.paths.Root, planPath)
 
-		opts := csvplan.CollectionOptions{
-			LinkHeader:      collCfg.LinkHeader,
-			StartHeader:     collCfg.StartHeader,
-			DurationHeader:  collCfg.DurationHeader,
-			DefaultDuration: 60,
-		}
+		opts := CollectionOptionsForConfig(Collection{Config: collCfg})
 
 		var (
 			rows       []csvplan.CollectionRow
 			err        error
 			headers    []string
+			defaults   map[string]string
 			delimiter  rune
 			planFormat string
 		)
@@ -100,6 +97,7 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			result, yamlErr := csvplan.LoadCollectionYAML(planPath, opts)
 			rows = result.Rows
 			headers = result.Columns
+			defaults = result.Defaults
 			err = yamlErr
 		} else {
 			planFormat = "csv"
@@ -125,6 +123,7 @@ func (r *CollectionResolver) LoadCollections() (map[string]Collection, error) {
 			Rows:       rows,
 			PlanErrors: planErrs,
 			Headers:    headers,
+			Defaults:   defaults,
 			Delimiter:  delimiter,
 			PlanFormat: planFormat,
 		}

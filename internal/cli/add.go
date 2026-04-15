@@ -133,35 +133,7 @@ func buildRowsForAdd(raw string, coll project.Collection) ([]csvplan.CollectionR
 	}
 
 	value := cleanYouTubeURL(raw)
-	opts := project.CollectionOptionsForConfig(coll)
-	defaultDur := opts.DefaultDuration
-	if defaultDur <= 0 {
-		defaultDur = 60
-	}
-
-	linkHeader := opts.LinkHeader
-	if linkHeader == "" {
-		linkHeader = "link"
-	}
-	startHeader := opts.StartHeader
-	if startHeader == "" {
-		startHeader = "start_time"
-	}
-	durationHeader := opts.DurationHeader
-	if durationHeader == "" {
-		durationHeader = "duration"
-	}
-
-	row := csvplan.CollectionRow{
-		Link:            strings.TrimSpace(value),
-		StartRaw:        "0:00",
-		DurationSeconds: defaultDur,
-		CustomFields: map[string]string{
-			linkHeader:     strings.TrimSpace(value),
-			startHeader:    "0:00",
-			durationHeader: fmt.Sprintf("%d", defaultDur),
-		},
-	}
+	row := project.BuildCollectionRow(coll, strings.TrimSpace(value))
 	return []csvplan.CollectionRow{row}, csvplan.ImportFormat("single"), nil
 }
 

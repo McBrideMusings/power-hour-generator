@@ -63,10 +63,6 @@ type collectionView struct {
 	addFocus  bool
 	addBuffer string
 
-	// needsReload is set after opening the plan file externally (Shift+E with `open`).
-	// The next navigation key in this view triggers a reload from disk.
-	needsReload bool
-
 	termWidth  int
 	termHeight int
 }
@@ -293,23 +289,23 @@ func (v collectionView) view() string {
 			// Inline edit: show edit buffer with cursor on the active field.
 			if isEditRow && j == v.editFieldIdx {
 				display := v.editValue + "█"
-				display = tui.TruncateWithEllipsis(display, w)
+				display = truncateCollectionValue(display, w)
 				parts = append(parts, editStyle.Render(fmt.Sprintf("%-*s", w, display)))
 				continue
 			}
 			// Inline edit: highlight other fields on the edit row.
 			if isEditRow {
-				val = tui.TruncateWithEllipsis(val, w)
+				val = truncateCollectionValue(val, w)
 				parts = append(parts, editRowStyle.Render(fmt.Sprintf("%-*s", w, val)))
 				continue
 			}
 
 			if state != rowRendered {
-				parts = append(parts, stateStyle.Render(fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w))))
+				parts = append(parts, stateStyle.Render(fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w))))
 			} else if col.field == "title" {
-				parts = append(parts, fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w)))
+				parts = append(parts, fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w)))
 			} else {
-				parts = append(parts, faint.Render(fmt.Sprintf("%-*s", w, tui.TruncateWithEllipsis(val, w))))
+				parts = append(parts, faint.Render(fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w))))
 			}
 		}
 		b.WriteString(parts[0])

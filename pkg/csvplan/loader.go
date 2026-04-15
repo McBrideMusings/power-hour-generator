@@ -469,6 +469,11 @@ func parseStartTime(value string) (time.Duration, error) {
 	return duration, nil
 }
 
+// ParseStartTime validates and parses a collection start_time string.
+func ParseStartTime(value string) (time.Duration, error) {
+	return parseStartTime(value)
+}
+
 func parseComponent(name, raw string, max int) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

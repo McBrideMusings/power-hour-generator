@@ -423,6 +423,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		name, args := revealCommand(m.pp.Root)
 		_ = execCommand(name, args...).Start()
 		return m, nil
+	case "u", "ctrl+r":
+		return m.refreshFromDisk(), nil
 	}
 
 	// Left/right arrow keys cycle through views.
@@ -806,16 +808,6 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 	v := m.collectionViews[cvIdx]
 	key := msg.String()
 
-	// If the plan was opened externally (Shift+E), reload data on navigation keys.
-	if v.needsReload {
-		switch key {
-		case "up", "k", "down", "j", "J", "K", "e", "E", "a", "d", "f", "F", "v", "V":
-			m = reloadCollection(m, cvIdx)
-			m.collectionViews[cvIdx].needsReload = false
-			v = m.collectionViews[cvIdx]
-		}
-	}
-
 	switch key {
 	case "up", "k":
 		if v.cursor > 0 {
@@ -862,6 +854,9 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		return m, nil
 
 	case "d":
+		return m.processDuplicateRow(cvIdx), nil
+
+	case "x":
 		if len(v.rows) == 0 {
 			return m, nil
 		}
@@ -899,8 +894,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		}
 		c := execCommand("open", coll.Plan)
 		c.Start()
-		m.collectionViews[cvIdx].needsReload = true
-		m.statusMsg = fmt.Sprintf("Opened %s — data reloads on next navigation", filepath.Base(coll.Plan))
+		m.statusMsg = fmt.Sprintf("Opened %s — press u to refresh", filepath.Base(coll.Plan))
 		return m, nil
 
 	case "f":
@@ -1069,7 +1063,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		}
 		return m, nil
 
-	case "d":
+	case "x":
 		if v.concatFocus {
 			return m, nil
 		}
@@ -2095,33 +2089,8 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 	// Clean YouTube URLs.
 	value = cleanYouTubeURL(value)
 
-	defaultDur := 60
-	if coll.Config.Duration > 0 {
-		defaultDur = coll.Config.Duration
-	}
-
-	newRow := csvplan.CollectionRow{
-		Index:           len(v.rows) + 1,
-		Link:            value,
-		StartRaw:        "0:00",
-		DurationSeconds: defaultDur,
-		CustomFields:    make(map[string]string),
-	}
-	linkHeader := coll.Config.LinkHeader
-	if linkHeader == "" {
-		linkHeader = "link"
-	}
-	startHeader := coll.Config.StartHeader
-	if startHeader == "" {
-		startHeader = "start_time"
-	}
-	durationHeader := coll.Config.DurationHeader
-	if durationHeader == "" {
-		durationHeader = "duration"
-	}
-	newRow.CustomFields[linkHeader] = value
-	newRow.CustomFields[startHeader] = "0:00"
-	newRow.CustomFields[durationHeader] = fmt.Sprintf("%d", defaultDur)
+	newRow := project.BuildCollectionRow(coll, value)
+	newRow.Index = len(v.rows) + 1
 
 	v.rows = append(v.rows, newRow)
 	v.cursor = len(v.rows) - 1
@@ -2189,6 +2158,39 @@ func (m Model) processDeleteRow() (tea.Model, tea.Cmd) {
 	m = writeCollection(m, cvIdx)
 	m = reResolve(m)
 	return m, nil
+}
+
+// processDuplicateRow duplicates the selected row and appends the copy to the
+// end of the active collection.
+func (m Model) processDuplicateRow(cvIdx int) Model {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m
+	}
+
+	collName := m.collectionNames[cvIdx]
+	coll := m.collections[collName]
+	if len(coll.Rows) == 0 {
+		return m
+	}
+
+	sourceIdx := m.collectionViews[cvIdx].cursor
+	if sourceIdx < 0 || sourceIdx >= len(coll.Rows) {
+		return m
+	}
+
+	coll = project.DuplicateCollectionRow(coll, sourceIdx)
+	m.collections[collName] = coll
+
+	v := m.collectionViews[cvIdx]
+	v.rows = coll.Rows
+	v.cursor = len(v.rows) - 1
+	v.autoScroll()
+	m.collectionViews[cvIdx] = v
+
+	m = writeCollection(m, cvIdx)
+	m = reResolve(m)
+	m.statusMsg = fmt.Sprintf("Duplicated row %d to bottom", sourceIdx+1)
+	return m
 }
 
 // processDeleteCacheEntry removes the cache entry at the cursor.
@@ -2359,6 +2361,75 @@ func reloadState(m Model) Model {
 	return m
 }
 
+func (m Model) refreshFromDisk() Model {
+	activeName := ""
+	if m.activeView >= 0 && m.activeView < len(m.viewNames) {
+		activeName = m.viewNames[m.activeView]
+	}
+
+	cfg, err := config.Load(m.pp.ConfigFile)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Refresh error: %v", err)
+		return m
+	}
+
+	pp := paths.ApplyConfig(m.pp, cfg)
+	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
+
+	resolver, err := project.NewCollectionResolver(cfg, pp)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Refresh error: %v", err)
+		return m
+	}
+
+	collections, err := resolver.LoadCollections()
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Refresh error: %v", err)
+		return m
+	}
+
+	idx, _ := cache.Load(pp)
+	rs, _ := state.Load(pp.RenderStateFile)
+
+	var timeline []project.TimelineEntry
+	if len(cfg.Timeline.Sequence) > 0 {
+		timeline, err = project.ResolveTimeline(cfg.Timeline, collections)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Refresh error: %v", err)
+			return m
+		}
+	}
+
+	refreshed := NewModel(cfg, pp, collections, timeline, idx, rs, m.toolWarning, m.toolStatuses)
+	refreshed.termWidth = m.termWidth
+	refreshed.termHeight = m.termHeight
+	refreshed.tick = m.tick
+	refreshed.mode = modeNormal
+	refreshed.statusMsg = "Refreshed from disk"
+	if refreshed.termWidth > 0 || refreshed.termHeight > 0 {
+		refreshed.timelineView.termWidth = refreshed.termWidth
+		refreshed.timelineView.termHeight = refreshed.termHeight
+		refreshed.cacheView.termWidth = refreshed.termWidth
+		refreshed.cacheView.termHeight = refreshed.termHeight
+		refreshed.toolsView.termWidth = refreshed.termWidth
+		for i := range refreshed.collectionViews {
+			refreshed.collectionViews[i].termWidth = refreshed.termWidth
+			refreshed.collectionViews[i].termHeight = refreshed.termHeight
+			refreshed.collectionViews[i].tick = refreshed.tick
+		}
+	}
+
+	refreshed.activeView = 0
+	for i, name := range refreshed.viewNames {
+		if name == activeName {
+			refreshed.activeView = i
+			break
+		}
+	}
+
+	return refreshed
+}
+
 // saveConfigAndReResolve writes the config and re-resolves the timeline.
 func saveConfigAndReResolve(m Model) Model {
 	if err := config.Save(m.pp.ConfigFile, m.cfg); err != nil {
@@ -2374,12 +2445,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	collName := m.collectionNames[cvIdx]
 	coll := m.collections[collName]
 
-	opts := csvplan.CollectionOptions{
-		LinkHeader:      coll.Config.LinkHeader,
-		StartHeader:     coll.Config.StartHeader,
-		DurationHeader:  coll.Config.DurationHeader,
-		DefaultDuration: 60,
-	}
+	opts := project.CollectionOptionsForConfig(coll)
 
 	var rows []csvplan.CollectionRow
 	var err error
@@ -2387,6 +2453,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 		result, yamlErr := csvplan.LoadCollectionYAML(coll.Plan, opts)
 		rows = result.Rows
 		coll.Headers = result.Columns
+		coll.Defaults = result.Defaults
 		err = yamlErr
 	} else {
 		rows, err = csvplan.LoadCollection(coll.Plan, opts)

@@ -3,6 +3,7 @@ package csvplan
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -158,7 +159,8 @@ func TestWriteYAML_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := WriteYAML(path, columns, rows); err != nil {
+	defaults := map[string]string{"start_time": "0:00", "duration": "60"}
+	if err := WriteYAML(path, columns, defaults, rows); err != nil {
 		t.Fatalf("WriteYAML: %v", err)
 	}
 
@@ -190,6 +192,9 @@ func TestWriteYAML_RoundTrip(t *testing.T) {
 			t.Errorf("column[%d] = %q, want %q", i, col, columns[i])
 		}
 	}
+	if result.Defaults["duration"] != "60" {
+		t.Fatalf("default duration = %q, want 60", result.Defaults["duration"])
+	}
 }
 
 func TestWriteYAML_EmptyRows(t *testing.T) {
@@ -198,7 +203,7 @@ func TestWriteYAML_EmptyRows(t *testing.T) {
 
 	columns := []string{"title", "artist", "start_time", "duration", "link"}
 
-	if err := WriteYAML(path, columns, nil); err != nil {
+	if err := WriteYAML(path, columns, map[string]string{"start_time": "0:00"}, nil); err != nil {
 		t.Fatalf("WriteYAML: %v", err)
 	}
 
@@ -218,6 +223,79 @@ func TestWriteYAML_EmptyRows(t *testing.T) {
 		if col != columns[i] {
 			t.Errorf("column[%d] = %q, want %q", i, col, columns[i])
 		}
+	}
+	if result.Defaults["start_time"] != "0:00" {
+		t.Fatalf("default start_time = %q, want 0:00", result.Defaults["start_time"])
+	}
+}
+
+func TestLoadCollectionYAML_AppliesDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "interstitials.yaml")
+
+	raw := `columns: [link, start_time, duration]
+defaults:
+  start_time: "0:00"
+  duration: "5"
+rows:
+  - link: https://example.com/interstitial
+`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	result, err := LoadCollectionYAML(path, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollectionYAML: %v", err)
+	}
+
+	if got := result.Rows[0].StartRaw; got != "0:00" {
+		t.Fatalf("start_time = %q, want 0:00", got)
+	}
+	if got := result.Rows[0].DurationSeconds; got != 5 {
+		t.Fatalf("duration = %d, want 5", got)
+	}
+	if got := result.Rows[0].CustomFields["duration"]; got != "5" {
+		t.Fatalf("duration field = %q, want 5", got)
+	}
+}
+
+func TestWriteYAML_OmitsValuesMatchingDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "interstitials.yaml")
+
+	rows := []CollectionRow{{
+		Index:           1,
+		Link:            "https://example.com/interstitial",
+		StartRaw:        "0:00",
+		DurationSeconds: 5,
+		CustomFields: map[string]string{
+			"link":       "https://example.com/interstitial",
+			"start_time": "0:00",
+			"duration":   "5",
+		},
+	}}
+
+	if err := WriteYAML(path, []string{"link", "start_time", "duration"}, map[string]string{"start_time": "0:00", "duration": "5"}, rows); err != nil {
+		t.Fatalf("WriteYAML: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	text := string(data)
+	if count := strings.Count(text, "start_time: \"0:00\""); count != 1 {
+		t.Fatalf("expected 1 start_time default entry, got %d\n%s", count, text)
+	}
+	if count := strings.Count(text, "duration: \"5\""); count != 1 {
+		t.Fatalf("expected 1 duration default entry, got %d\n%s", count, text)
+	}
+	if !strings.Contains(text, "- link: https://example.com/interstitial") {
+		t.Fatalf("expected row link in yaml, got:\n%s", text)
+	}
+	if strings.Contains(text, "rows:\n    - duration") || strings.Contains(text, "rows:\n    - start_time") {
+		t.Fatalf("expected row values matching defaults to be omitted, got:\n%s", text)
 	}
 }
 

@@ -44,6 +44,7 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  r            Render all segments\n")
 	b.WriteString("  c            Concatenate final video\n")
 	b.WriteString("  o            Open project in file manager\n")
+	b.WriteString("  u / Ctrl+R   Refresh from disk\n")
 	b.WriteString("  ?            This help\n")
 	b.WriteString("  q / Esc / Ctrl+C Quit\n")
 	b.WriteByte('\n')
@@ -53,7 +54,9 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  ↑/↓ or j/k       Move cursor\n")
 	b.WriteString("  J/K              Reorder item\n")
 	b.WriteString("  a                Focus Add Clip slot (paste link/path/CSV)\n")
-	b.WriteString("  d                Delete entry/row\n")
+	if activeView == 0 {
+		b.WriteString("  x                Delete selected timeline entry\n")
+	}
 	b.WriteString("  v                Play in VLC\n")
 	b.WriteString("  V                Play all in VLC\n")
 
@@ -61,6 +64,8 @@ func renderHelpOverlay(activeView int, width, height int) string {
 		b.WriteByte('\n')
 		b.WriteString(bold.Render("Collection"))
 		b.WriteByte('\n')
+		b.WriteString("  d            Duplicate row to bottom\n")
+		b.WriteString("  x            Delete selected row\n")
 		b.WriteString("  e/E          Edit/ext\n")
 		b.WriteString("  f/F          Fetch selected/all\n")
 		b.WriteString("  r/R          Render selected/all\n")
