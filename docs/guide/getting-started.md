@@ -38,6 +38,9 @@ Open `my-power-hour/songs.yaml` and add your clips:
 
 ```yaml
 columns: [title, artist, start_time, duration, name, link]
+defaults:
+  start_time: "0:00"
+  duration: "60"
 rows:
   - title: CHAMBEA
     artist: BAD BUNNY

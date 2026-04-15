@@ -68,10 +68,11 @@ func WriteCSV(path string, headers []string, rows []CollectionRow, delimiter run
 }
 
 // WriteYAML writes collection rows back to a YAML plan file using atomic write.
-// The output uses the structured format with explicit columns and rows.
-// Columns are merged with any new fields discovered in the row data.
-func WriteYAML(path string, columns []string, rows []CollectionRow) error {
-	columns = MergeHeaders(columns, rows)
+// The output uses the structured format with explicit columns, optional schema
+// defaults, and rows. Columns are merged with any new fields discovered in the
+// row data or defaults.
+func WriteYAML(path string, columns []string, defaults map[string]string, rows []CollectionRow) error {
+	columns = mergeYAMLHeaders(columns, defaults, rows)
 
 	entries := make([]map[string]interface{}, 0, len(rows))
 	for _, row := range rows {
@@ -80,17 +81,22 @@ func WriteYAML(path string, columns []string, rows []CollectionRow) error {
 			if v == "" {
 				continue
 			}
+			if defaults != nil && defaults[k] == v {
+				continue
+			}
 			entry[k] = v
 		}
 		entries = append(entries, entry)
 	}
 
 	plan := struct {
-		Columns []string                 `yaml:"columns"`
-		Rows    []map[string]interface{} `yaml:"rows"`
+		Columns  []string                 `yaml:"columns"`
+		Defaults map[string]string        `yaml:"defaults,omitempty"`
+		Rows     []map[string]interface{} `yaml:"rows"`
 	}{
-		Columns: columns,
-		Rows:    entries,
+		Columns:  columns,
+		Defaults: defaults,
+		Rows:     entries,
 	}
 
 	data, err := yaml.Marshal(plan)
@@ -122,6 +128,29 @@ func WriteYAML(path string, columns []string, rows []CollectionRow) error {
 	}
 
 	return nil
+}
+
+func mergeYAMLHeaders(columns []string, defaults map[string]string, rows []CollectionRow) []string {
+	merged := MergeHeaders(columns, rows)
+	if len(defaults) == 0 {
+		return merged
+	}
+
+	seen := make(map[string]bool, len(merged))
+	for _, col := range merged {
+		seen[col] = true
+	}
+
+	var extras []string
+	for field := range defaults {
+		normalized := normalizeHeader(field)
+		if normalized != "" && !seen[normalized] {
+			seen[normalized] = true
+			extras = append(extras, normalized)
+		}
+	}
+	sort.Strings(extras)
+	return append(merged, extras...)
 }
 
 // MergeHeaders preserves the existing CSV header order while appending any new

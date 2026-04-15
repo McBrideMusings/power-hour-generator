@@ -14,8 +14,9 @@ import (
 // YAMLResult holds the parsed result of a YAML plan file, including declared
 // column names and parsed rows.
 type YAMLResult struct {
-	Columns []string
-	Rows    []CollectionRow
+	Columns  []string
+	Defaults map[string]string
+	Rows     []CollectionRow
 }
 
 // LoadCollectionYAML reads a YAML plan file and returns a YAMLResult with
@@ -45,8 +46,9 @@ func LoadCollectionYAMLData(data []byte, opts CollectionOptions) ([]CollectionRo
 
 // yamlPlan is the structured YAML plan format with explicit column schema.
 type yamlPlan struct {
-	Columns []string                 `yaml:"columns"`
-	Rows    []map[string]interface{} `yaml:"rows"`
+	Columns  []string                 `yaml:"columns"`
+	Defaults map[string]interface{}   `yaml:"defaults"`
+	Rows     []map[string]interface{} `yaml:"rows"`
 }
 
 // loadCollectionYAMLStructured handles the structured format (columns + rows
@@ -59,8 +61,9 @@ func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResu
 		for i, c := range plan.Columns {
 			plan.Columns[i] = normalizeHeader(c)
 		}
-		rows, errs := parseYAMLRows(plan.Rows, opts)
-		result := YAMLResult{Columns: plan.Columns, Rows: rows}
+		defaults := normalizeYAMLDefaults(plan.Defaults)
+		rows, errs := parseYAMLRows(plan.Rows, defaults, opts)
+		result := YAMLResult{Columns: plan.Columns, Defaults: defaults, Rows: rows}
 		if len(errs) > 0 {
 			return result, errs
 		}
@@ -85,7 +88,7 @@ func loadCollectionYAMLBareList(data []byte, opts CollectionOptions) ([]Collecti
 		return nil, errors.New("no data rows found")
 	}
 
-	rows, errs := parseYAMLRows(rawRows, opts)
+	rows, errs := parseYAMLRows(rawRows, nil, opts)
 	if len(rows) == 0 {
 		return nil, errors.New("no data rows found")
 	}
@@ -123,25 +126,46 @@ func normalizeYAMLOpts(opts CollectionOptions) CollectionOptions {
 	return opts
 }
 
-func parseYAMLRows(rawRows []map[string]interface{}, opts CollectionOptions) ([]CollectionRow, ValidationErrors) {
+func normalizeYAMLDefaults(raw map[string]interface{}) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	defaults := make(map[string]string, len(raw))
+	for k, v := range raw {
+		key := normalizeHeader(k)
+		if key == "" {
+			continue
+		}
+		defaults[key] = yamlScalarToString(v)
+	}
+	if len(defaults) == 0 {
+		return nil
+	}
+	return defaults
+}
+
+func parseYAMLRows(rawRows []map[string]interface{}, defaults map[string]string, opts CollectionOptions) ([]CollectionRow, ValidationErrors) {
 	var (
 		rows []CollectionRow
 		errs ValidationErrors
 	)
 	for i, raw := range rawRows {
 		rowIndex := i + 1
-		row, rowErrs := parseYAMLRow(raw, rowIndex, opts)
+		row, rowErrs := parseYAMLRow(raw, defaults, rowIndex, opts)
 		errs = append(errs, rowErrs...)
 		rows = append(rows, row)
 	}
 	return rows, errs
 }
 
-func parseYAMLRow(raw map[string]interface{}, index int, opts CollectionOptions) (CollectionRow, []ValidationError) {
+func parseYAMLRow(raw map[string]interface{}, defaults map[string]string, index int, opts CollectionOptions) (CollectionRow, []ValidationError) {
 	var errs []ValidationError
 
-	// Normalize all keys and convert values to strings.
-	fields := make(map[string]string, len(raw))
+	// Start from schema defaults, then apply row-specific values over them.
+	fields := make(map[string]string, len(defaults)+len(raw))
+	for k, v := range defaults {
+		fields[k] = v
+	}
 	for k, v := range raw {
 		key := normalizeHeader(k)
 		if key == "" {

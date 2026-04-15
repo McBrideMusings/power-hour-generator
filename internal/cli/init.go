@@ -14,9 +14,15 @@ import (
 
 const (
 	songsPlanYAML = `columns: [title, artist, start_time, duration, link]
+defaults:
+    start_time: "0:00"
+    duration: "60"
 rows: []
 `
 	interstitialsPlanYAML = `columns: [link, start_time, duration]
+defaults:
+    start_time: "0:00"
+    duration: "5"
 rows: []
 `
 	songsPlanCSV         = "title,artist,start_time,duration,link\n"
