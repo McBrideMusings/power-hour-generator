@@ -43,6 +43,7 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  1-9           Jump to view\n")
 	b.WriteString("  r            Render all segments\n")
 	b.WriteString("  c            Concatenate final video\n")
+	b.WriteString("  o            Open project in file manager\n")
 	b.WriteString("  ?            This help\n")
 	b.WriteString("  Esc / Ctrl+C Quit\n")
 	b.WriteByte('\n')
