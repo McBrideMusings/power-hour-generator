@@ -90,6 +90,7 @@ type Model struct {
 	editFieldIdx int    // which column is being edited (index into collectionView.columns)
 	editValue    string // current edit buffer
 	editOriginal string // original value before edit started
+	editCursor   int    // caret position within editValue
 
 	// Add-clip slot state.
 	addBuffer string // paste/typed buffer for the active add-clip slot
@@ -250,6 +251,19 @@ func (m Model) setCollectionRowNote(cvIdx int, rowIndex int, note string) Model 
 	return m
 }
 
+func (m Model) setCollectionCursorNote(cvIdx int, note string) Model {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		m.statusMsg = note
+		return m
+	}
+	v := m.collectionViews[cvIdx]
+	if v.cursor < 0 || v.cursor >= len(v.rows) {
+		m.statusMsg = note
+		return m
+	}
+	return m.setCollectionRowNote(cvIdx, v.rows[v.cursor].Index, note)
+}
+
 func (m Model) setCacheRowNote(identifier string, note string) Model {
 	if strings.TrimSpace(identifier) == "" {
 		return m
@@ -265,7 +279,41 @@ func (m Model) setCacheRowNote(identifier string, note string) Model {
 	return m
 }
 
+func (m Model) setCacheCursorNote(note string) Model {
+	entries := m.cacheView.entries()
+	if m.cacheView.cursor < 0 || m.cacheView.cursor >= len(entries) {
+		m.statusMsg = note
+		return m
+	}
+	return m.setCacheRowNote(entries[m.cacheView.cursor].Identifier, note)
+}
+
+func (m Model) setTimelineSequenceNote(seqIdx int, note string) Model {
+	if seqIdx < 0 || seqIdx >= len(m.timelineView.sequence) {
+		m.statusMsg = note
+		return m
+	}
+	if m.timelineView.seqStatus == nil {
+		m.timelineView.seqStatus = make(map[int]string)
+	}
+	if m.timelineView.seqStatusUntil == nil {
+		m.timelineView.seqStatusUntil = make(map[int]int)
+	}
+	m.timelineView.seqStatus[seqIdx] = "note:" + note
+	m.timelineView.seqStatusUntil[seqIdx] = m.tick + 14
+	return m
+}
+
 func (m Model) expireTransientRowNotes() Model {
+	for seqIdx, until := range m.timelineView.seqStatusUntil {
+		if until > m.tick {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(m.timelineView.seqStatus[seqIdx]), "note:") {
+			delete(m.timelineView.seqStatus, seqIdx)
+		}
+		delete(m.timelineView.seqStatusUntil, seqIdx)
+	}
 	for i := range m.collectionViews {
 		for rowIndex, until := range m.collectionViews[i].rowStatusUntil {
 			if until > m.tick {
@@ -363,32 +411,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case metadataProbeMsg:
 		cvIdx := msg.collectionIdx
 		if cvIdx >= 0 && cvIdx < len(m.collectionViews) {
-			if msg.err != nil {
-				m.statusMsg = fmt.Sprintf("Probe failed: %v", msg.err)
-			} else {
-				v := m.collectionViews[cvIdx]
-				// Find the target row by matching the link URL, not by index.
-				// This is safe against add/delete races that shift row positions.
-				rowFound := false
-				for ri := range v.rows {
-					if strings.TrimSpace(v.rows[ri].Link) == msg.link {
+			v := m.collectionViews[cvIdx]
+			// Find the target row by matching the link URL, not by index.
+			// This is safe against add/delete races that shift row positions.
+			rowFound := false
+			rowIndex := 0
+			for ri := range v.rows {
+				if strings.TrimSpace(v.rows[ri].Link) == msg.link {
+					rowIndex = v.rows[ri].Index
+					if msg.err == nil {
 						if msg.title != "" {
 							v.rows[ri].CustomFields["title"] = msg.title
 						}
 						if msg.artist != "" {
 							v.rows[ri].CustomFields["artist"] = msg.artist
 						}
-						rowFound = true
-						break
 					}
+					rowFound = true
+					break
 				}
-				if rowFound {
-					m.collectionViews[cvIdx] = v
-					collName := m.collectionNames[cvIdx]
-					m.collectionViews[cvIdx].columns = discoverColumns(v.rows, m.collections[collName].Headers)
-					m = writeCollection(m, cvIdx)
-					m.statusMsg = fmt.Sprintf("Probed: %s – %s", msg.title, msg.artist)
+			}
+			if rowFound && msg.err == nil {
+				m.collectionViews[cvIdx] = v
+				collName := m.collectionNames[cvIdx]
+				m.collectionViews[cvIdx].columns = discoverColumns(v.rows, m.collections[collName].Headers)
+				m = writeCollection(m, cvIdx)
+			}
+			if rowFound {
+				if msg.err != nil {
+					m = m.setCollectionRowNote(cvIdx, rowIndex, fmt.Sprintf("probe failed: %v", msg.err))
+				} else {
+					note := strings.Trim(strings.Join([]string{msg.title, msg.artist}, " - "), " -")
+					if note == "" {
+						note = "metadata updated"
+					}
+					m = m.setCollectionRowNote(cvIdx, rowIndex, note)
 				}
+			} else if msg.err != nil {
+				m.statusMsg = fmt.Sprintf("Probe failed: %v", msg.err)
 			}
 		}
 		return m, nil
@@ -597,6 +657,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		field := cols[m.editFieldIdx].field
 		m.editValue = v.rows[v.cursor].CustomFields[field]
 		m.editOriginal = m.editValue
+		m.editCursor = len(m.editValue)
 	}
 
 	switch msg.Type {
@@ -615,30 +676,26 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m = writeCollection(m, cvIdx)
 		m = reResolve(m)
-		m.statusMsg = "Saved"
+		m = m.setCollectionRowNote(cvIdx, v.rows[v.cursor].Index, "saved")
 		return m, nil
 
 	case tea.KeyRight:
-		commitField()
-		m.editFieldIdx++
-		if m.editFieldIdx >= len(cols) {
-			m.editFieldIdx = 0
+		if m.editCursor < len(m.editValue) {
+			m.editCursor++
 		}
-		loadField()
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
+		v.editCursor = m.editCursor
 		m.collectionViews[cvIdx] = v
 		return m, nil
 
 	case tea.KeyLeft:
-		commitField()
-		m.editFieldIdx--
-		if m.editFieldIdx < 0 {
-			m.editFieldIdx = len(cols) - 1
+		if m.editCursor > 0 {
+			m.editCursor--
 		}
-		loadField()
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
+		v.editCursor = m.editCursor
 		m.collectionViews[cvIdx] = v
 		return m, nil
 
@@ -653,6 +710,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		loadField()
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
+		v.editCursor = m.editCursor
 		m.collectionViews[cvIdx] = v
 		return m, nil
 
@@ -667,19 +725,25 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		loadField()
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
+		v.editCursor = m.editCursor
 		m.collectionViews[cvIdx] = v
 		return m, nil
 
 	case tea.KeyBackspace:
-		if len(m.editValue) > 0 {
-			m.editValue = m.editValue[:len(m.editValue)-1]
+		if m.editCursor > 0 && len(m.editValue) > 0 {
+			m.editValue = m.editValue[:m.editCursor-1] + m.editValue[m.editCursor:]
+			m.editCursor--
 		}
 		m.collectionViews[cvIdx].editValue = m.editValue
+		m.collectionViews[cvIdx].editCursor = m.editCursor
 		return m, nil
 
 	case tea.KeyRunes:
-		m.editValue += string(msg.Runes)
+		ch := string(msg.Runes)
+		m.editValue = m.editValue[:m.editCursor] + ch + m.editValue[m.editCursor:]
+		m.editCursor += len(ch)
 		m.collectionViews[cvIdx].editValue = m.editValue
+		m.collectionViews[cvIdx].editCursor = m.editCursor
 		return m, nil
 
 	case tea.KeyTab:
@@ -691,6 +755,20 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		loadField()
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
+		v.editCursor = m.editCursor
+		m.collectionViews[cvIdx] = v
+		return m, nil
+
+	case tea.KeyShiftTab:
+		commitField()
+		m.editFieldIdx--
+		if m.editFieldIdx < 0 {
+			m.editFieldIdx = len(cols) - 1
+		}
+		loadField()
+		v.editFieldIdx = m.editFieldIdx
+		v.editValue = m.editValue
+		v.editCursor = m.editCursor
 		m.collectionViews[cvIdx] = v
 		return m, nil
 	}
@@ -771,19 +849,23 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 	if looksLikeBatchImport(value) {
 		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("Import failed: %v", err)
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("import failed: %v", err))
 			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
 		coll = project.AppendCollectionRows(coll, rows)
 		if err := project.WriteCollectionPlan(coll); err != nil {
-			m.statusMsg = fmt.Sprintf("Write error: %v", err)
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("write error: %v", err))
 			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
 		m.collections[collName] = coll
 		m = reloadCollection(m, cvIdx)
-		m.statusMsg = fmt.Sprintf("Imported %d rows from %s", len(rows), format)
+		if len(rows) > 0 {
+			m.collectionViews[cvIdx].cursor = len(m.collectionViews[cvIdx].rows) - 1
+			m.collectionViews[cvIdx].autoScroll()
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("imported %d rows from %s", len(rows), format))
+		}
 		// Stay in modeAddClip with an empty buffer so another paste is ready.
 		m.resetAddClipInput(cvIdx, true)
 		return m, nil
@@ -837,9 +919,10 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 
 	// Kick off async yt-dlp probe for URLs.
 	if isURL(value) {
-		m.statusMsg = "Probing metadata..."
+		m = m.setCollectionCursorNote(cvIdx, "probing metadata...")
 		return m, probeMetadata(value, cvIdx)
 	}
+	m = m.setCollectionCursorNote(cvIdx, "added")
 
 	return m, nil
 }
@@ -866,9 +949,11 @@ func (m Model) enterInlineEditOn(cvIdx, rowIdx, fieldIdx int) Model {
 	v.editFieldIdx = fieldIdx
 	field := cols[fieldIdx].field
 	v.editValue = v.rows[rowIdx].CustomFields[field]
+	v.editCursor = len(v.editValue)
 	m.editFieldIdx = fieldIdx
 	m.editValue = v.editValue
 	m.editOriginal = v.editValue
+	m.editCursor = v.editCursor
 	m.collectionViews[cvIdx] = v
 	m.mode = modeInlineEdit
 	return m
@@ -950,10 +1035,12 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 			field := cols[0].field
 			m.editValue = v.rows[v.cursor].CustomFields[field]
 			m.editOriginal = m.editValue
+			m.editCursor = len(m.editValue)
 		}
 		m.collectionViews[cvIdx].editing = true
 		m.collectionViews[cvIdx].editFieldIdx = m.editFieldIdx
 		m.collectionViews[cvIdx].editValue = m.editValue
+		m.collectionViews[cvIdx].editCursor = m.editCursor
 		return m, nil
 
 	case "E":
@@ -1542,7 +1629,7 @@ func (m Model) View() string {
 		case modeConfirmDelete:
 			b.WriteString(footerStyle.Render(fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)))
 		case modeInlineEdit:
-			b.WriteString(footerStyle.Render("←/→ field  ↑/↓ row  Enter save  Esc cancel  Tab next field"))
+			b.WriteString(footerStyle.Render("←/→ cursor  ↑/↓ row  Tab/S-Tab field  Enter save  Esc cancel"))
 		case modeAddClip:
 			b.WriteString(footerStyle.Render("paste link/path or CSV (multi-line auto-imports) · Enter submit · Esc cancel"))
 		default:
@@ -2056,6 +2143,7 @@ func (m Model) processAddTimelineEntry(value string) (tea.Model, tea.Cmd) {
 	m.timelineView = v
 	m.cfg.Timeline.Sequence = v.sequence
 	m = saveConfigAndReResolve(m)
+	m = m.setTimelineSequenceNote(v.seqCursor, "added")
 	return m, nil
 }
 
@@ -2067,6 +2155,12 @@ func (m Model) processDeleteTimelineEntry() (tea.Model, tea.Cmd) {
 	}
 
 	idx := v.seqCursor
+	desc := "removed entry"
+	if entry := v.sequence[idx]; entry.File != "" {
+		desc = "removed file entry"
+	} else if entry.Collection != "" {
+		desc = "removed " + entry.Collection
+	}
 	v.sequence = append(v.sequence[:idx], v.sequence[idx+1:]...)
 
 	if v.seqCursor >= len(v.sequence) && v.seqCursor > 0 {
@@ -2075,6 +2169,9 @@ func (m Model) processDeleteTimelineEntry() (tea.Model, tea.Cmd) {
 	m.timelineView = v
 	m.cfg.Timeline.Sequence = v.sequence
 	m = saveConfigAndReResolve(m)
+	if len(m.timelineView.sequence) > 0 {
+		m = m.setTimelineSequenceNote(m.timelineView.seqCursor, desc)
+	}
 	return m, nil
 }
 
@@ -2130,19 +2227,23 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 	if looksLikeBatchImport(value) {
 		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("Import failed: %v", err)
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("import failed: %v", err))
 			return m, nil
 		}
 
 		coll = project.AppendCollectionRows(coll, rows)
 		if err := project.WriteCollectionPlan(coll); err != nil {
-			m.statusMsg = fmt.Sprintf("Write error: %v", err)
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("write error: %v", err))
 			return m, nil
 		}
 
 		m.collections[collName] = coll
 		m = reloadCollection(m, cvIdx)
-		m.statusMsg = fmt.Sprintf("Imported %d rows from %s", len(rows), format)
+		if len(rows) > 0 {
+			m.collectionViews[cvIdx].cursor = len(m.collectionViews[cvIdx].rows) - 1
+			m.collectionViews[cvIdx].autoScroll()
+			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("imported %d rows from %s", len(rows), format))
+		}
 		return m, nil
 	}
 
@@ -2162,9 +2263,10 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 
 	// Probe metadata for URLs.
 	if isURL(value) {
-		m.statusMsg = "Probing metadata..."
+		m = m.setCollectionCursorNote(cvIdx, "probing metadata...")
 		return m, probeMetadata(value, cvIdx)
 	}
+	m = m.setCollectionCursorNote(cvIdx, "added")
 
 	return m, nil
 }
@@ -2217,6 +2319,9 @@ func (m Model) processDeleteRow() (tea.Model, tea.Cmd) {
 
 	m = writeCollection(m, cvIdx)
 	m = reResolve(m)
+	if len(m.collectionViews[cvIdx].rows) > 0 {
+		m = m.setCollectionCursorNote(cvIdx, "removed row")
+	}
 	return m, nil
 }
 
@@ -2249,7 +2354,7 @@ func (m Model) processDuplicateRow(cvIdx int) Model {
 
 	m = writeCollection(m, cvIdx)
 	m = reResolve(m)
-	m.statusMsg = fmt.Sprintf("Duplicated row %d to bottom", sourceIdx+1)
+	m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("duplicated row %d", sourceIdx+1))
 	return m
 }
 
@@ -2267,14 +2372,14 @@ func (m Model) processDeleteCacheEntry() (tea.Model, tea.Cmd) {
 	entry := entries[m.cacheView.cursor]
 	idxEntry, ok := m.cacheIdx.GetByIdentifier(entry.Identifier)
 	if !ok {
-		m.statusMsg = "Entry not found in index"
+		m = m.setCacheCursorNote("entry not found in index")
 		return m, nil
 	}
 
 	// Delete the cached file for URL-sourced entries only.
 	if idxEntry.SourceType == cache.SourceTypeURL && idxEntry.CachedPath != "" {
 		if err := os.Remove(idxEntry.CachedPath); err != nil && !os.IsNotExist(err) {
-			m.statusMsg = fmt.Sprintf("Remove file: %v", err)
+			m = m.setCacheCursorNote(fmt.Sprintf("remove file: %v", err))
 			return m, nil
 		}
 	}
@@ -2288,7 +2393,7 @@ func (m Model) processDeleteCacheEntry() (tea.Model, tea.Cmd) {
 	}
 
 	if err := cache.Save(m.pp, m.cacheIdx); err != nil {
-		m.statusMsg = fmt.Sprintf("Save index: %v", err)
+		m = m.setCacheCursorNote(fmt.Sprintf("save index: %v", err))
 		return m, nil
 	}
 
@@ -2296,11 +2401,13 @@ func (m Model) processDeleteCacheEntry() (tea.Model, tea.Cmd) {
 	if title == "" {
 		title = filepath.Base(entry.CachedPath)
 	}
-	m.statusMsg = fmt.Sprintf("Removed: %s", title)
 
 	m = reloadState(m)
 	if m.cacheView.cursor >= len(m.cacheView.entries()) && m.cacheView.cursor > 0 {
 		m.cacheView.cursor--
+	}
+	if len(m.cacheView.entries()) > 0 {
+		m = m.setCacheCursorNote(fmt.Sprintf("removed %s", title))
 	}
 
 	return m, nil
@@ -2328,6 +2435,7 @@ func writeCollection(m Model, cvIdx int) Model {
 	oldEditing := v.editing
 	oldEditFieldIdx := v.editFieldIdx
 	oldEditValue := v.editValue
+	oldEditCursor := v.editCursor
 	oldAddFocus := v.addFocus
 	oldAddBuffer := v.addBuffer
 
@@ -2350,6 +2458,7 @@ func writeCollection(m Model, cvIdx int) Model {
 	v.editing = oldEditing
 	v.editFieldIdx = oldEditFieldIdx
 	v.editValue = oldEditValue
+	v.editCursor = oldEditCursor
 	v.addFocus = oldAddFocus
 	v.addBuffer = oldAddBuffer
 	v.autoScroll()

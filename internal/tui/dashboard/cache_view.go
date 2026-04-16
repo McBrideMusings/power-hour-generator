@@ -113,6 +113,12 @@ func (v *cacheView) toggle() {
 
 func (v cacheView) visibleRowCount() int {
 	h := v.termHeight - 9
+	entries := v.entries()
+	if v.cursor >= 0 && v.cursor < len(entries) {
+		if inlineRowNote(v.rowStatus[entries[v.cursor].Identifier]) != "" {
+			h--
+		}
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -179,14 +185,6 @@ func (v cacheView) view() string {
 			coll = faint.Render("—")
 		}
 		rawStatus := v.rowStatus[e.Identifier]
-		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
-			status := faint.Render("—")
-			noteWidth := max(12, v.termWidth-24)
-			b.WriteString(fmt.Sprintf("%s%s  %-*s  %s",
-				cursor, idx, statusWidth, status, editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth))))
-			b.WriteByte('\n')
-			continue
-		}
 		status := tui.TruncateWithEllipsis(rawStatus, statusWidth)
 		if status == "" {
 			status = faint.Render("—")
@@ -197,6 +195,12 @@ func (v cacheView) view() string {
 		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %s  %-14s  %s",
 			cursor, idx, statusWidth, status, flexWidth, title, faint.Render(fmt.Sprintf("%-*s", flexWidth, artist)), coll, faint.Render(fmt.Sprintf("%-*s", flexWidth, file))))
 		b.WriteByte('\n')
+		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+			noteWidth := max(12, v.termWidth-8)
+			b.WriteString("        ")
+			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			b.WriteByte('\n')
+		}
 	}
 
 	if endRow < len(entries) {
