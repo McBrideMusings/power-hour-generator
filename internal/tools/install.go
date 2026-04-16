@@ -40,6 +40,9 @@ func Install(ctx context.Context, toolName string, version string, opts InstallO
 	if !ok {
 		return Status{}, fmt.Errorf("unknown tool: %s", toolName)
 	}
+	if !def.Installable {
+		return Status{}, fmt.Errorf("tool %s cannot be installed automatically", toolName)
+	}
 
 	var current Status
 	if !opts.SkipInitialCheck {

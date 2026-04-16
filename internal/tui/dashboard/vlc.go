@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,38 +17,25 @@ import (
 	"powerhour/pkg/csvplan"
 )
 
-// vlcAppBundle is the macOS application bundle path for VLC.
-const vlcAppBundle = "/Applications/VLC.app"
-
-// detectVLC checks if VLC is installed and returns the app bundle path.
-func detectVLC() (string, bool) {
-	if _, err := os.Stat(vlcAppBundle); err == nil {
-		return vlcAppBundle, true
-	}
-	p, err := exec.LookPath("vlc")
-	if err == nil {
-		return p, true
-	}
-	return "", false
-}
-
 // quitVLC gracefully quits any running VLC instance and waits for it to exit.
 func quitVLC() {
-	// Check if VLC is running first.
-	check := exec.Command("pgrep", "-x", "VLC")
-	if check.Run() != nil {
-		return // not running, nothing to quit
+	if !vlcRunning() {
+		return
 	}
 
-	quit := exec.Command("osascript", "-e", `tell application "VLC" to quit`)
-	quit.Run()
+	switch runtime.GOOS {
+	case "darwin":
+		_ = exec.Command("osascript", "-e", `tell application "VLC" to quit`).Run()
+	case "windows":
+		_ = exec.Command("taskkill", "/IM", "vlc.exe", "/T").Run()
+	default:
+		_ = exec.Command("pkill", "-TERM", "-x", "vlc").Run()
+	}
 
-	// Wait for VLC to actually exit (up to 3 seconds).
 	for i := 0; i < 30; i++ {
 		time.Sleep(100 * time.Millisecond)
-		check := exec.Command("pgrep", "-x", "VLC")
-		if check.Run() != nil {
-			return // exited
+		if !vlcRunning() {
+			return
 		}
 	}
 }
@@ -54,7 +43,24 @@ func quitVLC() {
 // playFileInVLC opens a single file in VLC, replacing any existing playlist.
 func playFileInVLC(vlcPath, filePath string) error {
 	quitVLC()
-	c := exec.Command("open", "-a", vlcPath, filePath)
+	c := exec.Command(vlcPath, vlcLaunchArgs(filePath)...)
+	return c.Start()
+}
+
+// playClipInVLC opens a source file in VLC at a specific offset and optionally
+// limits playback to a stop time.
+func playClipInVLC(vlcPath, filePath string, startSeconds float64, stopSeconds float64) error {
+	quitVLC()
+
+	args := vlcLaunchArgs(filePath)
+	if startSeconds > 0 {
+		args = append(args, "--start-time", strconv.FormatFloat(startSeconds, 'f', -1, 64))
+	}
+	if stopSeconds > startSeconds {
+		args = append(args, "--stop-time", strconv.FormatFloat(stopSeconds, 'f', -1, 64))
+	}
+
+	c := exec.Command(vlcPath, args...)
 	return c.Start()
 }
 
@@ -89,12 +95,37 @@ func playPlaylistInVLC(vlcPath string, files []string, tmpDir string) (int, int,
 	}
 
 	quitVLC()
-	c := exec.Command("open", "-a", vlcPath, playlistPath)
+	c := exec.Command(vlcPath, vlcLaunchArgs(playlistPath)...)
 	if err := c.Start(); err != nil {
 		return 0, 0, err
 	}
 
 	return len(existing), total, nil
+}
+
+func vlcLaunchArgs(target string) []string {
+	args := []string{}
+	switch runtime.GOOS {
+	case "darwin":
+		args = append(args, "--macosx-continue-playback", "2", "--no-macosx-recentitems")
+	}
+	args = append(args, target)
+	return args
+}
+
+func vlcRunning() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("pgrep", "-x", "VLC").Run() == nil
+	case "windows":
+		out, err := exec.Command("tasklist", "/FI", "IMAGENAME eq vlc.exe").Output()
+		if err != nil {
+			return false
+		}
+		return strings.Contains(strings.ToLower(string(out)), "vlc.exe")
+	default:
+		return exec.Command("pgrep", "-x", "vlc").Run() == nil
+	}
 }
 
 // resolveRenderedSegmentPath returns the rendered segment output path for a collection row.

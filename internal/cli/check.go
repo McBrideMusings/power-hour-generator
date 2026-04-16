@@ -138,6 +138,11 @@ func printCheckResult(cmd *cobra.Command, project string, statuses []tools.Statu
 	})
 
 	for _, st := range sorted {
+		if st.Optional && st.Path == "" {
+			cmd.Println(faint.Render("–") + " " + bold.Render(st.Tool) + faint.Render(" (optional, not found)"))
+			cmd.Println()
+			continue
+		}
 		if st.Satisfied {
 			headline := green.Render("✓") + " " + bold.Render(st.Tool)
 			if st.Version != "" {
@@ -201,6 +206,9 @@ func printEncodingStatus(cmd *cobra.Command, bold, green, red, faint lipgloss.St
 func ensureStrict(statuses []tools.Status) error {
 	var failures []string
 	for _, st := range statuses {
+		if st.Optional {
+			continue
+		}
 		if st.Satisfied {
 			continue
 		}

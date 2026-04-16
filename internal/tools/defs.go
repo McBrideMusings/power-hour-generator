@@ -8,6 +8,7 @@ import (
 var toolDefinitions = map[string]ToolDefinition{
 	"ffmpeg": {
 		Name:           "ffmpeg",
+		Installable:    true,
 		MinimumVersion: "6.0",
 		DefaultVersion: "6.0",
 		Binaries: []BinarySpec{
@@ -17,10 +18,19 @@ var toolDefinitions = map[string]ToolDefinition{
 	},
 	"yt-dlp": {
 		Name:           "yt-dlp",
+		Installable:    true,
 		MinimumVersion: "2023.01.01",
 		DefaultVersion: "2024.07.16",
 		Binaries: []BinarySpec{
 			{ID: "yt-dlp", Executable: executableName("yt-dlp"), VersionSwitch: "--version"},
+		},
+	},
+	"vlc": {
+		Name:        "vlc",
+		Optional:    true,
+		Installable: false,
+		Binaries: []BinarySpec{
+			{ID: "vlc", Executable: executableName("vlc"), VersionSwitch: "--version"},
 		},
 	},
 }
@@ -39,6 +49,30 @@ func KnownTools() []string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	return names
+}
+
+// RequiredTools returns the tools needed for normal fetch/render workflows.
+func RequiredTools() []string {
+	var names []string
+	for _, name := range KnownTools() {
+		if toolDefinitions[name].Optional {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names
+}
+
+// InstallableTools returns the tools that can be managed automatically.
+func InstallableTools() []string {
+	var names []string
+	for _, name := range KnownTools() {
+		if !toolDefinitions[name].Installable {
+			continue
+		}
+		names = append(names, name)
+	}
 	return names
 }
 

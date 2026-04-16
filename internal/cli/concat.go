@@ -66,7 +66,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	// Ensure tools are available.
 	sw.Update("Checking tools...")
 	ctx2 := tools.WithMinimums(ctx, cfg.ToolMinimums())
-	if _, err := tools.EnsureAll(ctx2, tools.KnownTools(), func(msg string) {
+	if _, err := tools.EnsureAll(ctx2, tools.RequiredTools(), func(msg string) {
 		sw.Update(msg)
 	}); err != nil {
 		return err
@@ -294,4 +294,3 @@ func formatBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGTPE"[exp])
 }
-

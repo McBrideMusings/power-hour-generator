@@ -11,6 +11,7 @@ const (
 // Status captures the resolved state for a managed tool.
 type Status struct {
 	Tool          string            `json:"tool"`
+	Optional      bool              `json:"optional,omitempty"`
 	Version       string            `json:"version,omitempty"`
 	Minimum       string            `json:"minimum,omitempty"`
 	Source        Source            `json:"source"`
@@ -34,6 +35,8 @@ type BinarySpec struct {
 // ToolDefinition contains metadata required to manage a tool.
 type ToolDefinition struct {
 	Name           string
+	Optional       bool
+	Installable    bool
 	MinimumVersion string
 	DefaultVersion string
 	Binaries       []BinarySpec

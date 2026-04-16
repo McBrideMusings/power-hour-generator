@@ -26,6 +26,7 @@ type cacheView struct {
 	showAll         bool // false = filtered to project, true = all cached
 	activity        string
 	rowStatus       map[string]string
+	rowStatusUntil  map[string]int
 	cursor          int
 	scrollTop       int
 
@@ -93,6 +94,7 @@ func newCacheView(idx *cache.Index, collectionLinks map[string]string) cacheView
 		allEntries:      allEntries,
 		filteredEntries: filteredEntries,
 		rowStatus:       make(map[string]string),
+		rowStatusUntil:  make(map[string]int),
 	}
 }
 
@@ -176,7 +178,16 @@ func (v cacheView) view() string {
 		if coll == "" {
 			coll = faint.Render("—")
 		}
-		status := tui.TruncateWithEllipsis(v.rowStatus[e.Identifier], statusWidth)
+		rawStatus := v.rowStatus[e.Identifier]
+		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+			status := faint.Render("—")
+			noteWidth := max(12, v.termWidth-24)
+			b.WriteString(fmt.Sprintf("%s%s  %-*s  %s",
+				cursor, idx, statusWidth, status, editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth))))
+			b.WriteByte('\n')
+			continue
+		}
+		status := tui.TruncateWithEllipsis(rawStatus, statusWidth)
 		if status == "" {
 			status = faint.Render("—")
 		} else {
