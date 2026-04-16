@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"time"
 )
@@ -57,7 +58,7 @@ func Detect(ctx context.Context) ([]Status, error) {
 
 func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (Status, ManifestEntry, bool) {
 	minVersion, minNotes := resolveMinimumVersion(ctx, def)
-	status := Status{Tool: def.Name, Minimum: minVersion, Paths: map[string]string{}}
+	status := Status{Tool: def.Name, Optional: def.Optional, Minimum: minVersion, Paths: map[string]string{}}
 	if len(minNotes) > 0 {
 		status.Notes = append(status.Notes, minNotes...)
 	}
@@ -270,13 +271,55 @@ func locateCache(def ToolDefinition) (map[string]string, error) {
 func locateSystem(def ToolDefinition) (map[string]string, error) {
 	paths := map[string]string{}
 	for _, bin := range def.Binaries {
-		path, err := exec.LookPath(bin.Executable)
-		if err != nil {
-			return nil, fmt.Errorf("%s not found in PATH", bin.Executable)
+		path := firstExistingPath(systemCandidates(def, bin))
+		if path == "" {
+			var err error
+			path, err = exec.LookPath(bin.Executable)
+			if err != nil {
+				return nil, fmt.Errorf("%s not found in PATH", bin.Executable)
+			}
 		}
 		paths[bin.ID] = path
 	}
 	return paths, nil
+}
+
+func systemCandidates(def ToolDefinition, bin BinarySpec) []string {
+	if def.Name != "vlc" {
+		return nil
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		return []string{
+			"/Applications/VLC.app/Contents/MacOS/VLC",
+			"/Applications/VLC Media Player.app/Contents/MacOS/VLC",
+		}
+	case "windows":
+		return []string{
+			filepath.Join(os.Getenv("ProgramFiles"), "VideoLAN", "VLC", bin.Executable),
+			filepath.Join(os.Getenv("ProgramFiles(x86)"), "VideoLAN", "VLC", bin.Executable),
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "VideoLAN", "VLC", bin.Executable),
+		}
+	default:
+		return []string{
+			"/snap/bin/vlc",
+			"/usr/bin/vlc",
+			"/usr/local/bin/vlc",
+		}
+	}
+}
+
+func firstExistingPath(candidates []string) string {
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func equalPathMaps(a, b map[string]string) bool {

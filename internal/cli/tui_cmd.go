@@ -102,17 +102,28 @@ func detectToolStatuses(ctx context.Context) ([]dashboard.ToolStatus, string) {
 		return nil, ""
 	}
 
-	var result []dashboard.ToolStatus
+	statusByName := make(map[string]tools.Status, len(statuses))
+	for _, status := range statuses {
+		statusByName[status.Tool] = status
+	}
+
+	result := make([]dashboard.ToolStatus, 0, len(tools.KnownTools()))
 	var warning string
 
-	for _, s := range statuses {
+	for _, name := range tools.KnownTools() {
+		s, ok := statusByName[name]
+		if !ok {
+			continue
+		}
 		ts := dashboard.ToolStatus{
 			Name:          s.Tool,
+			Optional:      s.Optional,
+			Available:     s.Path != "",
 			Version:       s.Version,
 			Path:          s.Path,
 			InstallMethod: s.InstallMethod,
 		}
-		if !s.Satisfied {
+		if !s.Optional && !s.Satisfied {
 			ts.UpdateAvail = "not satisfied"
 			if warning == "" {
 				warning = s.Tool

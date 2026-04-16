@@ -109,10 +109,14 @@ func runToolsInstall(cmd *cobra.Command, args []string) error {
 
 	var toolsToInstall []string
 	if target == "all" {
-		toolsToInstall = tools.KnownTools()
+		toolsToInstall = tools.InstallableTools()
 	} else {
-		if _, ok := tools.Definition(target); !ok {
+		def, ok := tools.Definition(target)
+		if !ok {
 			return fmt.Errorf("unknown tool: %s", target)
+		}
+		if !def.Installable {
+			return fmt.Errorf("tool %s cannot be installed automatically", target)
 		}
 		toolsToInstall = []string{target}
 	}

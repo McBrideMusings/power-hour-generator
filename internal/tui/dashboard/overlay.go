@@ -24,6 +24,8 @@ var (
 // ToolStatus holds info about an external tool for the overlay.
 type ToolStatus struct {
 	Name          string
+	Optional      bool
+	Available     bool
 	Version       string
 	Path          string
 	InstallMethod string
@@ -57,8 +59,9 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	if activeView == 0 {
 		b.WriteString("  x                Delete selected timeline entry\n")
 	}
-	b.WriteString("  v                Play in VLC\n")
-	b.WriteString("  V                Play all in VLC\n")
+	b.WriteString("  v                Play in vlc\n")
+	b.WriteString("  V                Play vlc/all playlist\n")
+	b.WriteString("                   (shown when vlc is detected)\n")
 
 	if activeView != 0 && activeView <= 10 { // collection views
 		b.WriteByte('\n')

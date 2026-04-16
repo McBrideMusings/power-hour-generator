@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -93,6 +94,31 @@ func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
 	}
 }
 
+func TestInlineEditReloadsParsedStartTimeFromDisk(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 2 // start_time
+	m.editValue = "1:00"
+	m.editOriginal = "0:15"
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 2
+	m.collectionViews[0].editValue = "1:00"
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+
+	row := got.collectionViews[0].rows[0]
+	if row.StartRaw != "1:00" {
+		t.Fatalf("StartRaw = %q, want 1:00", row.StartRaw)
+	}
+	if row.Start != time.Minute {
+		t.Fatalf("Start = %v, want %v", row.Start, time.Minute)
+	}
+	if row.CustomFields["start_time"] != "1:00" {
+		t.Fatalf("custom start_time = %q, want 1:00", row.CustomFields["start_time"])
+	}
+}
+
 func testCollectionModel(t *testing.T) Model {
 	t.Helper()
 
@@ -111,6 +137,7 @@ func testCollectionModel(t *testing.T) Model {
 		Index:           1,
 		Link:            "https://example.com/watch?v=1",
 		StartRaw:        "0:15",
+		Start:           15 * time.Second,
 		DurationSeconds: 60,
 		CustomFields: map[string]string{
 			"title":      "First Song",

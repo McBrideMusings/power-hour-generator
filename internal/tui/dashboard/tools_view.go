@@ -36,7 +36,9 @@ func (v toolsView) view() string {
 		b.WriteString(fmt.Sprintf("    Path:     %s\n", faint.Render(nonEmptyOrDash(t.Path))))
 		b.WriteString(fmt.Sprintf("    Install:  %s\n", faint.Render(nonEmptyOrDash(t.InstallMethod))))
 
-		if t.UpdateAvail != "" {
+		if t.Optional && !t.Available {
+			b.WriteString(fmt.Sprintf("    Update:   %s\n", faint.Render("optional, not found")))
+		} else if t.UpdateAvail != "" {
 			b.WriteString(fmt.Sprintf("    Update:   %s\n", countYellow.Render(t.UpdateAvail)))
 		} else {
 			b.WriteString(fmt.Sprintf("    Update:   %s\n", countGreen.Render("up to date")))

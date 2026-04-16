@@ -100,10 +100,6 @@ type Model struct {
 	toolStatuses  []ToolStatus
 	doctorOverlay *cacheDoctorOverlay
 
-	// VLC state.
-	vlcPath  string
-	vlcFound bool
-
 	job dashboardJobState
 }
 
@@ -193,8 +189,6 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 		toolsView:       newToolsView(toolStatuses),
 	}
 
-	m.vlcPath, m.vlcFound = detectVLC()
-
 	return m
 }
 
@@ -218,6 +212,81 @@ func (m Model) viewKind(idx int) string {
 // collectionViewIndex returns the collection view slice index for the given active view.
 func (m Model) collectionViewIndex() int {
 	return m.activeView - 1
+}
+
+func (m Model) toolStatus(name string) (ToolStatus, bool) {
+	for _, status := range m.toolStatuses {
+		if strings.EqualFold(status.Name, name) {
+			return status, true
+		}
+	}
+	return ToolStatus{}, false
+}
+
+func (m Model) vlcPath() string {
+	status, ok := m.toolStatus("vlc")
+	if !ok {
+		return ""
+	}
+	return status.Path
+}
+
+func (m Model) vlcAvailable() bool {
+	return m.vlcPath() != ""
+}
+
+func (m Model) setCollectionRowNote(cvIdx int, rowIndex int, note string) Model {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m
+	}
+	if m.collectionViews[cvIdx].rowStatus == nil {
+		m.collectionViews[cvIdx].rowStatus = make(map[int]string)
+	}
+	if m.collectionViews[cvIdx].rowStatusUntil == nil {
+		m.collectionViews[cvIdx].rowStatusUntil = make(map[int]int)
+	}
+	m.collectionViews[cvIdx].rowStatus[rowIndex] = "note:" + note
+	m.collectionViews[cvIdx].rowStatusUntil[rowIndex] = m.tick + 14
+	return m
+}
+
+func (m Model) setCacheRowNote(identifier string, note string) Model {
+	if strings.TrimSpace(identifier) == "" {
+		return m
+	}
+	if m.cacheView.rowStatus == nil {
+		m.cacheView.rowStatus = make(map[string]string)
+	}
+	if m.cacheView.rowStatusUntil == nil {
+		m.cacheView.rowStatusUntil = make(map[string]int)
+	}
+	m.cacheView.rowStatus[identifier] = "note:" + note
+	m.cacheView.rowStatusUntil[identifier] = m.tick + 14
+	return m
+}
+
+func (m Model) expireTransientRowNotes() Model {
+	for i := range m.collectionViews {
+		for rowIndex, until := range m.collectionViews[i].rowStatusUntil {
+			if until > m.tick {
+				continue
+			}
+			if strings.HasPrefix(strings.TrimSpace(m.collectionViews[i].rowStatus[rowIndex]), "note:") {
+				delete(m.collectionViews[i].rowStatus, rowIndex)
+			}
+			delete(m.collectionViews[i].rowStatusUntil, rowIndex)
+		}
+	}
+	for identifier, until := range m.cacheView.rowStatusUntil {
+		if until > m.tick {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(m.cacheView.rowStatus[identifier]), "note:") {
+			delete(m.cacheView.rowStatus, identifier)
+		}
+		delete(m.cacheView.rowStatusUntil, identifier)
+	}
+	return m
 }
 
 func scheduleDashTick() tea.Cmd {
@@ -261,6 +330,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.doctorOverlay != nil {
 			m.doctorOverlay.tick = m.tick
 		}
+		m = m.expireTransientRowNotes()
 		m = m.drainJobEvents()
 		return m, scheduleDashTick()
 
@@ -918,30 +988,32 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		return m.startCollectionRenderJob(cvIdx, append([]csvplan.CollectionRow(nil), v.rows...), true), nil
 
 	case "v":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			return m, nil
 		}
 		if len(v.rows) == 0 {
 			return m, nil
 		}
+		vlcPath := m.vlcPath()
 		collName := m.collectionNames[cvIdx]
 		coll := m.collections[collName]
 		row := v.rows[v.cursor]
+		m = m.setCollectionRowNote(cvIdx, row.Index, "opening vlc...")
 		segPath := resolveRenderedSegmentPath(m.pp, m.cfg, collName, coll, row)
 		if _, err := os.Stat(segPath); err == nil {
-			if err := playFileInVLC(m.vlcPath, segPath); err != nil {
-				m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-			} else {
-				m.statusMsg = fmt.Sprintf("Playing rendered: %s", filepath.Base(segPath))
+			if err := playFileInVLC(vlcPath, segPath); err != nil {
+				m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 			}
 		} else {
 			srcPath := m.resolveVideoPath(row)
 			if srcPath != "" {
-				if err := playFileInVLC(m.vlcPath, srcPath); err != nil {
-					m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-				} else {
-					m.statusMsg = fmt.Sprintf("Playing source (not yet rendered): %s", filepath.Base(srcPath))
+				stopSeconds := row.Start.Seconds()
+				if row.DurationSeconds > 0 {
+					stopSeconds += float64(row.DurationSeconds)
+				}
+				if err := playClipInVLC(vlcPath, srcPath, row.Start.Seconds(), stopSeconds); err != nil {
+					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			} else {
 				m.statusMsg = "No rendered or cached file found"
@@ -950,28 +1022,27 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		return m, nil
 
 	case "V":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			return m, nil
 		}
 		if len(v.rows) == 0 {
 			return m, nil
 		}
+		vlcPath := m.vlcPath()
 		collName := m.collectionNames[cvIdx]
 		coll := m.collections[collName]
+		m.collectionViews[cvIdx].activity = "opening vlc..."
 		var allPaths []string
 		for _, row := range v.rows {
 			allPaths = append(allPaths, resolveRenderedSegmentPath(m.pp, m.cfg, collName, coll, row))
 		}
 		tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
-		played, total, err := playPlaylistInVLC(m.vlcPath, allPaths, tmpDir)
+		_, _, err := playPlaylistInVLC(vlcPath, allPaths, tmpDir)
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-		} else if played == total {
-			m.statusMsg = fmt.Sprintf("Playing all %d %s segments in VLC", played, collName)
-		} else {
-			m.statusMsg = fmt.Sprintf("Playing %d/%d %s segments (%d not yet rendered)", played, total, collName, total-played)
+			m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 		}
+		m.collectionViews[cvIdx].activity = ""
 		return m, nil
 	}
 
@@ -1093,17 +1164,16 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return m, nil
 
 	case "v":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			return m, nil
 		}
+		vlcPath := m.vlcPath()
 		// Concat row: play the concat output.
 		if v.concatFocus {
 			if v.concatExists {
-				if err := playFileInVLC(m.vlcPath, v.concatPath); err != nil {
-					m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-				} else {
-					m.statusMsg = fmt.Sprintf("Playing: %s", filepath.Base(v.concatPath))
+				if err := playFileInVLC(vlcPath, v.concatPath); err != nil {
+					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			} else {
 				m.statusMsg = "Not yet exported — press c to concatenate"
@@ -1118,40 +1188,33 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			}
 			if len(paths) == 1 {
 				if _, err := os.Stat(paths[0]); err == nil {
-					if err := playFileInVLC(m.vlcPath, paths[0]); err != nil {
-						m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-					} else {
-						m.statusMsg = fmt.Sprintf("Playing: %s", filepath.Base(paths[0]))
+					if err := playFileInVLC(vlcPath, paths[0]); err != nil {
+						m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 					}
 				} else {
 					m.statusMsg = "Segment not yet rendered"
 				}
 			} else {
 				tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
-				played, total, err := playPlaylistInVLC(m.vlcPath, paths, tmpDir)
+				_, _, err := playPlaylistInVLC(vlcPath, paths, tmpDir)
 				if err != nil {
-					m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-				} else if played == total {
-					m.statusMsg = fmt.Sprintf("Playing %d segments in VLC", played)
-				} else {
-					m.statusMsg = fmt.Sprintf("Playing %d/%d segments (%d not yet rendered)", played, total, total-played)
+					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			}
 		}
 		return m, nil
 
 	case "V":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			return m, nil
 		}
+		vlcPath := m.vlcPath()
 		// Concat row: V plays just the concat file (same as v).
 		if v.concatFocus {
 			if v.concatExists {
-				if err := playFileInVLC(m.vlcPath, v.concatPath); err != nil {
-					m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-				} else {
-					m.statusMsg = fmt.Sprintf("Playing: %s", filepath.Base(v.concatPath))
+				if err := playFileInVLC(vlcPath, v.concatPath); err != nil {
+					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			} else {
 				m.statusMsg = "Not yet exported — press c to concatenate"
@@ -1164,13 +1227,9 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, nil
 		}
 		tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
-		played, total, err := playPlaylistInVLC(m.vlcPath, allPaths, tmpDir)
+		_, _, err := playPlaylistInVLC(vlcPath, allPaths, tmpDir)
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-		} else if played == total {
-			m.statusMsg = fmt.Sprintf("Playing full timeline: %d segments in VLC", played)
-		} else {
-			m.statusMsg = fmt.Sprintf("Playing timeline: %d/%d segments (%d not yet rendered)", played, total, total-played)
+			m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 		}
 		return m, nil
 	}
@@ -1232,8 +1291,8 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cacheView = v
 		return m, nil
 	case "v":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			m.cacheView = v
 			return m, nil
 		}
@@ -1241,19 +1300,19 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cacheView = v
 			return m, nil
 		}
+		vlcPath := m.vlcPath()
 		entry := entries[v.cursor]
+		m = m.setCacheRowNote(entry.Identifier, "opening vlc...")
 		if entry.CachedPath != "" {
-			if err := playFileInVLC(m.vlcPath, entry.CachedPath); err != nil {
-				m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-			} else {
-				m.statusMsg = fmt.Sprintf("Playing source: %s", filepath.Base(entry.CachedPath))
+			if err := playFileInVLC(vlcPath, entry.CachedPath); err != nil {
+				m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 			}
 		} else {
 			m.statusMsg = "No cached file"
 		}
 	case "V":
-		if !m.vlcFound {
-			m.statusMsg = "VLC not found — install from videolan.org to preview clips"
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
 			m.cacheView = v
 			return m, nil
 		}
@@ -1267,13 +1326,14 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				allPaths = append(allPaths, e.CachedPath)
 			}
 		}
+		vlcPath := m.vlcPath()
+		m.cacheView.activity = "opening vlc..."
 		tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
-		played, total, err := playPlaylistInVLC(m.vlcPath, allPaths, tmpDir)
+		_, _, err := playPlaylistInVLC(vlcPath, allPaths, tmpDir)
 		if err != nil {
-			m.statusMsg = fmt.Sprintf("VLC error: %v", err)
-		} else {
-			m.statusMsg = fmt.Sprintf("Playing all %d/%d cached sources in VLC", played, total)
+			m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 		}
+		m.cacheView.activity = ""
 	}
 
 	m.cacheView = v
@@ -2263,6 +2323,13 @@ func writeCollection(m Model, cvIdx int) Model {
 	collName := m.collectionNames[cvIdx]
 	coll := m.collections[collName]
 	v := m.collectionViews[cvIdx]
+	oldCursor := v.cursor
+	oldScrollTop := v.scrollTop
+	oldEditing := v.editing
+	oldEditFieldIdx := v.editFieldIdx
+	oldEditValue := v.editValue
+	oldAddFocus := v.addFocus
+	oldAddBuffer := v.addBuffer
 
 	coll.Rows = v.rows
 	if coll.PlanFormat != "yaml" {
@@ -2272,13 +2339,21 @@ func writeCollection(m Model, cvIdx int) Model {
 
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Write error: %v", err)
+		return m
 	}
 
 	m.collections[collName] = coll
-
-	// Recompute row states after mutation.
-	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx)
-
+	m = reloadCollection(m, cvIdx)
+	v = m.collectionViews[cvIdx]
+	v.cursor = min(oldCursor, max(0, len(v.rows)-1))
+	v.scrollTop = oldScrollTop
+	v.editing = oldEditing
+	v.editFieldIdx = oldEditFieldIdx
+	v.editValue = oldEditValue
+	v.addFocus = oldAddFocus
+	v.addBuffer = oldAddBuffer
+	v.autoScroll()
+	m.collectionViews[cvIdx] = v
 	return m
 }
 

@@ -42,17 +42,18 @@ type collectionColumn struct {
 
 // collectionView holds the state for a single collection's plan data table.
 type collectionView struct {
-	name      string
-	planPath  string
-	rows      []csvplan.CollectionRow
-	collCfg   project.Collection
-	columns   []collectionColumn
-	states    []rowState // per-row cache/render state
-	rowStatus map[int]string
-	activity  string
-	tick      int
-	cursor    int
-	scrollTop int
+	name           string
+	planPath       string
+	rows           []csvplan.CollectionRow
+	collCfg        project.Collection
+	columns        []collectionColumn
+	states         []rowState // per-row cache/render state
+	rowStatus      map[int]string
+	rowStatusUntil map[int]int
+	activity       string
+	tick           int
+	cursor         int
+	scrollTop      int
 
 	// Inline edit state (set by model when modeInlineEdit is active).
 	editing      bool
@@ -129,13 +130,14 @@ func discoverColumns(rows []csvplan.CollectionRow, declaredColumns []string) []c
 func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index) collectionView {
 	states := computeRowStates(coll, pp, cfg, idx)
 	return collectionView{
-		name:      coll.Name,
-		planPath:  coll.Plan,
-		rows:      coll.Rows,
-		collCfg:   coll,
-		columns:   discoverColumns(coll.Rows, coll.Headers),
-		states:    states,
-		rowStatus: make(map[int]string),
+		name:           coll.Name,
+		planPath:       coll.Plan,
+		rows:           coll.Rows,
+		collCfg:        coll,
+		columns:        discoverColumns(coll.Rows, coll.Headers),
+		states:         states,
+		rowStatus:      make(map[int]string),
+		rowStatusUntil: make(map[int]int),
 	}
 }
 
@@ -279,8 +281,17 @@ func (v collectionView) view() string {
 
 		isEditRow := v.editing && i == v.cursor
 
-		status := compactRowStatus(v.rowStatus[row.Index], v.tick)
+		rawStatus := v.rowStatus[row.Index]
+		status := compactRowStatus(rawStatus, v.tick)
 		gutter := fmt.Sprintf("%s%-*s %-*s", cursor, idxWidth-2, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
+		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+			b.WriteString(gutter)
+			b.WriteString(strings.Repeat(" ", gutterGapWidth))
+			noteWidth := max(12, v.termWidth-len(gutter)-gutterGapWidth-2)
+			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			b.WriteByte('\n')
+			continue
+		}
 		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])
@@ -421,6 +432,8 @@ func compactRowStatus(raw string, tick int) string {
 	switch {
 	case status == "":
 		return ""
+	case strings.HasPrefix(status, "note:"):
+		return ""
 	case status == "queued":
 		return "~"
 	case status == "cached":
@@ -442,4 +455,12 @@ func compactRowStatus(raw string, tick int) string {
 	default:
 		return status
 	}
+}
+
+func inlineRowNote(raw string) string {
+	status := strings.TrimSpace(raw)
+	if !strings.HasPrefix(status, "note:") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(status, "note:"))
 }
