@@ -21,7 +21,7 @@ type timelineView struct {
 	resolved []project.TimelineEntry
 
 	// Data references for rendering labels.
-	collections    map[string]project.Collection
+	collections     map[string]project.Collection
 	collectionNames []string
 
 	// Cursor and scroll for sequence entries panel.
@@ -35,10 +35,12 @@ type timelineView struct {
 	focusPanel int
 
 	// Concat output.
-	concatPath   string // path to the concat output file
-	concatExists bool   // whether the file exists on disk
-	concatSize   int64  // file size in bytes
-	concatFocus  bool   // cursor is on the concat row
+	concatPath     string // path to the concat output file
+	concatExists   bool   // whether the file exists on disk
+	concatSize     int64  // file size in bytes
+	concatFocus    bool   // cursor is on the concat row
+	seqStatus      map[int]string
+	seqStatusUntil map[int]int
 
 	// Terminal dimensions for viewport calculation.
 	termWidth  int
@@ -55,6 +57,8 @@ func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collec
 		concatPath:      concatPath,
 		concatExists:    concatExists,
 		concatSize:      concatSize,
+		seqStatus:       make(map[int]string),
+		seqStatusUntil:  make(map[int]int),
 	}
 }
 
@@ -103,6 +107,12 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 
 	seqH := v.seqPanelHeight()
 	visibleSeq := seqH
+	if v.seqCursor >= 0 && v.seqCursor < len(v.sequence) && inlineRowNote(v.seqStatus[v.seqCursor]) != "" {
+		visibleSeq--
+	}
+	if visibleSeq < 1 {
+		visibleSeq = 1
+	}
 	startSeq := v.seqScrollTop
 	endSeq := startSeq + visibleSeq
 	if endSeq > len(v.sequence) {
@@ -112,6 +122,10 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	if startSeq > 0 {
 		b.WriteString(faint.Render(fmt.Sprintf("  ↑ %d more above", startSeq)))
 		b.WriteByte('\n')
+	}
+	rendered := endSeq - startSeq
+	if startSeq > 0 {
+		rendered++
 	}
 
 	for i := startSeq; i < endSeq; i++ {
@@ -145,6 +159,12 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			b.WriteString(fadeDim.Render("  " + fade))
 		}
 		b.WriteByte('\n')
+		if note := inlineRowNote(v.seqStatus[i]); note != "" && i == v.seqCursor && v.focusPanel == 0 {
+			b.WriteString("   ")
+			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, max(12, v.termWidth-6))))
+			b.WriteByte('\n')
+			rendered++
+		}
 	}
 
 	if len(v.sequence) == 0 {
@@ -158,10 +178,6 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	}
 
 	// Pad remaining sequence panel lines.
-	rendered := endSeq - startSeq
-	if startSeq > 0 {
-		rendered++
-	}
 	if endSeq < len(v.sequence) {
 		rendered++
 	}

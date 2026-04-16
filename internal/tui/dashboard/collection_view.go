@@ -59,6 +59,7 @@ type collectionView struct {
 	editing      bool
 	editFieldIdx int
 	editValue    string
+	editCursor   int
 
 	// Add-clip slot state (set by model when modeAddClip is active).
 	addFocus  bool
@@ -181,6 +182,11 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 func (v collectionView) visibleRowCount() int {
 	// -10 instead of -9 to reserve a line for the persistent Add Clip slot.
 	h := v.termHeight - 10
+	if v.cursor >= 0 && v.cursor < len(v.rows) {
+		if inlineRowNote(v.rowStatus[v.rows[v.cursor].Index]) != "" {
+			h--
+		}
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -284,14 +290,6 @@ func (v collectionView) view() string {
 		rawStatus := v.rowStatus[row.Index]
 		status := compactRowStatus(rawStatus, v.tick)
 		gutter := fmt.Sprintf("%s%-*s %-*s", cursor, idxWidth-2, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
-		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
-			b.WriteString(gutter)
-			b.WriteString(strings.Repeat(" ", gutterGapWidth))
-			noteWidth := max(12, v.termWidth-len(gutter)-gutterGapWidth-2)
-			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
-			b.WriteByte('\n')
-			continue
-		}
 		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])
@@ -299,7 +297,7 @@ func (v collectionView) view() string {
 
 			// Inline edit: show edit buffer with cursor on the active field.
 			if isEditRow && j == v.editFieldIdx {
-				display := v.editValue + "█"
+				display := renderCursorField(v.editValue, v.editCursor)
 				display = truncateCollectionValue(display, w)
 				parts = append(parts, editStyle.Render(fmt.Sprintf("%-*s", w, display)))
 				continue
@@ -325,6 +323,12 @@ func (v collectionView) view() string {
 			b.WriteString(strings.Join(parts[1:], "  "))
 		}
 		b.WriteByte('\n')
+		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+			b.WriteString(strings.Repeat(" ", gutterWidth+gutterGapWidth))
+			noteWidth := max(12, v.termWidth-gutterWidth-gutterGapWidth-2)
+			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			b.WriteByte('\n')
+		}
 	}
 
 	if endRow < len(v.rows) {
