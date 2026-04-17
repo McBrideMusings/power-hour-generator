@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
@@ -64,8 +65,39 @@ func TestHandleCollectionKeyWithMutationsDeleteUsesX(t *testing.T) {
 	if !strings.Contains(got.deleteDesc, "row 1") {
 		t.Fatalf("deleteDesc = %q, want row 1", got.deleteDesc)
 	}
+	if got.collectionViews[0].confirmDelete == "" {
+		t.Fatal("confirmDelete empty, want inline prompt set on the active collection view")
+	}
+	if !strings.Contains(got.collectionViews[0].confirmDelete, "[y/n]") {
+		t.Fatalf("confirmDelete = %q, want [y/n] prompt", got.collectionViews[0].confirmDelete)
+	}
 	if len(got.collectionViews[0].rows) != 1 {
 		t.Fatalf("rows changed before confirmation: %d", len(got.collectionViews[0].rows))
+	}
+}
+
+func TestHandleConfirmDeleteKeyClearsInlinePrompt(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].confirmDelete = "Delete row 1? [y/n]"
+	m.cacheView.confirmDelete = "Delete cache entry? [y/n]"
+	m.timelineView.confirmDelete = "Delete sequence? [y/n]"
+	m.mode = modeConfirmDelete
+	m.deleteDesc = `row 1 "First Song"`
+
+	gotModel, _ := m.handleConfirmDeleteKey(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("n"),
+	})
+	got := gotModel.(Model)
+
+	if got.collectionViews[0].confirmDelete != "" {
+		t.Fatalf("collection confirmDelete = %q, want empty after cancel", got.collectionViews[0].confirmDelete)
+	}
+	if got.cacheView.confirmDelete != "" {
+		t.Fatalf("cache confirmDelete = %q, want empty after cancel", got.cacheView.confirmDelete)
+	}
+	if got.timelineView.confirmDelete != "" {
+		t.Fatalf("timeline confirmDelete = %q, want empty after cancel", got.timelineView.confirmDelete)
 	}
 }
 
@@ -91,6 +123,9 @@ func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
 	}
 	if !strings.Contains(got.deleteDesc, "songs") {
 		t.Fatalf("deleteDesc = %q, want songs", got.deleteDesc)
+	}
+	if got.timelineView.confirmDelete == "" {
+		t.Fatal("confirmDelete empty, want inline prompt set on the timeline view")
 	}
 }
 
@@ -221,6 +256,250 @@ func TestInlineEditInsertAndBackspaceAtCaret(t *testing.T) {
 	}
 }
 
+func TestProcessAddRowUsesCachedLinkMetadata(t *testing.T) {
+	m := testCollectionModel(t)
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"youtube:abc123": {
+				Identifier: "youtube:abc123",
+				Source:     "https://youtube.com/watch?v=abc123",
+				Title:      "Cache Song",
+				Artist:     "Cache Artist",
+			},
+		},
+		Links: map[string]string{
+			"https://youtube.com/watch?v=abc123": "youtube:abc123",
+		},
+	}
+
+	gotModel, cmd := m.processAddRow("https://youtube.com/watch?v=abc123&list=foo")
+	got := gotModel.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no probe command for cached link")
+	}
+	if len(got.collectionViews[0].rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got.collectionViews[0].rows))
+	}
+	row := got.collectionViews[0].rows[1]
+	if row.CustomFields["title"] != "Cache Song" {
+		t.Fatalf("title = %q, want Cache Song", row.CustomFields["title"])
+	}
+	if row.CustomFields["artist"] != "Cache Artist" {
+		t.Fatalf("artist = %q, want Cache Artist", row.CustomFields["artist"])
+	}
+	if got.collectionViews[0].rowStatus[row.Index] != "note:recognized cached link https://youtube.com/watch?v=abc123" {
+		t.Fatalf("row status = %q", got.collectionViews[0].rowStatus[row.Index])
+	}
+}
+
+func TestInlineEditTabDoesNotApplyFuzzyCacheMatch(t *testing.T) {
+	m := testCollectionModel(t)
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"youtube:match1": {
+				Identifier: "youtube:match1",
+				Source:     "https://example.com/watch?v=match1",
+				Title:      "Midnight City",
+				Artist:     "M83",
+			},
+		},
+		Links: map[string]string{
+			"https://example.com/watch?v=match1": "youtube:match1",
+		},
+	}
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "midnight"
+	m.editOriginal = ""
+	m.editCursor = len(m.editValue)
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = m.editValue
+	m.collectionViews[0].editCursor = m.editCursor
+	m.collectionViews[0].rows[0].CustomFields["title"] = ""
+	m.collectionViews[0].rows[0].CustomFields["artist"] = ""
+	m.collectionViews[0].rows[0].CustomFields["link"] = ""
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyTab})
+	got := gotModel.(Model)
+
+	if got.editFieldIdx != 1 {
+		t.Fatalf("editFieldIdx = %d, want 1", got.editFieldIdx)
+	}
+	if got.editValue != "" {
+		t.Fatalf("editValue = %q, want empty artist field", got.editValue)
+	}
+}
+
+func TestAddClipTabAddsBestCachedMatch(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"youtube:ninara": {
+				Identifier: "youtube:ninara",
+				Source:     "https://example.com/watch?v=ninara",
+				Title:      "Ninara",
+				Artist:     "Kora",
+			},
+		},
+		Links: map[string]string{
+			"https://example.com/watch?v=ninara": "youtube:ninara",
+		},
+	}
+	m.cfg.Cache = config.Default().Cache
+	collCfg := m.cfg.Collections["songs"]
+	collCfg.CacheSearchProfile = "song_lookup"
+	m.cfg.Collections["songs"] = collCfg
+	coll := m.collections["songs"]
+	coll.Config.CacheSearchProfile = "song_lookup"
+	m.collections["songs"] = coll
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "Ninara"
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = "Ninara"
+	m = m.refreshAddClipHint(0)
+
+	gotModel, cmd := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyTab})
+	got := gotModel.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no async command when adding fuzzy cache match")
+	}
+	if len(got.collectionViews[0].rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(got.collectionViews[0].rows))
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.CustomFields["title"] != "Ninara" {
+		t.Fatalf("title = %q, want Ninara", row.CustomFields["title"])
+	}
+	if row.CustomFields["artist"] != "Kora" {
+		t.Fatalf("artist = %q, want Kora", row.CustomFields["artist"])
+	}
+	if row.CustomFields["link"] != "https://example.com/watch?v=ninara" {
+		t.Fatalf("link = %q, want cached link", row.CustomFields["link"])
+	}
+	if got.collectionViews[0].addBuffer != "" {
+		t.Fatalf("addBuffer = %q, want empty", got.collectionViews[0].addBuffer)
+	}
+}
+
+func TestAddClipArrowKeysSelectSuggestionForTab(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"one": {Identifier: "one", Source: "https://example.com/1", Title: "Ninara", Artist: "Kora"},
+			"two": {Identifier: "two", Source: "https://example.com/2", Title: "Nine Ball", Artist: "Zach Bryan"},
+		},
+		Links: map[string]string{
+			"https://example.com/1": "one",
+			"https://example.com/2": "two",
+		},
+	}
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "ni"
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = "ni"
+	m = m.refreshAddClipHint(0)
+
+	downModel, _ := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyDown})
+	down := downModel.(Model)
+	if down.collectionViews[0].addSelected != 1 {
+		t.Fatalf("addSelected = %d, want 1", down.collectionViews[0].addSelected)
+	}
+
+	gotModel, cmd := down.handleAddClipKey(tea.KeyMsg{Type: tea.KeyTab})
+	got := gotModel.(Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when adding selected fuzzy cache match")
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.CustomFields["title"] != "Nine Ball" {
+		t.Fatalf("title = %q, want Nine Ball", row.CustomFields["title"])
+	}
+}
+
+func TestAddClipBackspaceAndCaretEditBuffer(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "https://youtu.be/abc123?si=test"
+	m.addCursor = len(m.addBuffer)
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = m.addBuffer
+	m.collectionViews[0].addCursor = m.addCursor
+
+	leftModel, _ := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyLeft})
+	left := leftModel.(Model)
+	if left.addCursor != len(m.addBuffer)-1 {
+		t.Fatalf("addCursor after left = %d", left.addCursor)
+	}
+
+	gotModel, _ := left.handleAddClipKey(tea.KeyMsg{Type: tea.KeyBackspace})
+	got := gotModel.(Model)
+	want := "https://youtu.be/abc123?si=tet"
+	if got.addBuffer != want {
+		t.Fatalf("addBuffer = %q, want %q", got.addBuffer, want)
+	}
+	if got.collectionViews[0].addBuffer != want {
+		t.Fatalf("view addBuffer = %q, want %q", got.collectionViews[0].addBuffer, want)
+	}
+	if got.addCursor != len(want)-1 {
+		t.Fatalf("addCursor = %d, want %d", got.addCursor, len(want)-1)
+	}
+}
+
+func TestInlineEditLinkCtrlRStartsProbe(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 4
+	m.editValue = "https://example.com/watch?v=2"
+	m.editOriginal = "https://example.com/watch?v=1"
+	m.editCursor = len(m.editValue)
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 4
+	m.collectionViews[0].editValue = m.editValue
+	m.collectionViews[0].editCursor = m.editCursor
+
+	gotModel, cmd := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	got := gotModel.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected probe command")
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.CustomFields["link"] != "https://example.com/watch?v=2" {
+		t.Fatalf("link = %q, want updated link", row.CustomFields["link"])
+	}
+	if got.collectionViews[0].rowStatus[row.Index] != "probing" {
+		t.Fatalf("row status = %q, want probing", got.collectionViews[0].rowStatus[row.Index])
+	}
+}
+
 func TestProcessDuplicateRowUsesInlineNote(t *testing.T) {
 	m := testCollectionModel(t)
 
@@ -311,7 +590,7 @@ func testCollectionModel(t *testing.T) Model {
 		Name:       "songs",
 		Plan:       planPath,
 		OutputDir:  "songs",
-		Config:     config.CollectionConfig{OutputDir: "songs"},
+		Config:     config.CollectionConfig{OutputDir: "songs", CacheSearchProfile: "song_lookup"},
 		Rows:       []csvplan.CollectionRow{row},
 		Headers:    []string{"title", "artist", "link", "start_time", "duration"},
 		Delimiter:  ',',
@@ -323,6 +602,7 @@ func testCollectionModel(t *testing.T) Model {
 			Collections: map[string]config.CollectionConfig{
 				"songs": coll.Config,
 			},
+			Cache: config.Default().Cache,
 		},
 		pp:              pp,
 		collections:     map[string]project.Collection{"songs": coll},

@@ -42,6 +42,10 @@ type timelineView struct {
 	seqStatus      map[int]string
 	seqStatusUntil map[int]int
 
+	// Inline confirm prompt rendered beneath the cursor sequence row (set by
+	// model when modeConfirmDelete is active). Empty = no pending confirm.
+	confirmDelete string
+
 	// Terminal dimensions for viewport calculation.
 	termWidth  int
 	termHeight int
@@ -107,8 +111,10 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 
 	seqH := v.seqPanelHeight()
 	visibleSeq := seqH
-	if v.seqCursor >= 0 && v.seqCursor < len(v.sequence) && inlineRowNote(v.seqStatus[v.seqCursor]) != "" {
-		visibleSeq--
+	if v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
+		if v.confirmDelete != "" || inlineRowNote(v.seqStatus[v.seqCursor], 0) != "" {
+			visibleSeq--
+		}
 	}
 	if visibleSeq < 1 {
 		visibleSeq = 1
@@ -159,7 +165,12 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			b.WriteString(fadeDim.Render("  " + fade))
 		}
 		b.WriteByte('\n')
-		if note := inlineRowNote(v.seqStatus[i]); note != "" && i == v.seqCursor && v.focusPanel == 0 {
+		if i == v.seqCursor && v.focusPanel == 0 && v.confirmDelete != "" {
+			b.WriteString("   ")
+			b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, max(12, v.termWidth-6))))
+			b.WriteByte('\n')
+			rendered++
+		} else if note := inlineRowNote(v.seqStatus[i], 0); note != "" && i == v.seqCursor && v.focusPanel == 0 {
 			b.WriteString("   ")
 			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, max(12, v.termWidth-6))))
 			b.WriteByte('\n')

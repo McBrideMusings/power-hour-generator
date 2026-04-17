@@ -15,7 +15,7 @@ CONTEXT.md
 - Avoid creating multiple sources of truth: the CSV plan and YAML config are authoritative inputs, and caches should be derived from them rather than storing duplicate state elsewhere.
 - Cached source media lives in `cache/`; assume callers keep that directory up to date if they restructure existing projects.
 - Interactive progress tables (fetch/render) rely on ANSI escapes. The render table currently emits an initial “pending” snapshot before the live updates; treat the second table as the authoritative state until the UI bug is cleaned up.
-- Always deploy the app after code or behavior changes unless the user explicitly says not to. In this repo, deploy means running `go install ./cmd/powerhour` before finishing the task.
+- After every code or behavior change, run `go install ./cmd/powerhour` unless the user explicitly says not to. Treat that install step as required before closing the task.
 
 ## CSV schema (order = playback/order index)
 Columns:

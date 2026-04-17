@@ -28,10 +28,28 @@ func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) 
 	var results []ValidationResult
 	results = append(results, c.validateExternalFiles(projectRoot)...)
 	results = append(results, c.validateOverlayEntries()...)
+	results = append(results, c.validateCacheConfig()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
 	results = append(results, c.validateTimeline(projectRoot)...)
 	return results
+}
+
+var knownCacheFields = map[string]bool{
+	"title":       true,
+	"artist":      true,
+	"album":       true,
+	"track":       true,
+	"uploader":    true,
+	"channel":     true,
+	"upload_date": true,
+	"description": true,
+	"source":      true,
+	"links":       true,
+	"identifier":  true,
+	"id":          true,
+	"extractor":   true,
+	"cached_path": true,
 }
 
 func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {
@@ -90,6 +108,52 @@ func (c Config) validateOverlayEntries() []ValidationResult {
 			})
 		}
 	}
+	return results
+}
+
+func (c Config) validateCacheConfig() []ValidationResult {
+	var results []ValidationResult
+
+	validateFields := func(context string, fields []string) {
+		for _, field := range fields {
+			field = strings.TrimSpace(strings.ToLower(field))
+			if field == "" {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("%s: cache field name cannot be empty", context),
+				})
+				continue
+			}
+			if !knownCacheFields[field] {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("%s: unknown cache field %q", context, field),
+				})
+			}
+		}
+	}
+
+	validateFields("cache.view.primary_fields", c.Cache.View.PrimaryFields)
+	validateFields("cache.view.secondary_fields", c.Cache.View.SecondaryFields)
+	for name, profile := range c.Cache.SearchProfiles {
+		validateFields(fmt.Sprintf("cache.search_profiles.%s.search_fields", name), profile.SearchFields)
+		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.title_fields", name), profile.Fill.TitleFields)
+		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.artist_fields", name), profile.Fill.ArtistFields)
+		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.link_fields", name), profile.Fill.LinkFields)
+	}
+	for name, coll := range c.Collections {
+		profileName := strings.TrimSpace(coll.CacheSearchProfile)
+		if profileName == "" {
+			continue
+		}
+		if _, ok := c.Cache.SearchProfiles[profileName]; !ok {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("collection %q: cache_search_profile %q does not exist", name, profileName),
+			})
+		}
+	}
+
 	return results
 }
 

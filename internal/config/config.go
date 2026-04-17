@@ -19,17 +19,18 @@ type OverlayEntry struct {
 
 // CollectionConfig defines a collection of clips with configurable CSV headers.
 type CollectionConfig struct {
-	Plan           string         `yaml:"plan"`
-	File           string         `yaml:"file,omitempty"`
-	Duration       int            `yaml:"duration,omitempty"`
-	OutputDir      string         `yaml:"output_dir"`
-	Fade           float64        `yaml:"fade,omitempty"`
-	FadeIn         float64        `yaml:"fade_in,omitempty"`
-	FadeOut        float64        `yaml:"fade_out,omitempty"`
-	Overlays       []OverlayEntry `yaml:"overlays,omitempty"`
-	LinkHeader     string         `yaml:"link_header"`
-	StartHeader    string         `yaml:"start_header"`
-	DurationHeader string         `yaml:"duration_header"`
+	Plan               string         `yaml:"plan"`
+	File               string         `yaml:"file,omitempty"`
+	Duration           int            `yaml:"duration,omitempty"`
+	OutputDir          string         `yaml:"output_dir"`
+	Fade               float64        `yaml:"fade,omitempty"`
+	FadeIn             float64        `yaml:"fade_in,omitempty"`
+	FadeOut            float64        `yaml:"fade_out,omitempty"`
+	Overlays           []OverlayEntry `yaml:"overlays,omitempty"`
+	LinkHeader         string         `yaml:"link_header"`
+	StartHeader        string         `yaml:"start_header"`
+	DurationHeader     string         `yaml:"duration_header"`
+	CacheSearchProfile string         `yaml:"cache_search_profile,omitempty"`
 }
 
 // TimelineConfig defines the playback sequence for the power hour.
@@ -41,8 +42,8 @@ type TimelineConfig struct {
 // Exactly one of Collection or File must be set.
 type SequenceEntry struct {
 	Collection string            `yaml:"collection,omitempty"`
-	Count      int               `yaml:"count,omitempty"` // 0 = play all; only valid with Collection
-	File       string            `yaml:"file,omitempty"`  // inline file path; mutually exclusive with Collection
+	Count      int               `yaml:"count,omitempty"`      // 0 = play all; only valid with Collection
+	File       string            `yaml:"file,omitempty"`       // inline file path; mutually exclusive with Collection
 	Interleave *InterleaveConfig `yaml:"interleave,omitempty"` // only valid with Collection
 	Fade       float64           `yaml:"fade,omitempty"`
 	FadeIn     float64           `yaml:"fade_in,omitempty"`
@@ -131,9 +132,35 @@ type Config struct {
 	Files           FileOverrides               `yaml:"files"`
 	Tools           ToolPins                    `yaml:"tools"`
 	Downloads       DownloadsConfig             `yaml:"downloads"`
+	Cache           CacheConfig                 `yaml:"cache"`
 	Library         LibraryConfig               `yaml:"library"`
 	SegmentsBaseDir string                      `yaml:"segments_base_dir"`
 	Encoding        EncodingConfig              `yaml:"encoding,omitempty"`
+}
+
+// CacheConfig controls how cache metadata is displayed and searched in the TUI.
+type CacheConfig struct {
+	View           CacheViewConfig               `yaml:"view"`
+	SearchProfiles map[string]CacheSearchProfile `yaml:"search_profiles,omitempty"`
+}
+
+// CacheViewConfig controls the cache tab's metadata columns via ordered fallbacks.
+type CacheViewConfig struct {
+	PrimaryFields   []string `yaml:"primary_fields,omitempty"`
+	SecondaryFields []string `yaml:"secondary_fields,omitempty"`
+}
+
+// CacheSearchProfile controls add-slot fuzzy search and row fill behavior.
+type CacheSearchProfile struct {
+	SearchFields []string        `yaml:"search_fields,omitempty"`
+	Fill         CacheFillConfig `yaml:"fill,omitempty"`
+}
+
+// CacheFillConfig controls which cache metadata fills row fields, in order.
+type CacheFillConfig struct {
+	TitleFields  []string `yaml:"title_fields,omitempty"`
+	ArtistFields []string `yaml:"artist_fields,omitempty"`
+	LinkFields   []string `yaml:"link_fields,omitempty"`
 }
 
 // ToolPins captures optional version pinning for managed external tools.
@@ -278,12 +305,13 @@ func Default() Config {
 		},
 		Collections: map[string]CollectionConfig{
 			"songs": {
-				Plan:           "songs.yaml",
-				OutputDir:      "songs",
-				Overlays:       []OverlayEntry{{Type: "song-info"}},
-				LinkHeader:     "link",
-				StartHeader:    "start_time",
-				DurationHeader: "duration",
+				Plan:               "songs.yaml",
+				OutputDir:          "songs",
+				Overlays:           []OverlayEntry{{Type: "song-info"}},
+				LinkHeader:         "link",
+				StartHeader:        "start_time",
+				DurationHeader:     "duration",
+				CacheSearchProfile: "song_lookup",
 			},
 			"interstitials": {
 				Plan:           "interstitials.yaml",
@@ -312,8 +340,24 @@ func Default() Config {
 		Plan: PlanConfig{
 			DefaultDurationSec: 60,
 		},
-		Tools:           ToolPins{},
-		Downloads:       DownloadsConfig{FilenameTemplate: "$ID"},
+		Tools:     ToolPins{},
+		Downloads: DownloadsConfig{FilenameTemplate: "$ID"},
+		Cache: CacheConfig{
+			View: CacheViewConfig{
+				PrimaryFields:   []string{"title", "track"},
+				SecondaryFields: []string{"artist", "uploader", "channel"},
+			},
+			SearchProfiles: map[string]CacheSearchProfile{
+				"song_lookup": {
+					SearchFields: []string{"title", "artist"},
+					Fill: CacheFillConfig{
+						TitleFields:  []string{"title", "track"},
+						ArtistFields: []string{"artist", "uploader", "channel"},
+						LinkFields:   []string{"source", "links"},
+					},
+				},
+			},
+		},
 		SegmentsBaseDir: "segments",
 	}
 }
@@ -414,6 +458,7 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.Downloads.FilenameTemplate) == "" {
 		c.Downloads.FilenameTemplate = defaults.Downloads.FilenameTemplate
 	}
+	c.Cache.applyDefaults(defaults.Cache)
 	if strings.TrimSpace(c.SegmentsBaseDir) == "" {
 		c.SegmentsBaseDir = "segments"
 	}
@@ -627,6 +672,8 @@ func (c *Config) applyCollectionDefaults() {
 			collection.DurationHeader = "duration"
 		}
 
+		collection.CacheSearchProfile = strings.TrimSpace(collection.CacheSearchProfile)
+
 		// Apply default output directory
 		if strings.TrimSpace(collection.OutputDir) == "" {
 			collection.OutputDir = name
@@ -634,6 +681,77 @@ func (c *Config) applyCollectionDefaults() {
 
 		c.Collections[name] = collection
 	}
+}
+
+func (c *CacheConfig) applyDefaults(defaults CacheConfig) {
+	if c == nil {
+		return
+	}
+	c.View.PrimaryFields = normalizeCacheFieldList(c.View.PrimaryFields)
+	c.View.SecondaryFields = normalizeCacheFieldList(c.View.SecondaryFields)
+	if len(c.View.PrimaryFields) == 0 {
+		c.View.PrimaryFields = append([]string(nil), defaults.View.PrimaryFields...)
+	}
+	if len(c.View.SecondaryFields) == 0 {
+		c.View.SecondaryFields = append([]string(nil), defaults.View.SecondaryFields...)
+	}
+	if c.SearchProfiles == nil {
+		c.SearchProfiles = map[string]CacheSearchProfile{}
+	}
+	for name, profile := range defaults.SearchProfiles {
+		existing, ok := c.SearchProfiles[name]
+		if !ok {
+			c.SearchProfiles[name] = profile
+			continue
+		}
+		existing.applyDefaults(profile)
+		c.SearchProfiles[name] = existing
+	}
+}
+
+func (p *CacheSearchProfile) applyDefaults(defaults CacheSearchProfile) {
+	if p == nil {
+		return
+	}
+	p.SearchFields = normalizeCacheFieldList(p.SearchFields)
+	p.Fill.TitleFields = normalizeCacheFieldList(p.Fill.TitleFields)
+	p.Fill.ArtistFields = normalizeCacheFieldList(p.Fill.ArtistFields)
+	p.Fill.LinkFields = normalizeCacheFieldList(p.Fill.LinkFields)
+	if len(p.SearchFields) == 0 {
+		p.SearchFields = append([]string(nil), defaults.SearchFields...)
+	}
+	if len(p.Fill.TitleFields) == 0 {
+		p.Fill.TitleFields = append([]string(nil), defaults.Fill.TitleFields...)
+	}
+	if len(p.Fill.ArtistFields) == 0 {
+		p.Fill.ArtistFields = append([]string(nil), defaults.Fill.ArtistFields...)
+	}
+	if len(p.Fill.LinkFields) == 0 {
+		p.Fill.LinkFields = append([]string(nil), defaults.Fill.LinkFields...)
+	}
+}
+
+func (c Config) CacheSearchProfile(name string) (CacheSearchProfile, bool) {
+	if len(c.Cache.SearchProfiles) == 0 {
+		return CacheSearchProfile{}, false
+	}
+	profile, ok := c.Cache.SearchProfiles[strings.TrimSpace(name)]
+	return profile, ok
+}
+
+func normalizeCacheFieldList(fields []string) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(strings.ToLower(field))
+		if field == "" {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
 }
 
 // ValidateCollections validates collection configurations and returns errors.
