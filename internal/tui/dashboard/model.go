@@ -412,7 +412,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Concat error: %v", msg.err)
 		}
 		m = reloadState(m)
-		m.timelineView.concatPath, m.timelineView.concatExists, m.timelineView.concatSize = findConcatOutput(m.pp.Root)
+		m.timelineView.concatPath, m.timelineView.concatExists, m.timelineView.concatSize, m.timelineView.concatModTime = findConcatOutput(m.pp.Root)
 		return m, nil
 
 	case fetchDoneMsg:
@@ -635,6 +635,9 @@ func (m Model) handleConfirmDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.processDeleteCacheEntry()
 		}
 		if m.activeView == 0 {
+			if m.timelineView.concatFocus {
+				return m.processDeleteTimelineOutput(), nil
+			}
 			return m.processDeleteTimelineEntry()
 		}
 		return m.processDeleteRow()
@@ -1283,8 +1286,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		if coll.Plan == "" {
 			return m, nil
 		}
-		c := execCommand("open", coll.Plan)
-		c.Start()
+		_ = openExternalPath(coll.Plan)
 		m.statusMsg = fmt.Sprintf("Opened %s — press u to refresh", filepath.Base(coll.Plan))
 		return m, nil
 
@@ -1384,19 +1386,25 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 	case "up", "k":
 		if v.concatFocus {
-			v.concatFocus = false
-			if len(v.sequence) > 0 {
-				v.seqCursor = len(v.sequence) - 1
-				v.autoScrollSeq()
-			}
+			// Already at top.
 		} else if v.focusPanel == 0 {
 			if v.seqCursor > 0 {
 				v.seqCursor--
 				v.autoScrollSeq()
+			} else {
+				v.concatFocus = true
 			}
 		} else {
-			if v.resScrollTop > 0 {
-				v.resScrollTop--
+			if v.resCursor > 0 {
+				v.resCursor--
+				v.autoScrollRes()
+			} else if len(v.sequence) > 0 {
+				v.focusPanel = 0
+				v.seqCursor = len(v.sequence) - 1
+				v.autoScrollSeq()
+			} else {
+				v.focusPanel = 0
+				v.concatFocus = true
 			}
 		}
 		m.timelineView = v
@@ -1404,22 +1412,34 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 	case "down", "j":
 		if v.concatFocus {
-			// Already at bottom, do nothing.
+			v.concatFocus = false
+			if len(v.sequence) > 0 {
+				v.focusPanel = 0
+				v.seqCursor = 0
+				v.autoScrollSeq()
+			} else if len(v.resolved) > 0 {
+				v.focusPanel = 1
+				v.resCursor = 0
+				v.autoScrollRes()
+			}
 		} else if v.focusPanel == 0 {
 			if v.seqCursor < len(v.sequence)-1 {
 				v.seqCursor++
 				v.autoScrollSeq()
-			} else {
-				// Move to concat row.
-				v.concatFocus = true
+			} else if len(v.resolved) > 0 {
+				v.focusPanel = 1
+				if v.resCursor >= len(v.resolved) {
+					v.resCursor = len(v.resolved) - 1
+				}
+				if v.resCursor < 0 {
+					v.resCursor = 0
+				}
+				v.autoScrollRes()
 			}
 		} else {
-			maxScroll := len(v.resolved) - v.resPanelHeight()
-			if maxScroll < 0 {
-				maxScroll = 0
-			}
-			if v.resScrollTop < maxScroll {
-				v.resScrollTop++
+			if v.resCursor < len(v.resolved)-1 {
+				v.resCursor++
+				v.autoScrollRes()
 			}
 		}
 		m.timelineView = v
@@ -1457,6 +1477,13 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 	case "x":
 		if v.concatFocus {
+			if !v.concatExists {
+				return m, nil
+			}
+			m.deleteDesc = fmt.Sprintf("output %q", filepath.Base(v.concatPath))
+			m.mode = modeConfirmDelete
+			v.confirmDelete = fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)
+			m.timelineView = v
 			return m, nil
 		}
 		if v.focusPanel == 0 && len(v.sequence) > 0 {
@@ -1465,7 +1492,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			if entry.File != "" {
 				desc = fmt.Sprintf("file: %s", entry.File)
 			} else if entry.Collection != "" {
-				desc = fmt.Sprintf("%s × %d", entry.Collection, entry.Count)
+				desc = fmt.Sprintf("%s %s", entry.Collection, timelineSliceLabel(entry.Slice))
 			}
 			m.deleteDesc = desc
 			m.mode = modeConfirmDelete
@@ -1484,6 +1511,26 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			m.input = newTextInput("Add sequence entry — [c]ollection or [f]ile path:")
 			return m, nil
 		}
+		return m, nil
+
+	case "e", "E":
+		if v.concatFocus {
+			if !v.concatExists {
+				m.statusMsg = "Not yet exported — press c to concatenate"
+				return m, nil
+			}
+			if err := openExternalPath(v.concatPath); err != nil {
+				m.statusMsg = fmt.Sprintf("Open error: %v", err)
+				return m, nil
+			}
+			m.statusMsg = fmt.Sprintf("Opened %s", filepath.Base(v.concatPath))
+			return m, nil
+		}
+		if err := openExternalPath(m.pp.ConfigFile); err != nil {
+			m.statusMsg = fmt.Sprintf("Open error: %v", err)
+			return m, nil
+		}
+		m.statusMsg = fmt.Sprintf("Opened %s — edit timeline.sequence, then press u to refresh", filepath.Base(m.pp.ConfigFile))
 		return m, nil
 
 	case "v":
@@ -1523,6 +1570,19 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 				if err != nil {
 					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
+			}
+		} else if v.focusPanel == 1 && len(v.resolved) > 0 && v.resCursor >= 0 && v.resCursor < len(v.resolved) {
+			paths := resolveAllTimelineSegmentPaths(m.pp, m.cfg, m.collections)
+			if v.resCursor >= len(paths) {
+				m.statusMsg = "No segment for this playback item"
+				return m, nil
+			}
+			if _, err := os.Stat(paths[v.resCursor]); err == nil {
+				if err := playFileInVLC(vlcPath, paths[v.resCursor]); err != nil {
+					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
+				}
+			} else {
+				m.statusMsg = "Segment not yet rendered"
 			}
 		}
 		return m, nil
@@ -1916,6 +1976,11 @@ func execCommand(name string, args ...string) *exec.Cmd {
 	return exec.Command(name, args...)
 }
 
+var openExternalPath = func(path string) error {
+	name, args := revealCommand(path)
+	return execCommand(name, args...).Start()
+}
+
 func revealCommand(path string) (string, []string) {
 	switch runtime.GOOS {
 	case "darwin":
@@ -2253,58 +2318,7 @@ func buildCollectionRenderSegmentLocal(pp paths.ProjectPaths, cfg config.Config,
 }
 
 func applySequenceEntryFadesLocal(cfg config.Config, clips []project.CollectionClip) {
-	byCollection := make(map[string][]int)
-	for i, cc := range clips {
-		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], i)
-	}
-	for _, indices := range byCollection {
-		sort.Slice(indices, func(a, b int) bool {
-			return clips[indices[a]].Clip.Row.Index < clips[indices[b]].Clip.Row.Index
-		})
-	}
-
-	consumed := make(map[string]int)
-	for _, entry := range cfg.Timeline.Sequence {
-		if entry.Collection == "" {
-			continue
-		}
-		indices := byCollection[entry.Collection]
-		if len(indices) == 0 {
-			continue
-		}
-		start := consumed[entry.Collection]
-		if start >= len(indices) {
-			continue
-		}
-		count := len(indices) - start
-		if entry.Count > 0 && entry.Count < count {
-			count = entry.Count
-		}
-		if count < 0 {
-			count = 0
-		}
-		consumed[entry.Collection] = start + count
-		if entry.Fade == 0 && entry.FadeIn == 0 && entry.FadeOut == 0 {
-			continue
-		}
-		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
-		for _, idx := range indices[start : start+count] {
-			clips[idx].Clip.FadeInSeconds = fadeIn
-			clips[idx].Clip.FadeOutSeconds = fadeOut
-		}
-		if entry.Interleave != nil {
-			ilIndices := byCollection[entry.Interleave.Collection]
-			ilStart := consumed[entry.Interleave.Collection]
-			ilCount := len(ilIndices) - ilStart
-			if ilCount > count {
-				ilCount = count
-			}
-			if ilCount < 0 {
-				ilCount = 0
-			}
-			consumed[entry.Interleave.Collection] = ilStart + ilCount
-		}
-	}
+	project.ApplySequenceEntryFades(cfg, clips)
 }
 
 func resolveDashboardEntryForRow(pp paths.ProjectPaths, idx *cache.Index, row csvplan.Row) (cache.Entry, bool, error) {
@@ -2353,7 +2367,7 @@ func (m Model) processAddTimelineEntry(value string) (tea.Model, tea.Cmd) {
 	var entry config.SequenceEntry
 
 	if value == "c" || value == "C" {
-		// Need a second prompt for collection name — for now, add first collection with count=all.
+		// Need a second prompt for collection name — for now, add the first collection using the default slice.
 		if len(m.collectionNames) > 0 {
 			entry = config.SequenceEntry{Collection: m.collectionNames[0]}
 		} else {
@@ -2412,6 +2426,21 @@ func (m Model) processDeleteTimelineEntry() (tea.Model, tea.Cmd) {
 		m = m.setTimelineSequenceNote(m.timelineView.seqCursor, desc)
 	}
 	return m, nil
+}
+
+func (m Model) processDeleteTimelineOutput() Model {
+	v := m.timelineView
+	if !v.concatExists {
+		return m
+	}
+	if err := os.Remove(v.concatPath); err != nil && !os.IsNotExist(err) {
+		m.statusMsg = fmt.Sprintf("Remove error: %v", err)
+		return m
+	}
+	v.concatPath, v.concatExists, v.concatSize, v.concatModTime = findConcatOutput(m.pp.Root)
+	m.timelineView = v
+	m.statusMsg = "Removed output"
+	return m
 }
 
 // processAddRow adds a new row to the active collection.

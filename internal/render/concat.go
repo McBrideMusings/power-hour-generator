@@ -33,111 +33,43 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 		return resolveSegmentsFallback(pp)
 	}
 
-	// Pre-build per-collection ordered segment paths.
-	collPaths := make(map[string][]TimelineSegmentPath, len(collections))
+	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
+	if err != nil {
+		return nil, err
+	}
+
+	collPaths := make(map[string]map[int]TimelineSegmentPath, len(collections))
 	for name, coll := range collections {
 		ordered, err := buildCollectionPaths(pp, cfg, name, coll)
 		if err != nil {
 			return nil, err
 		}
-		collPaths[name] = ordered
+		byIndex := make(map[int]TimelineSegmentPath, len(ordered))
+		for _, path := range ordered {
+			byIndex[path.Index] = path
+		}
+		collPaths[name] = byIndex
 	}
 
-	// Walk timeline sequence, consuming clips according to Count and Interleave.
-	consumed := make(map[string]int, len(collections))
 	var result []TimelineSegmentPath
-
-	for seqIdx, entry := range cfg.Timeline.Sequence {
-		// Inline file entry: resolve to the normalized segment path under __inline__/.
-		// Raw source files (e.g. .webm) cannot be stream-copied into MP4; they must
-		// be re-encoded first via renderInlineFiles.
-		if entry.File != "" {
-			resolvedFile := resolveInlineFilePath(pp.Root, entry.File)
+	for _, placement := range placements {
+		if placement.SourceFile != "" {
+			resolvedFile := resolveInlineFilePath(pp.Root, placement.SourceFile)
 			result = append(result, TimelineSegmentPath{
 				CollectionName: "__inline__",
-				Path:           InlineSegmentPath(pp.SegmentsDir, seqIdx, resolvedFile),
+				Path:           InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, resolvedFile),
 			})
 			continue
 		}
-
-		mainPaths, ok := collPaths[entry.Collection]
+		pathsByIndex, ok := collPaths[placement.Collection]
 		if !ok {
-			return nil, fmt.Errorf("timeline references unknown collection %q", entry.Collection)
+			return nil, fmt.Errorf("timeline references unknown collection %q", placement.Collection)
 		}
-
-		mainStart := consumed[entry.Collection]
-		mainCount := len(mainPaths) - mainStart
-		if entry.Count > 0 && entry.Count < mainCount {
-			mainCount = entry.Count
-		}
-		mainSlice := mainPaths[mainStart : mainStart+mainCount]
-		consumed[entry.Collection] += mainCount
-
-		if entry.Interleave == nil {
-			result = append(result, mainSlice...)
-			continue
-		}
-
-		// Interleave: splice one clip from the interleave collection after
-		// every `every` main clips.
-		il := entry.Interleave
-		ilPaths, ok := collPaths[il.Collection]
+		path, ok := pathsByIndex[placement.RowIndex]
 		if !ok {
-			return nil, fmt.Errorf("timeline interleave references unknown collection %q", il.Collection)
+			return nil, fmt.Errorf("timeline references missing row %d in collection %q", placement.RowIndex, placement.Collection)
 		}
-		ilStart := consumed[il.Collection]
-		every := il.Every
-		if every <= 0 {
-			every = 1
-		}
-		placement := project.ResolvePlacement(il.Placement)
-
-		ilAvail := len(ilPaths) - ilStart
-		if ilAvail <= 0 {
-			// All interleave clips already consumed; cycle from the beginning.
-			ilStart = 0
-			ilAvail = len(ilPaths)
-		}
-		if ilAvail == 0 {
-			// No interleave clips at all — just append main clips.
-			result = append(result, mainSlice...)
-			continue
-		}
-
-		ilIdx := 0
-		emitIL := func() {
-			absIdx := ilStart + (ilIdx % ilAvail)
-			result = append(result, ilPaths[absIdx])
-			ilIdx++
-		}
-
-		for mainIdx, seg := range mainSlice {
-			isLast := mainIdx == len(mainSlice)-1
-
-			if placement == "before" || placement == "around" {
-				if mainIdx%every == 0 {
-					emitIL()
-				}
-			}
-
-			result = append(result, seg)
-
-			switch placement {
-			case "after":
-				if (mainIdx+1)%every == 0 {
-					emitIL()
-				}
-			case "between":
-				if (mainIdx+1)%every == 0 && !isLast {
-					emitIL()
-				}
-			case "around":
-				if isLast {
-					emitIL()
-				}
-			}
-		}
-		consumed[il.Collection] = ilStart + (ilIdx % ilAvail)
+		result = append(result, path)
 	}
 
 	return result, nil
@@ -157,107 +89,45 @@ func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip)
 		return nil, fmt.Errorf("no timeline sequence configured")
 	}
 
-	// Group clips by collection, sorted by row index.
-	byCollection := make(map[string][]project.CollectionClip)
+	byCollection := make(map[string]map[int]project.CollectionClip)
 	for _, cc := range collClips {
-		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], cc)
+		if byCollection[cc.CollectionName] == nil {
+			byCollection[cc.CollectionName] = make(map[int]project.CollectionClip)
+		}
+		byCollection[cc.CollectionName][cc.Clip.Row.Index] = cc
 	}
-	for name := range byCollection {
-		clips := byCollection[name]
-		sort.Slice(clips, func(i, j int) bool {
-			return clips[i].Clip.Row.Index < clips[j].Clip.Row.Index
+
+	collections := make(map[string]project.Collection, len(byCollection))
+	for name, clips := range byCollection {
+		rows := make([]csvplan.CollectionRow, 0, len(clips))
+		for rowIndex := range clips {
+			rows = append(rows, csvplan.CollectionRow{Index: rowIndex})
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			return rows[i].Index < rows[j].Index
 		})
-		byCollection[name] = clips
+		collections[name] = project.Collection{Name: name, Rows: rows}
 	}
 
-	consumed := make(map[string]int)
+	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
+	if err != nil {
+		return nil, err
+	}
+
 	var result []TimelineClip
-
-	for _, entry := range cfg.Timeline.Sequence {
-		// Inline file entries have no collection clips; skip them.
-		if entry.File != "" {
+	for _, placement := range placements {
+		if placement.SourceFile != "" {
 			continue
 		}
-
-		mainClips, ok := byCollection[entry.Collection]
+		clipsByIndex, ok := byCollection[placement.Collection]
 		if !ok {
-			return nil, fmt.Errorf("timeline references unknown collection %q", entry.Collection)
+			return nil, fmt.Errorf("timeline references unknown collection %q", placement.Collection)
 		}
-
-		mainStart := consumed[entry.Collection]
-		mainCount := len(mainClips) - mainStart
-		if entry.Count > 0 && entry.Count < mainCount {
-			mainCount = entry.Count
-		}
-		mainSlice := mainClips[mainStart : mainStart+mainCount]
-		consumed[entry.Collection] += mainCount
-
-		if entry.Interleave == nil {
-			for _, cc := range mainSlice {
-				result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
-			}
-			continue
-		}
-
-		il := entry.Interleave
-		ilClips, ok := byCollection[il.Collection]
+		cc, ok := clipsByIndex[placement.RowIndex]
 		if !ok {
-			return nil, fmt.Errorf("timeline interleave references unknown collection %q", il.Collection)
+			return nil, fmt.Errorf("timeline references missing row %d in collection %q", placement.RowIndex, placement.Collection)
 		}
-		ilStart := consumed[il.Collection]
-		every := il.Every
-		if every <= 0 {
-			every = 1
-		}
-		placement := project.ResolvePlacement(il.Placement)
-
-		ilAvail := len(ilClips) - ilStart
-		if ilAvail <= 0 {
-			ilStart = 0
-			ilAvail = len(ilClips)
-		}
-		if ilAvail == 0 {
-			for _, cc := range mainSlice {
-				result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
-			}
-			continue
-		}
-
-		ilIdx := 0
-		emitIL := func() {
-			absIdx := ilStart + (ilIdx % ilAvail)
-			ilCC := ilClips[absIdx]
-			result = append(result, TimelineClip{CollectionName: ilCC.CollectionName, CollectionClip: ilCC})
-			ilIdx++
-		}
-
-		for mainIdx, cc := range mainSlice {
-			isLast := mainIdx == len(mainSlice)-1
-
-			if placement == "before" || placement == "around" {
-				if mainIdx%every == 0 {
-					emitIL()
-				}
-			}
-
-			result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
-
-			switch placement {
-			case "after":
-				if (mainIdx+1)%every == 0 {
-					emitIL()
-				}
-			case "between":
-				if (mainIdx+1)%every == 0 && !isLast {
-					emitIL()
-				}
-			case "around":
-				if isLast {
-					emitIL()
-				}
-			}
-		}
-		consumed[il.Collection] = ilStart + (ilIdx % ilAvail)
+		result = append(result, TimelineClip{CollectionName: cc.CollectionName, CollectionClip: cc})
 	}
 
 	return result, nil

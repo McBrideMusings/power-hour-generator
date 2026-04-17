@@ -115,6 +115,38 @@ See [Overlays](/guide/overlays) for profile configuration.
 
 See [Collections](/guide/collections) for multi-CSV project setup.
 
+## Timeline
+
+```yaml
+timeline:
+  sequence:
+    - collection: songs
+      slice: start:30
+      interleave:
+        collection: interstitials
+        every: 1
+        placement: between
+    - collection: songs
+      slice: 31:end
+    - file: videos/outro.mp4
+      fade_in: 0.5
+```
+
+Use `timeline.sequence` to define the final playback order for `powerhour concat` and the timeline TUI.
+
+Collection entries support `slice`, which selects rows relative to that collection's remaining cursor:
+
+- `start:end` — take all remaining rows
+- `start:30` — take the next 30 rows
+- `31:end` — skip the next 30 remaining rows and take the rest
+- `-5:end` — take the last 5 remaining rows
+- `0%:50%` — take the first half of the remaining rows
+- `50%:100%` — take the second half of the remaining rows
+
+When `slice` is omitted it defaults to `start:end`. Percent start bounds round down and percent end bounds round up so percentage splits cover the whole remaining span cleanly.
+
+File entries do not support `slice`; use `file` plus optional `fade`, `fade_in`, and `fade_out` settings for standalone media inserts.
+
 ## Full Example
 
 ```yaml
@@ -183,6 +215,17 @@ files:
 downloads:
   filename_template: "$INDEX_$ID"
   global_cache: true
+timeline:
+  sequence:
+    - collection: songs
+      slice: start:30
+      interleave:
+        collection: interstitials
+        every: 1
+        placement: between
+    - collection: songs
+    - file: videos/outro.mp4
+      fade_in: 0.5
 plan:
   default_duration_s: 60
 tools:

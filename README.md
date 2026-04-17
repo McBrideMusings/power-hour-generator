@@ -24,7 +24,7 @@ The project is in active development. This document describes the planned capabi
 1. Create a project directory with `powerhour init`. By default it scaffolds YAML collection plans; use `--plan-format csv` or `--plan-format tsv` to start with delimiter-based plans instead.
 2. Fill in your collection plan files and adjust `powerhour.yaml` as needed for overlays, timing, or encoding defaults.
 3. Run the CLI pointing at the project directory; the tool will download sources into `cache/`, render segments into `segments/`, write logs under `logs/`, and maintain metadata in `.powerhour/index.json`.
-4. Import the generated segment files into your preferred editor to build the final compilation.
+4. Run `powerhour concat --project <dir>` to assemble the final export from the configured timeline sequence.
 
 Currently implemented commands cover project scaffolding, validation, cache population, tool management, and segment rendering.
 
@@ -172,6 +172,23 @@ tools:
     minimum_version: latest
     proxy: socks5://127.0.0.1:9050
 ```
+
+Timeline sequencing also lives in `powerhour.yaml`. Collection entries now use `slice` ranges instead of `count`, so you can split a collection by fixed spans, percentages, or relative end offsets:
+
+```yaml
+timeline:
+  sequence:
+    - collection: songs
+      slice: start:30
+      interleave:
+        collection: interstitials
+        every: 1
+        placement: between
+    - collection: songs
+      slice: 31:end
+```
+
+`slice` defaults to `start:end` when omitted. Valid endpoints include `start`, `end`, positive integers, negative integers from the remaining end, and percentages like `0%:50%` or `50%:100%`.
 
 Global per-user settings live in `~/.powerhour/config.yaml`. Besides encoding defaults and download settings, you can define reusable artist aliases under `metadata_normalization.artist_aliases` so uploader/channel names normalize consistently during fetch and `cache doctor`.
 

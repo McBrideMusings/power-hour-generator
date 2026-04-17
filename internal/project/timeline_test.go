@@ -57,10 +57,10 @@ func TestResolveTimeline(t *testing.T) {
 			},
 		},
 		{
-			name: "count limit",
+			name: "slice limit",
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
-					{Collection: "songs", Count: 2},
+					{Collection: "songs", Slice: "start:2"},
 				},
 			},
 			collections: map[string]Collection{
@@ -72,10 +72,10 @@ func TestResolveTimeline(t *testing.T) {
 			},
 		},
 		{
-			name: "count exceeds available",
+			name: "slice exceeds available",
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
-					{Collection: "songs", Count: 100},
+					{Collection: "songs", Slice: "start:100"},
 				},
 			},
 			collections: map[string]Collection{
@@ -271,11 +271,11 @@ func TestResolveTimeline(t *testing.T) {
 		},
 		{
 			name: "stateful cursor two halves",
-			// songs appears twice: first count:2, then no count on 5-row collection
+			// songs appears twice: first start:2, then default to end on 5-row collection
 			// Expected: rows 1-2, then rows 3-5 (cursor picks up at 2)
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
-					{Collection: "songs", Count: 2},
+					{Collection: "songs", Slice: "start:2"},
 					{Collection: "songs"},
 				},
 			},
@@ -291,13 +291,13 @@ func TestResolveTimeline(t *testing.T) {
 			},
 		},
 		{
-			name: "stateful cursor both halves with count",
-			// songs appears twice, each count:2 on 4-row collection
+			name: "stateful cursor both halves with slice",
+			// songs appears twice, each start:2 on 4-row collection
 			// Expected: rows 1-2, then rows 3-4
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
-					{Collection: "songs", Count: 2},
-					{Collection: "songs", Count: 2},
+					{Collection: "songs", Slice: "start:2"},
+					{Collection: "songs", Slice: "start:2"},
 				},
 			},
 			collections: map[string]Collection{
@@ -312,10 +312,10 @@ func TestResolveTimeline(t *testing.T) {
 		},
 		{
 			name: "stateful cursor collection exhausted skips silently",
-			// songs count:3 on 3-row collection, then songs again (exhausted) → only first 3 entries
+			// songs start:3 on 3-row collection, then songs again (exhausted) → only first 3 entries
 			timeline: config.TimelineConfig{
 				Sequence: []config.SequenceEntry{
-					{Collection: "songs", Count: 3},
+					{Collection: "songs", Slice: "start:3"},
 					{Collection: "songs"},
 				},
 			},

@@ -314,9 +314,9 @@ func TestValidateTimeline_Valid(t *testing.T) {
 		},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
-				{Collection: "intro", Count: 1},
+				{Collection: "intro", Slice: "start:1"},
 				{Collection: "songs", Interleave: &InterleaveConfig{Collection: "interstitials", Every: 1}},
-				{Collection: "outro", Count: 1},
+				{Collection: "outro", Slice: "start:1"},
 			},
 		},
 	}
@@ -418,14 +418,14 @@ func TestValidateTimeline_EveryNegative(t *testing.T) {
 	}
 }
 
-func TestValidateTimeline_NegativeCount(t *testing.T) {
+func TestValidateTimeline_InvalidSlice(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{
 			"songs": {Plan: "songs.csv"},
 		},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
-				{Collection: "songs", Count: -1},
+				{Collection: "songs", Slice: "oops"},
 			},
 		},
 	}
@@ -437,7 +437,7 @@ func TestValidateTimeline_NegativeCount(t *testing.T) {
 		}
 	}
 	if len(errs) != 1 {
-		t.Fatalf("expected 1 error for count=-1, got %d: %v", len(errs), errs)
+		t.Fatalf("expected 1 error for invalid slice, got %d: %v", len(errs), errs)
 	}
 }
 
@@ -483,12 +483,12 @@ func TestValidateTimeline_FileBothCollectionAndFile(t *testing.T) {
 	}
 }
 
-func TestValidateTimeline_FileWithCount(t *testing.T) {
+func TestValidateTimeline_FileWithSlice(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
-				{File: "intro.mp4", Count: 5},
+				{File: "intro.mp4", Slice: "start:5"},
 			},
 		},
 	}
@@ -500,7 +500,7 @@ func TestValidateTimeline_FileWithCount(t *testing.T) {
 		}
 	}
 	if len(errs) == 0 {
-		t.Fatal("expected error for file entry with count set, got none")
+		t.Fatal("expected error for file entry with slice set, got none")
 	}
 }
 

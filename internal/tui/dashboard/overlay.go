@@ -57,7 +57,8 @@ func renderHelpOverlay(activeView int, width, height int) string {
 	b.WriteString("  J/K              Reorder item\n")
 	b.WriteString("  a                Focus Add Clip slot (paste link/path/CSV)\n")
 	if activeView == 0 {
-		b.WriteString("  x                Delete selected timeline entry\n")
+		b.WriteString("  e/E              Open selected output or project config\n")
+		b.WriteString("  x                Delete selected timeline entry or output\n")
 	}
 	b.WriteString("  v                Play in vlc\n")
 	b.WriteString("  V                Play vlc/all playlist\n")

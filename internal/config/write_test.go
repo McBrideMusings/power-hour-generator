@@ -35,7 +35,7 @@ func TestSave_RoundTrip(t *testing.T) {
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
 				{File: "intro.mp4", Fade: 1.0},
-				{Collection: "songs", Count: 10},
+				{Collection: "songs", Slice: "start:10"},
 				{File: "outro.mp4"},
 			},
 		},
@@ -60,8 +60,8 @@ func TestSave_RoundTrip(t *testing.T) {
 	if loaded.Timeline.Sequence[1].Collection != "songs" {
 		t.Errorf("seq[1].Collection = %q, want %q", loaded.Timeline.Sequence[1].Collection, "songs")
 	}
-	if loaded.Timeline.Sequence[1].Count != 10 {
-		t.Errorf("seq[1].Count = %d, want 10", loaded.Timeline.Sequence[1].Count)
+	if loaded.Timeline.Sequence[1].Slice != "start:10" {
+		t.Errorf("seq[1].Slice = %q, want start:10", loaded.Timeline.Sequence[1].Slice)
 	}
 	if loaded.Video.Width != 1920 {
 		t.Errorf("video.Width = %d, want 1920", loaded.Video.Width)
@@ -79,8 +79,8 @@ func TestSave_ModifyTimeline(t *testing.T) {
 		},
 		Timeline: TimelineConfig{
 			Sequence: []SequenceEntry{
-				{Collection: "songs", Count: 5},
-				{Collection: "songs", Count: 5},
+				{Collection: "songs", Slice: "start:5"},
+				{Collection: "songs", Slice: "start:5"},
 			},
 		},
 	}

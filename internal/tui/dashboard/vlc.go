@@ -213,96 +213,13 @@ func resolveSequenceEntrySegmentPaths(pp paths.ProjectPaths, cfg config.Config, 
 // as ResolveTimeline.
 func assignTimelineToSequenceEntries(timeline config.TimelineConfig, collections map[string]project.Collection, totalEntries int) []int {
 	result := make([]int, 0, totalEntries)
-	cursor := make(map[string]int)
-
-	for entryIdx, entry := range timeline.Sequence {
-		if entry.File != "" {
-			result = append(result, entryIdx)
-			continue
-		}
-
-		coll, ok := collections[entry.Collection]
-		if !ok {
-			continue
-		}
-
-		start := cursor[entry.Collection]
-		rows := coll.Rows
-		if start >= len(rows) {
-			continue
-		}
-		rows = rows[start:]
-		if entry.Count > 0 && entry.Count < len(rows) {
-			rows = rows[:entry.Count]
-		}
-		cursor[entry.Collection] = start + len(rows)
-
-		if entry.Interleave == nil {
-			for range rows {
-				result = append(result, entryIdx)
-			}
-			continue
-		}
-
-		ilColl, ok := collections[entry.Interleave.Collection]
-		if !ok {
-			for range rows {
-				result = append(result, entryIdx)
-			}
-			continue
-		}
-
-		ilStart := cursor[entry.Interleave.Collection]
-		ilAvail := len(ilColl.Rows) - ilStart
-		if ilAvail <= 0 {
-			ilStart = 0
-			ilAvail = len(ilColl.Rows)
-		}
-
-		every := entry.Interleave.Every
-		placement := project.ResolvePlacement(entry.Interleave.Placement)
-		ilIdx := 0
-
-		emitIL := func() {
-			if ilAvail <= 0 {
-				return
-			}
-			result = append(result, entryIdx)
-			ilIdx++
-		}
-
-		for i := range rows {
-			isLast := i == len(rows)-1
-
-			if placement == "before" || placement == "around" {
-				if i%every == 0 {
-					emitIL()
-				}
-			}
-
-			// Primary clip.
-			result = append(result, entryIdx)
-
-			switch placement {
-			case "after":
-				if (i+1)%every == 0 {
-					emitIL()
-				}
-			case "between":
-				if (i+1)%every == 0 && !isLast {
-					emitIL()
-				}
-			case "around":
-				if isLast {
-					emitIL()
-				}
-			}
-		}
-
-		// Update the interleave cursor so the next sequence entry referencing
-		// the same interleave collection resumes from where we left off.
-		cursor[entry.Interleave.Collection] = ilStart + ilIdx
+	placements, err := project.BuildTimelinePlacements(timeline, collections)
+	if err != nil {
+		return result
 	}
-
+	result = make([]int, 0, min(totalEntries, len(placements)))
+	for _, placement := range placements {
+		result = append(result, placement.SequenceEntryIndex)
+	}
 	return result
 }

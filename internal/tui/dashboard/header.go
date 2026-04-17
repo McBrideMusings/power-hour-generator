@@ -2,11 +2,14 @@ package dashboard
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
-// renderHeader produces the 1-line header bar:
-//   POWER HOUR │ 1:Timeline  2:Songs  3:Intros │ songs: 18/20 cached │ ⚠ yt-dlp
+// renderHeader produces a 2-line header:
+//
+//	POWER HOUR │ 1:Timeline  2:Songs  3:Intros │ songs: 18/20 cached │ ⚠ yt-dlp
+//	/full/project/path
 func renderHeader(m Model) string {
 	var b strings.Builder
 
@@ -46,6 +49,13 @@ func renderHeader(m Model) string {
 		b.WriteString(headerSep.Render(" │ "))
 		b.WriteString(countYellow.Render("⚠ " + m.toolWarning))
 	}
+
+	b.WriteByte('\n')
+	projectPath := m.pp.Root
+	if projectPath == "" {
+		projectPath = filepath.Clean(".")
+	}
+	b.WriteString(faint.Render(projectPath))
 
 	return b.String()
 }

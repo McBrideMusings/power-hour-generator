@@ -674,51 +674,7 @@ func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx 
 // that a collection appearing twice with different fade values gets different
 // fades for each portion.
 func applySequenceEntryFades(cfg config.Config, clips []project.CollectionClip) {
-	// Index clips by collection name in row-index order.
-	byCollection := make(map[string][]int) // collection name → indices into clips
-	for i, cc := range clips {
-		byCollection[cc.CollectionName] = append(byCollection[cc.CollectionName], i)
-	}
-	// Sort each collection's indices by row index for stable cursor consumption.
-	for _, indices := range byCollection {
-		sort.Slice(indices, func(a, b int) bool {
-			return clips[indices[a]].Clip.Row.Index < clips[indices[b]].Clip.Row.Index
-		})
-	}
-
-	consumed := make(map[string]int)
-	for _, entry := range cfg.Timeline.Sequence {
-		if entry.Collection == "" {
-			continue
-		}
-		indices := byCollection[entry.Collection]
-		start := consumed[entry.Collection]
-		count := len(indices) - start
-		if entry.Count > 0 && entry.Count < count {
-			count = entry.Count
-		}
-		consumed[entry.Collection] = start + count
-
-		if entry.Fade == 0 && entry.FadeIn == 0 && entry.FadeOut == 0 {
-			continue
-		}
-		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
-		for _, idx := range indices[start : start+count] {
-			clips[idx].Clip.FadeInSeconds = fadeIn
-			clips[idx].Clip.FadeOutSeconds = fadeOut
-		}
-
-		// Also apply to interleave clips if the interleave entry has no fade of its own.
-		if entry.Interleave != nil {
-			ilIndices := byCollection[entry.Interleave.Collection]
-			ilStart := consumed[entry.Interleave.Collection]
-			ilCount := len(ilIndices) - ilStart
-			if ilCount > count {
-				ilCount = count
-			}
-			consumed[entry.Interleave.Collection] = ilStart + ilCount
-		}
-	}
+	project.ApplySequenceEntryFades(cfg, clips)
 }
 
 func writeCollectionRenderJSON(cmd *cobra.Command, projectRoot string, clips []project.CollectionClip, results []render.Result) error {

@@ -91,14 +91,14 @@ timeline:
         # - file: videos/intro.mp4              # optional: play a video before songs start
         #   fade_out: 0.5
         - collection: songs
-          count: 30                             # adjust to half your total song count
+          slice: start:30                       # adjust to the first half of your total song count
           interleave:
             collection: interstitials
             every: 1
             placement: between                  # between (default), after, before, around
         # - file: videos/intermission.mp4       # optional: play a video between halves
         #   fade: 1.0
-        - collection: songs                     # automatically continues from row 31
+        - collection: songs                     # automatically continues from the remaining songs
           interleave:
             collection: interstitials
             every: 1
