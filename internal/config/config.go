@@ -42,7 +42,7 @@ type TimelineConfig struct {
 // Exactly one of Collection or File must be set.
 type SequenceEntry struct {
 	Collection string            `yaml:"collection,omitempty"`
-	Count      int               `yaml:"count,omitempty"`      // 0 = play all; only valid with Collection
+	Slice      string            `yaml:"slice,omitempty"`      // default: start:end; only valid with Collection
 	File       string            `yaml:"file,omitempty"`       // inline file path; mutually exclusive with Collection
 	Interleave *InterleaveConfig `yaml:"interleave,omitempty"` // only valid with Collection
 	Fade       float64           `yaml:"fade,omitempty"`

@@ -15,130 +15,21 @@ type TimelineEntry struct {
 	SourceFile  string // set for inline file entries (SequenceEntry.File); empty for collection entries
 }
 
-// ResolveTimeline produces an ordered list of timeline entries from the config
-// sequence. It respects Count limits and Interleave rules, cycling through the
-// interleave collection when it has fewer clips than insertion points.
-//
-// Collection references are stateful: each time a collection appears in the
-// sequence, it resumes from where the previous reference left off. This allows
-// splitting a collection across multiple sequence entries (e.g. two halves of a
-// song list separated by an intermission) without specifying an explicit offset.
-//
-// Inline file entries (SequenceEntry.File != "") produce a single TimelineEntry
-// with SourceFile set and no Collection/Index.
 func ResolveTimeline(timeline config.TimelineConfig, collections map[string]Collection) ([]TimelineEntry, error) {
-	var entries []TimelineEntry
-	seq := 0
-	cursor := make(map[string]int) // consumed row count per collection
-
-	for _, entry := range timeline.Sequence {
-		// Inline file entry.
-		if entry.File != "" {
-			seq++
-			entries = append(entries, TimelineEntry{
-				SourceFile: entry.File,
-				Sequence:   seq,
-			})
-			continue
-		}
-
-		primary, err := requireCollection(collections, entry.Collection)
-		if err != nil {
-			return nil, err
-		}
-
-		start := cursor[entry.Collection]
-		rows := primary.Rows
-		if start >= len(rows) {
-			// Collection exhausted; skip this entry silently.
-			continue
-		}
-		rows = rows[start:]
-
-		if entry.Count > 0 && entry.Count < len(rows) {
-			rows = rows[:entry.Count]
-		}
-
-		cursor[entry.Collection] = start + len(rows)
-
-		if entry.Interleave == nil {
-			for _, row := range rows {
-				seq++
-				entries = append(entries, TimelineEntry{
-					Collection: entry.Collection,
-					Index:      row.Index,
-					Sequence:   seq,
-				})
-			}
-			continue
-		}
-
-		secondary, err := requireCollection(collections, entry.Interleave.Collection)
-		if err != nil {
-			return nil, err
-		}
-
-		interleaveRows := secondary.Rows
-		ilStart := cursor[entry.Interleave.Collection]
-		ilAvail := len(interleaveRows) - ilStart
-		if ilAvail <= 0 {
-			// Cycle from the beginning.
-			ilStart = 0
-			ilAvail = len(interleaveRows)
-		}
-
-		ilIdx := 0
-		every := entry.Interleave.Every
-		placement := ResolvePlacement(entry.Interleave.Placement)
-
-		emitIL := func() {
-			if ilAvail <= 0 {
-				return
-			}
-			seq++
-			absIdx := ilStart + (ilIdx % ilAvail)
-			ilRow := interleaveRows[absIdx]
-			entries = append(entries, TimelineEntry{
-				Collection: entry.Interleave.Collection,
-				Index:      ilRow.Index,
-				Sequence:   seq,
-			})
-			ilIdx++
-		}
-
-		for i, row := range rows {
-			isLast := i == len(rows)-1
-
-			if placement == "before" || placement == "around" {
-				if i%every == 0 {
-					emitIL()
-				}
-			}
-
-			seq++
-			entries = append(entries, TimelineEntry{
-				Collection: entry.Collection,
-				Index:      row.Index,
-				Sequence:   seq,
-			})
-
-			switch placement {
-			case "after":
-				if (i+1)%every == 0 {
-					emitIL()
-				}
-			case "between":
-				if (i+1)%every == 0 && !isLast {
-					emitIL()
-				}
-			case "around":
-				if isLast {
-					emitIL()
-				}
-			}
-		}
+	placements, err := BuildTimelinePlacements(timeline, collections)
+	if err != nil {
+		return nil, err
 	}
 
+	entries := make([]TimelineEntry, 0, len(placements))
+	for i, placement := range placements {
+		entries = append(entries, TimelineEntry{
+			Collection: placement.Collection,
+			Index:      placement.RowIndex,
+			Sequence:   i + 1,
+			SourceFile: placement.SourceFile,
+		})
+	}
 	return entries, nil
 }
 

@@ -237,7 +237,7 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 			continue
 		}
 
-		// Inline file entry: count and interleave are not valid; file must exist.
+		// Inline file entry: slice and interleave are not valid; file must exist.
 		if hasFile {
 			if entry.Fade < 0 || entry.FadeIn < 0 || entry.FadeOut < 0 {
 				results = append(results, ValidationResult{
@@ -245,10 +245,10 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 					Message: fmt.Sprintf("timeline sequence[%d] (file %q): fade values must be >= 0", i, entry.File),
 				})
 			}
-			if entry.Count > 0 {
+			if strings.TrimSpace(entry.Slice) != "" {
 				results = append(results, ValidationResult{
 					Level:   "error",
-					Message: fmt.Sprintf("timeline sequence[%d] (file %q): count is not valid for file entries", i, entry.File),
+					Message: fmt.Sprintf("timeline sequence[%d] (file %q): slice is not valid for file entries", i, entry.File),
 				})
 			}
 			if entry.Interleave != nil {
@@ -277,10 +277,10 @@ func (c Config) validateTimeline(projectRoot string) []ValidationResult {
 				Message: fmt.Sprintf("timeline sequence[%d]: collection %q does not exist", i, entry.Collection),
 			})
 		}
-		if entry.Count < 0 {
+		if _, err := ParseTimelineSlice(entry.Slice); err != nil {
 			results = append(results, ValidationResult{
 				Level:   "error",
-				Message: fmt.Sprintf("timeline sequence[%d] (%q): count must be >= 0", i, entry.Collection),
+				Message: fmt.Sprintf("timeline sequence[%d] (%q): invalid slice: %v", i, entry.Collection, err),
 			})
 		}
 		if entry.Fade < 0 || entry.FadeIn < 0 || entry.FadeOut < 0 {

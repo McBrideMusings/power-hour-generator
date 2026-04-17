@@ -107,7 +107,7 @@ func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
 		timelineView: timelineView{
 			sequence: []config.SequenceEntry{{
 				Collection: "songs",
-				Count:      2,
+				Slice:      "start:2",
 			}},
 		},
 	}
@@ -126,6 +126,139 @@ func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
 	}
 	if got.timelineView.confirmDelete == "" {
 		t.Fatal("confirmDelete empty, want inline prompt set on the timeline view")
+	}
+}
+
+func TestHandleTimelineKeyWithMutationsEditOpensProjectConfig(t *testing.T) {
+	m := testTimelineModel(t)
+
+	var opened string
+	prev := openExternalPath
+	openExternalPath = func(path string) error {
+		opened = path
+		return nil
+	}
+	defer func() {
+		openExternalPath = prev
+	}()
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("e"),
+	})
+	got := gotModel.(Model)
+
+	if opened != m.pp.ConfigFile {
+		t.Fatalf("opened path = %q, want %q", opened, m.pp.ConfigFile)
+	}
+	if !strings.Contains(got.statusMsg, filepath.Base(m.pp.ConfigFile)) {
+		t.Fatalf("statusMsg = %q, want config filename", got.statusMsg)
+	}
+	if !strings.Contains(got.statusMsg, "timeline.sequence") {
+		t.Fatalf("statusMsg = %q, want timeline.sequence hint", got.statusMsg)
+	}
+}
+
+func TestHandleTimelineKeyWithMutationsEditExternalOpensProjectConfig(t *testing.T) {
+	m := testTimelineModel(t)
+
+	var opened string
+	prev := openExternalPath
+	openExternalPath = func(path string) error {
+		opened = path
+		return nil
+	}
+	defer func() {
+		openExternalPath = prev
+	}()
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("E"),
+	})
+	got := gotModel.(Model)
+
+	if opened != m.pp.ConfigFile {
+		t.Fatalf("opened path = %q, want %q", opened, m.pp.ConfigFile)
+	}
+	if !strings.Contains(got.statusMsg, "press u to refresh") {
+		t.Fatalf("statusMsg = %q, want refresh hint", got.statusMsg)
+	}
+}
+
+func TestHandleTimelineKeyWithMutationsEditOpensOutputWhenSelected(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.concatFocus = true
+	m.timelineView.concatExists = true
+	m.timelineView.concatPath = filepath.Join(m.pp.Root, "powerhour.mp4")
+
+	var opened string
+	prev := openExternalPath
+	openExternalPath = func(path string) error {
+		opened = path
+		return nil
+	}
+	defer func() {
+		openExternalPath = prev
+	}()
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("e"),
+	})
+	got := gotModel.(Model)
+
+	if opened != m.timelineView.concatPath {
+		t.Fatalf("opened path = %q, want %q", opened, m.timelineView.concatPath)
+	}
+	if !strings.Contains(got.statusMsg, "Opened powerhour.mp4") {
+		t.Fatalf("statusMsg = %q, want output open message", got.statusMsg)
+	}
+}
+
+func TestHandleTimelineKeyWithMutationsDeleteOutputUsesX(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.concatFocus = true
+	m.timelineView.concatExists = true
+	m.timelineView.concatPath = filepath.Join(m.pp.Root, "powerhour.mp4")
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{
+		Type:  tea.KeyRunes,
+		Runes: []rune("x"),
+	})
+	got := gotModel.(Model)
+
+	if got.mode != modeConfirmDelete {
+		t.Fatalf("mode = %v, want %v", got.mode, modeConfirmDelete)
+	}
+	if !strings.Contains(got.deleteDesc, "output") {
+		t.Fatalf("deleteDesc = %q, want output", got.deleteDesc)
+	}
+	if got.timelineView.confirmDelete == "" {
+		t.Fatal("confirmDelete empty, want inline prompt set for output delete")
+	}
+}
+
+func TestHandleTimelineKeyWithMutationsDownMovesFromSequenceToPlaybackOrder(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.sequence = []config.SequenceEntry{{Collection: "songs"}}
+	m.timelineView.seqCursor = 0
+	m.timelineView.focusPanel = 0
+	m.timelineView.resolved = []project.TimelineEntry{
+		{Collection: "songs", Index: 1, Sequence: 1},
+		{Collection: "songs", Index: 2, Sequence: 2},
+	}
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{
+		Type: tea.KeyDown,
+	})
+	got := gotModel.(Model)
+
+	if got.timelineView.focusPanel != 1 {
+		t.Fatalf("focusPanel = %d, want 1", got.timelineView.focusPanel)
+	}
+	if got.timelineView.resCursor != 0 {
+		t.Fatalf("resCursor = %d, want 0", got.timelineView.resCursor)
 	}
 }
 
@@ -543,7 +676,7 @@ func TestProcessAddTimelineEntryUsesInlineNote(t *testing.T) {
 
 func TestProcessDeleteTimelineEntryUsesInlineNote(t *testing.T) {
 	m := testTimelineModel(t)
-	m.timelineView.sequence = append(m.timelineView.sequence, config.SequenceEntry{Collection: "songs", Count: 2})
+	m.timelineView.sequence = append(m.timelineView.sequence, config.SequenceEntry{Collection: "songs", Slice: "start:2"})
 	m.cfg.Timeline.Sequence = append([]config.SequenceEntry(nil), m.timelineView.sequence...)
 
 	gotModel, _ := m.processDeleteTimelineEntry()
@@ -554,6 +687,102 @@ func TestProcessDeleteTimelineEntryUsesInlineNote(t *testing.T) {
 	}
 	if got.timelineView.seqStatus[0] != "note:removed songs" {
 		t.Fatalf("seq status = %q, want removed songs note", got.timelineView.seqStatus[0])
+	}
+}
+
+func TestProcessDeleteTimelineOutputRemovesFile(t *testing.T) {
+	m := testTimelineModel(t)
+	outputPath := filepath.Join(m.pp.Root, "powerhour.mp4")
+	if err := os.WriteFile(outputPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("write output: %v", err)
+	}
+	m.timelineView.concatFocus = true
+	m.timelineView.concatPath = outputPath
+	m.timelineView.concatExists = true
+
+	got := m.processDeleteTimelineOutput()
+
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output still exists, stat err = %v", err)
+	}
+	if got.timelineView.concatExists {
+		t.Fatal("concatExists = true, want false after delete")
+	}
+}
+
+func TestRenderFooterTimelineIncludesEditShortcuts(t *testing.T) {
+	m := testTimelineModel(t)
+
+	footer := renderFooter(m)
+	if !strings.Contains(footer, "e/E edit/ext") {
+		t.Fatalf("footer = %q, want e/E edit/ext", footer)
+	}
+}
+
+func TestRenderHelpOverlayTimelineIncludesEditShortcuts(t *testing.T) {
+	help := renderHelpOverlay(0, 120, 40)
+	if !strings.Contains(help, "Open selected output or project config") {
+		t.Fatalf("help overlay missing timeline edit shortcut text: %q", help)
+	}
+}
+
+func TestTimelineViewRendersOutputBeforeSequenceAndPreview(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.concatExists = true
+	m.timelineView.concatPath = filepath.Join(m.pp.Root, "powerhour.mp4")
+	m.timelineView.concatSize = 128
+	m.timelineView.concatModTime = time.Date(2026, 4, 17, 12, 0, 0, 0, time.UTC)
+	m.timelineView.termWidth = 120
+	m.timelineView.termHeight = 40
+
+	view := m.timelineView.view(nil)
+	outputPos := strings.Index(view, "POWER HOUR")
+	seqPos := strings.Index(view, "TIMELINE SEQUENCE")
+	previewPos := strings.Index(view, "PLAYBACK ORDER")
+	if outputPos < 0 || seqPos < 0 || previewPos < 0 {
+		t.Fatalf("missing section label in view: %q", view)
+	}
+	if !(outputPos < seqPos && seqPos < previewPos) {
+		t.Fatalf("section order invalid: output=%d seq=%d preview=%d", outputPos, seqPos, previewPos)
+	}
+}
+
+func TestTimelineViewConcatFocusDoesNotAlsoHighlightSequence(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.concatFocus = true
+	m.timelineView.concatExists = true
+	m.timelineView.concatPath = filepath.Join(m.pp.Root, "powerhour.mp4")
+	m.timelineView.termWidth = 120
+	m.timelineView.termHeight = 30
+
+	view := m.timelineView.view(nil)
+	if strings.Count(view, "▸ ") != 1 {
+		t.Fatalf("view has %d visible cursors, want exactly 1\n%s", strings.Count(view, "▸ "), view)
+	}
+}
+
+func TestTimelineViewRendersPlaybackOrderCursor(t *testing.T) {
+	m := testTimelineModel(t)
+	m.timelineView.focusPanel = 1
+	m.timelineView.resolved = []project.TimelineEntry{{Collection: "songs", Index: 1, Sequence: 1}}
+	m.timelineView.termWidth = 120
+	m.timelineView.termHeight = 30
+	m.collections["songs"] = project.Collection{
+		Name: "songs",
+		Rows: []csvplan.CollectionRow{{
+			Index:           1,
+			DurationSeconds: 60,
+			CustomFields: map[string]string{
+				"title":  "First Song",
+				"artist": "Artist A",
+			},
+		}},
+	}
+	m.timelineView.collections = m.collections
+
+	view := m.timelineView.view(nil)
+	if !strings.Contains(view, "▸ ● 01 First Song") {
+		t.Fatalf("playback order cursor missing:\n%s", view)
 	}
 }
 

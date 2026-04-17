@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -14,8 +15,8 @@ import (
 	"powerhour/internal/tui"
 )
 
-// timelineView holds the state for the timeline view with two panels:
-// sequence entries (top) and resolved preview (bottom).
+// timelineView holds the state for the timeline view with output at the top,
+// sequence entries in the middle, and resolved preview at the bottom.
 type timelineView struct {
 	sequence []config.SequenceEntry
 	resolved []project.TimelineEntry
@@ -29,6 +30,7 @@ type timelineView struct {
 	seqScrollTop int
 
 	// Scroll for resolved preview panel.
+	resCursor    int
 	resScrollTop int
 
 	// Which panel has focus: 0 = sequence entries, 1 = resolved preview.
@@ -38,7 +40,8 @@ type timelineView struct {
 	concatPath     string // path to the concat output file
 	concatExists   bool   // whether the file exists on disk
 	concatSize     int64  // file size in bytes
-	concatFocus    bool   // cursor is on the concat row
+	concatModTime  time.Time
+	concatFocus    bool // cursor is on the concat row
 	seqStatus      map[int]string
 	seqStatusUntil map[int]int
 
@@ -52,7 +55,7 @@ type timelineView struct {
 }
 
 func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collections map[string]project.Collection, collectionNames []string, projectRoot string) timelineView {
-	concatPath, concatExists, concatSize := findConcatOutput(projectRoot)
+	concatPath, concatExists, concatSize, concatModTime := findConcatOutput(projectRoot)
 	return timelineView{
 		sequence:        cfg.Timeline.Sequence,
 		resolved:        resolved,
@@ -61,38 +64,67 @@ func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collec
 		concatPath:      concatPath,
 		concatExists:    concatExists,
 		concatSize:      concatSize,
+		concatModTime:   concatModTime,
 		seqStatus:       make(map[int]string),
 		seqStatusUntil:  make(map[int]int),
 	}
 }
 
 // findConcatOutput looks for the concat output file in the project root.
-func findConcatOutput(projectRoot string) (string, bool, int64) {
+func findConcatOutput(projectRoot string) (string, bool, int64, time.Time) {
 	for _, ext := range []string{".mp4", ".mkv", ".mov"} {
 		p := filepath.Join(projectRoot, "powerhour"+ext)
 		if info, err := os.Stat(p); err == nil {
-			return p, true, info.Size()
+			return p, true, info.Size(), info.ModTime()
 		}
 	}
-	return filepath.Join(projectRoot, "powerhour.mp4"), false, 0
+	return filepath.Join(projectRoot, "powerhour.mp4"), false, 0, time.Time{}
 }
 
-// contentHeight returns total height available for the two panels.
+// contentHeight returns total height available for the sequence and preview panels.
 func (v timelineView) contentHeight() int {
-	// Subtract: header(1) + blank(1) + section labels(3) + blank between panels(1) + concat label+row(2) + blank(1) + blank(1) + status(1) + footer(1)
-	h := v.termHeight - 12
+	h := v.termHeight - 12 - v.outputExtraLines()
 	if h < 4 {
 		h = 4
 	}
 	return h
 }
 
-// seqPanelHeight returns height for the sequence entries panel (~40%).
+func (v timelineView) outputExtraLines() int {
+	if v.concatFocus && v.confirmDelete != "" {
+		return 1
+	}
+	return 0
+}
+
+func (v timelineView) sequenceLinesNeeded() int {
+	lines := len(v.sequence)
+	if lines == 0 {
+		lines = 1
+	}
+	if v.focusPanel == 0 && v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
+		if v.confirmDelete != "" || inlineRowNote(v.seqStatus[v.seqCursor], 0) != "" {
+			lines++
+		}
+	}
+	return lines
+}
+
+// seqPanelHeight returns height for the sequence entries panel.
 func (v timelineView) seqPanelHeight() int {
 	total := v.contentHeight()
-	h := total * 2 / 5
+	h := total / 4
 	if h < 2 {
 		h = 2
+	}
+	if needed := v.sequenceLinesNeeded(); needed > h {
+		h = needed
+	}
+	if h > total-1 {
+		h = total - 1
+	}
+	if h < 1 {
+		h = 1
 	}
 	return h
 }
@@ -105,8 +137,36 @@ func (v timelineView) resPanelHeight() int {
 func (v timelineView) view(cacheStatus map[string]string) string {
 	var b strings.Builder
 
+	// --- Output ---
+	b.WriteString(sectionLabel.Render("POWER HOUR"))
+	b.WriteByte('\n')
+
+	cursor := "  "
+	if v.concatFocus {
+		cursor = cursorStyle.Render("▸ ")
+	}
+	if v.concatExists {
+		name := filepath.Base(v.concatPath)
+		size := formatFileSize(v.concatSize)
+		exportedAt := faint.Render("exported " + v.concatModTime.Local().Format("2006-01-02 15:04"))
+		b.WriteString(fmt.Sprintf("%s%s  %s  %s",
+			cursor,
+			countGreen.Render(name),
+			faint.Render(size),
+			exportedAt))
+	} else {
+		b.WriteString(cursor + faint.Render("not yet exported — press c to concatenate"))
+	}
+	b.WriteByte('\n')
+	if v.concatFocus && v.confirmDelete != "" {
+		b.WriteString("   ")
+		b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, max(12, v.termWidth-6))))
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
+
 	// --- Sequence entries panel ---
-	b.WriteString(sectionLabel.Render("SEQUENCE ENTRIES"))
+	b.WriteString(sectionLabel.Render("TIMELINE SEQUENCE"))
 	b.WriteByte('\n')
 
 	seqH := v.seqPanelHeight()
@@ -137,7 +197,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	for i := startSeq; i < endSeq; i++ {
 		entry := v.sequence[i]
 		cursor := "  "
-		if i == v.seqCursor && v.focusPanel == 0 {
+		if i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus {
 			cursor = cursorStyle.Render("▸ ")
 		}
 
@@ -149,11 +209,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			b.WriteString(filepath.Base(entry.File))
 		} else {
 			b.WriteString(typeBadgeColl.Render(entry.Collection))
-			if entry.Count > 0 {
-				b.WriteString(fmt.Sprintf(" × %d", entry.Count))
-			} else {
-				b.WriteString(" × all")
-			}
+			b.WriteString(fadeDim.Render(" · " + timelineSliceLabel(entry.Slice)))
 			if entry.Interleave != nil {
 				b.WriteString(fadeDim.Render(fmt.Sprintf(" · interleave: %s every %d", entry.Interleave.Collection, entry.Interleave.Every)))
 			}
@@ -165,12 +221,12 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			b.WriteString(fadeDim.Render("  " + fade))
 		}
 		b.WriteByte('\n')
-		if i == v.seqCursor && v.focusPanel == 0 && v.confirmDelete != "" {
+		if i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus && v.confirmDelete != "" {
 			b.WriteString("   ")
 			b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, max(12, v.termWidth-6))))
 			b.WriteByte('\n')
 			rendered++
-		} else if note := inlineRowNote(v.seqStatus[i], 0); note != "" && i == v.seqCursor && v.focusPanel == 0 {
+		} else if note := inlineRowNote(v.seqStatus[i], 0); note != "" && i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus {
 			b.WriteString("   ")
 			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, max(12, v.termWidth-6))))
 			b.WriteByte('\n')
@@ -202,7 +258,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	for _, e := range v.resolved {
 		totalDuration += v.entryDuration(e)
 	}
-	b.WriteString(sectionLabel.Render(fmt.Sprintf("RESOLVED PREVIEW · %d clips · ~%s", len(v.resolved), formatDuration(totalDuration))))
+	b.WriteString(sectionLabel.Render(fmt.Sprintf("PLAYBACK ORDER · %d clips · ~%s", len(v.resolved), formatDuration(totalDuration))))
 	b.WriteByte('\n')
 
 	resH := v.resPanelHeight()
@@ -222,6 +278,10 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		label := v.entryLabel(e)
 		source := v.entrySource(e)
 		dur := v.entryDuration(e)
+		cursor := "  "
+		if i == v.resCursor && v.focusPanel == 1 {
+			cursor = cursorStyle.Render("▸ ")
+		}
 
 		// Cache dot.
 		key := cacheKeyForEntry(e)
@@ -234,11 +294,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		sourceLabel := faint.Render(source)
 		durLabel := faint.Render(formatDuration(dur))
 
-		b.WriteString(fmt.Sprintf("%s %s %s", dot, seqNum, label))
+		b.WriteString(fmt.Sprintf("%s%s %s %s", cursor, dot, seqNum, label))
 
 		// Right-align source and duration.
 		rightPart := fmt.Sprintf("%s · %s", sourceLabel, durLabel)
-		labelLen := 2 + 1 + 2 + 1 + len(tui.TruncateWithEllipsis(label, 999)) // dot + space + seq + space + label
+		labelLen := 2 + 2 + 1 + 2 + 1 + len(tui.TruncateWithEllipsis(label, 999)) // cursor + dot + space + seq + space + label
 		padding := v.termWidth - labelLen - lipgloss.Width(rightPart) - 2
 		if padding > 0 {
 			b.WriteString(strings.Repeat(" ", padding))
@@ -254,29 +314,15 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		b.WriteByte('\n')
 	}
 
-	// --- Concat output ---
-	b.WriteByte('\n')
-	b.WriteString(sectionLabel.Render("OUTPUT"))
-	b.WriteByte('\n')
-
-	cursor := "  "
-	if v.concatFocus {
-		cursor = cursorStyle.Render("▸ ")
-	}
-	if v.concatExists {
-		name := filepath.Base(v.concatPath)
-		size := formatFileSize(v.concatSize)
-		b.WriteString(fmt.Sprintf("%s%s  %s  %s",
-			cursor,
-			countGreen.Render(name),
-			faint.Render(size),
-			faint.Render(v.concatPath)))
-	} else {
-		b.WriteString(cursor + faint.Render("not yet exported — press c to concatenate"))
-	}
-	b.WriteByte('\n')
-
 	return b.String()
+}
+
+func timelineSliceLabel(raw string) string {
+	slice := config.NormalizeTimelineSlice(raw)
+	if slice == "" || slice == "start:end" {
+		return "to end"
+	}
+	return slice
 }
 
 func (v timelineView) entryLabel(e project.TimelineEntry) string {
@@ -317,6 +363,15 @@ func (v timelineView) entryDuration(e project.TimelineEntry) int {
 		return c.Config.Duration
 	}
 	return 0
+}
+
+func (v *timelineView) autoScrollRes() {
+	visible := v.resPanelHeight()
+	if v.resCursor < v.resScrollTop {
+		v.resScrollTop = v.resCursor
+	} else if v.resCursor >= v.resScrollTop+visible {
+		v.resScrollTop = v.resCursor - visible + 1
+	}
 }
 
 func cacheKeyForEntry(e project.TimelineEntry) string {
