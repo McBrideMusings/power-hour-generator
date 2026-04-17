@@ -76,6 +76,7 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
+        cache_search_profile: song_lookup
     interstitials:
         plan: %s
         output_dir: interstitials
@@ -115,6 +116,17 @@ files:
 tools: {}
 downloads:
     filename_template: $ID
+cache:
+    view:
+        primary_fields: [title, track]
+        secondary_fields: [artist, uploader, channel]
+    search_profiles:
+        song_lookup:
+            search_fields: [title, artist]
+            fill:
+                title_fields: [title, track]
+                artist_fields: [artist, uploader, channel]
+                link_fields: [source, links]
 library: {}
 segments_base_dir: segments
 `, songsPlan, interstitialsPlan)

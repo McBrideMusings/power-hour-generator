@@ -6,14 +6,15 @@ import (
 	"strings"
 
 	"powerhour/internal/cache"
+	"powerhour/internal/config"
 	"powerhour/internal/tui"
 )
 
 // cacheEntry is a flattened cache entry for display.
 type cacheEntry struct {
 	Identifier string
-	Title      string
-	Artist     string
+	Primary    string
+	Secondary  string
 	Source     string
 	CachedPath string
 	Collection string // which collection uses this, empty if not referenced
@@ -30,6 +31,10 @@ type cacheView struct {
 	cursor          int
 	scrollTop       int
 
+	// Inline confirm prompt rendered beneath the cursor row (set by model
+	// when modeConfirmDelete is active). Empty = no pending confirm.
+	confirmDelete string
+
 	termWidth  int
 	termHeight int
 }
@@ -45,7 +50,7 @@ func buildCollectionURLs(collectionLinks map[string]string) map[string]string {
 	return urls
 }
 
-func newCacheView(idx *cache.Index, collectionLinks map[string]string) cacheView {
+func newCacheView(cfg config.Config, idx *cache.Index, collectionLinks map[string]string) cacheView {
 	urls := buildCollectionURLs(collectionLinks)
 	var allEntries, filteredEntries []cacheEntry
 
@@ -69,15 +74,16 @@ func newCacheView(idx *cache.Index, collectionLinks map[string]string) cacheView
 				}
 			}
 
-			title := entry.Title
-			if title == "" {
-				title = filepath.Base(entry.CachedPath)
+			primary := firstConfiguredCacheValue(entry, cfg.Cache.View.PrimaryFields)
+			if primary == "" {
+				primary = filepath.Base(entry.CachedPath)
 			}
+			secondary := firstConfiguredCacheValue(entry, cfg.Cache.View.SecondaryFields)
 
 			ce := cacheEntry{
 				Identifier: entry.Identifier,
-				Title:      title,
-				Artist:     entry.Artist,
+				Primary:    primary,
+				Secondary:  secondary,
 				Source:     entry.Source,
 				CachedPath: entry.CachedPath,
 				Collection: collName,
@@ -115,7 +121,7 @@ func (v cacheView) visibleRowCount() int {
 	h := v.termHeight - 9
 	entries := v.entries()
 	if v.cursor >= 0 && v.cursor < len(entries) {
-		if inlineRowNote(v.rowStatus[entries[v.cursor].Identifier]) != "" {
+		if v.confirmDelete != "" || inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0) != "" {
 			h--
 		}
 	}
@@ -151,7 +157,7 @@ func (v cacheView) view() string {
 
 	b.WriteString(colHeader.Render(
 		fmt.Sprintf("%-4s  %-*s  %-*s  %-*s  %-14s  %-*s",
-			"#", statusWidth, "STATUS", flexWidth, "TITLE", flexWidth, "ARTIST", "COLLECTION", flexWidth, "FILE")))
+			"#", statusWidth, "STATUS", flexWidth, "PRIMARY", flexWidth, "SECONDARY", "COLLECTION", flexWidth, "FILE")))
 	b.WriteByte('\n')
 
 	visible := v.visibleRowCount()
@@ -178,8 +184,8 @@ func (v cacheView) view() string {
 			idx = faint.Render(idx)
 		}
 
-		title := tui.TruncateWithEllipsis(e.Title, flexWidth)
-		artist := tui.TruncateWithEllipsis(e.Artist, flexWidth)
+		title := tui.TruncateWithEllipsis(e.Primary, flexWidth)
+		artist := tui.TruncateWithEllipsis(e.Secondary, flexWidth)
 		coll := tui.TruncateWithEllipsis(e.Collection, 14)
 		if coll == "" {
 			coll = faint.Render("—")
@@ -195,7 +201,12 @@ func (v cacheView) view() string {
 		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %s  %-14s  %s",
 			cursor, idx, statusWidth, status, flexWidth, title, faint.Render(fmt.Sprintf("%-*s", flexWidth, artist)), coll, faint.Render(fmt.Sprintf("%-*s", flexWidth, file))))
 		b.WriteByte('\n')
-		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+		if i == v.cursor && v.confirmDelete != "" {
+			noteWidth := max(12, v.termWidth-8)
+			b.WriteString("        ")
+			b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, noteWidth)))
+			b.WriteByte('\n')
+		} else if note := inlineRowNote(rawStatus, 0); note != "" && i == v.cursor {
 			noteWidth := max(12, v.termWidth-8)
 			b.WriteString("        ")
 			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))

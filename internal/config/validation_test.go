@@ -9,7 +9,7 @@ import (
 func TestValidateStrict_OverlayEntries_Valid(t *testing.T) {
 	cfg := Config{
 		Collections: map[string]CollectionConfig{
-			"songs": {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "song-info"}}},
+			"songs":  {Plan: "x.csv", Overlays: []OverlayEntry{{Type: "song-info"}}},
 			"drinks": {Plan: "y.csv", Overlays: []OverlayEntry{{Type: "drink"}}},
 		},
 	}
@@ -229,6 +229,42 @@ func TestValidateStrict_SegmentTemplate_UnknownToken(t *testing.T) {
 	}
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error for unknown token, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidateStrict_CacheConfig_Valid(t *testing.T) {
+	cfg := Default()
+	cfg.Collections["songs"] = CollectionConfig{
+		Plan:               "songs.yaml",
+		CacheSearchProfile: "song_lookup",
+	}
+
+	results := cfg.validateCacheConfig()
+	if len(results) != 0 {
+		t.Fatalf("expected no results, got %v", results)
+	}
+}
+
+func TestValidateStrict_CacheConfig_UnknownField(t *testing.T) {
+	cfg := Default()
+	cfg.Cache.View.PrimaryFields = []string{"bogus"}
+
+	results := cfg.validateCacheConfig()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(results), results)
+	}
+}
+
+func TestValidateStrict_CacheConfig_MissingProfileReference(t *testing.T) {
+	cfg := Default()
+	cfg.Collections["songs"] = CollectionConfig{
+		Plan:               "songs.yaml",
+		CacheSearchProfile: "missing",
+	}
+
+	results := cfg.validateCacheConfig()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(results), results)
 	}
 }
 

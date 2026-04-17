@@ -60,10 +60,19 @@ type collectionView struct {
 	editFieldIdx int
 	editValue    string
 	editCursor   int
+	editHint     string
 
 	// Add-clip slot state (set by model when modeAddClip is active).
-	addFocus  bool
-	addBuffer string
+	addFocus       bool
+	addBuffer      string
+	addCursor      int
+	addHint        string
+	addSuggestions []songSuggestion
+	addSelected    int
+
+	// Inline confirm prompt rendered beneath the cursor row (set by model when
+	// modeConfirmDelete is active). Empty string means no pending confirm.
+	confirmDelete string
 
 	termWidth  int
 	termHeight int
@@ -182,8 +191,9 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 func (v collectionView) visibleRowCount() int {
 	// -10 instead of -9 to reserve a line for the persistent Add Clip slot.
 	h := v.termHeight - 10
+	h -= v.addSlotExtraLines()
 	if v.cursor >= 0 && v.cursor < len(v.rows) {
-		if inlineRowNote(v.rowStatus[v.rows[v.cursor].Index]) != "" {
+		if v.confirmDelete != "" || inlineRowNote(v.rowStatus[v.rows[v.cursor].Index], v.tick) != "" {
 			h--
 		}
 	}
@@ -191,6 +201,17 @@ func (v collectionView) visibleRowCount() int {
 		h = 1
 	}
 	return h
+}
+
+func (v collectionView) addSlotExtraLines() int {
+	lines := 0
+	if len(v.addSuggestions) > 0 {
+		lines += len(v.addSuggestions)
+	}
+	if strings.TrimSpace(v.addHint) != "" {
+		lines++
+	}
+	return lines
 }
 
 func (v collectionView) view() string {
@@ -323,10 +344,31 @@ func (v collectionView) view() string {
 			b.WriteString(strings.Join(parts[1:], "  "))
 		}
 		b.WriteByte('\n')
-		if note := inlineRowNote(rawStatus); note != "" && i == v.cursor {
+		note := ""
+		useConfirmStyle := false
+		if i == v.cursor && v.confirmDelete != "" {
+			note = v.confirmDelete
+			useConfirmStyle = true
+		} else if isEditRow {
+			if statusNote := inlineRowNote(rawStatus, v.tick); statusNote != "" {
+				note = statusNote
+			} else {
+				note = editContextNote(v, row)
+			}
+		} else {
+			note = inlineRowNote(rawStatus, v.tick)
+		}
+		if note != "" && i == v.cursor {
 			b.WriteString(strings.Repeat(" ", gutterWidth+gutterGapWidth))
 			noteWidth := max(12, v.termWidth-gutterWidth-gutterGapWidth-2)
-			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			switch {
+			case useConfirmStyle:
+				b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			case isEditRow && !strings.HasPrefix(strings.TrimSpace(rawStatus), "note:") && strings.TrimSpace(rawStatus) != "probing":
+				b.WriteString(faint.Render(tui.TruncateWithEllipsis("+ "+note, noteWidth)))
+			default:
+				b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
+			}
 			b.WriteByte('\n')
 		}
 	}
@@ -343,6 +385,22 @@ func (v collectionView) view() string {
 	return b.String()
 }
 
+func editContextNote(v collectionView, row csvplan.CollectionRow) string {
+	field := ""
+	if v.editFieldIdx >= 0 && v.editFieldIdx < len(v.columns) {
+		field = v.columns[v.editFieldIdx].field
+	}
+	parts := []string{fmt.Sprintf("Edit mode row %02d", row.Index)}
+	if field != "" {
+		parts = append(parts, "field "+field)
+	}
+	if strings.TrimSpace(v.editHint) != "" {
+		parts = append(parts, strings.TrimSpace(v.editHint))
+	}
+	parts = append(parts, "Enter save", "Esc cancel")
+	return strings.Join(parts, " · ")
+}
+
 // renderAddSlot renders the persistent add-clip row at the bottom of the grid.
 // Single-line input is shown verbatim with a faint detection hint (· link / · path);
 // multi-line pastes collapse to a chip like `[CSV +52 lines]` so the buffer never
@@ -356,24 +414,91 @@ func (v collectionView) renderAddSlot() string {
 	}
 
 	if !v.addFocus && v.addBuffer == "" {
-		hint := faint.Render("paste a link or CSV here, or type to add one manually")
-		if len(v.rows) == 0 {
-			hint = faint.Render("paste a link or CSV here · no rows yet — press 'a' to start")
-		}
-		return cursor + marker + hint
+		return faint.Render("  + press a to add a clip")
 	}
 
 	buf := v.addBuffer
 	body, detect := classifyAddBuffer(buf)
 
-	rendered := editStyle.Render(body)
+	renderBody := body
+	if v.addFocus && !strings.Contains(body, "\n") {
+		renderBody = renderCursorField(body, v.addCursor)
+	}
+	rendered := editStyle.Render(renderBody)
 	if v.addFocus {
-		rendered += editStyle.Render("█")
+		if strings.Contains(body, "\n") {
+			rendered += editStyle.Render("█")
+		}
 	}
 	if detect != "" {
 		rendered += "  " + faint.Render("· "+detect)
 	}
-	return cursor + marker + rendered
+	line := cursor + marker + rendered
+	if strings.TrimSpace(v.addHint) == "" && len(v.addSuggestions) == 0 {
+		return line
+	}
+	var b strings.Builder
+	b.WriteString(line)
+	suggestionWidth := max(12, v.termWidth-10)
+	query := strings.TrimSpace(v.addBuffer)
+	for i, suggestion := range v.addSuggestions {
+		b.WriteByte('\n')
+		label := renderSuggestionLabel(suggestion, query, i == v.addSelected)
+		b.WriteString(strings.Repeat(" ", 6))
+		b.WriteString(tui.TruncateWithEllipsis(label, suggestionWidth))
+	}
+	if strings.TrimSpace(v.addHint) != "" {
+		b.WriteByte('\n')
+		noteWidth := max(12, v.termWidth-6)
+		b.WriteString(strings.Repeat(" ", 6))
+		b.WriteString(faint.Render(tui.TruncateWithEllipsis(v.addHint, noteWidth)))
+	}
+	return b.String()
+}
+
+func renderSuggestionLabel(suggestion songSuggestion, query string, selected bool) string {
+	title := strings.TrimSpace(suggestion.Title)
+	artist := strings.TrimSpace(suggestion.Artist)
+	if title == "" && artist == "" {
+		title = strings.TrimSpace(suggestion.Link)
+	}
+	title = highlightMatch(title, query, selected)
+	artist = highlightMatch(artist, query, selected)
+	label := title
+	if artist != "" {
+		label += " - " + artist
+	}
+	return label
+}
+
+func highlightMatch(value, query string, selected bool) string {
+	value = strings.TrimSpace(value)
+	query = strings.TrimSpace(query)
+	if value == "" || query == "" {
+		return applySuggestionBaseStyle(value, selected)
+	}
+	lowerValue := strings.ToLower(value)
+	lowerQuery := strings.ToLower(query)
+	idx := strings.Index(lowerValue, lowerQuery)
+	if idx < 0 {
+		return applySuggestionBaseStyle(value, selected)
+	}
+	end := idx + len(query)
+	if idx >= len(value) || end > len(value) {
+		return applySuggestionBaseStyle(value, selected)
+	}
+	base := addSuggestionOtherStyle
+	if selected {
+		base = addSuggestionActiveStyle
+	}
+	return base.Render(value[:idx]) + matchStyle.Render(value[idx:end]) + base.Render(value[end:])
+}
+
+func applySuggestionBaseStyle(value string, selected bool) string {
+	if selected {
+		return addSuggestionActiveStyle.Render(value)
+	}
+	return addSuggestionOtherStyle.Render(value)
 }
 
 // classifyAddBuffer returns (displayBody, detectionHint).
@@ -450,6 +575,8 @@ func compactRowStatus(raw string, tick int) string {
 		return "F " + busySpinner(tick)
 	case status == "rendering":
 		return "R " + busySpinner(tick)
+	case status == "probing":
+		return "P " + busySpinner(tick)
 	case strings.HasPrefix(status, "rendering "):
 		pct := strings.TrimSpace(strings.TrimPrefix(status, "rendering "))
 		return "R " + pct
@@ -461,8 +588,11 @@ func compactRowStatus(raw string, tick int) string {
 	}
 }
 
-func inlineRowNote(raw string) string {
+func inlineRowNote(raw string, tick int) string {
 	status := strings.TrimSpace(raw)
+	if status == "probing" {
+		return busySpinner(tick) + " Probing metadata..."
+	}
 	if !strings.HasPrefix(status, "note:") {
 		return ""
 	}
