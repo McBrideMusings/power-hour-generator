@@ -14,15 +14,15 @@ func renderFooter(m Model) string {
 	kind := m.viewKind(m.activeView)
 	switch kind {
 	case "timeline":
-		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  x del  u refresh") + vlc + footerStyle.Render("  e/E edit/ext  r render  c concat  ? help  q/Esc quit")
+		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  x del  u refresh") + vlc + footerStyle.Render("  e/E edit/ext  r render  c concat  o open  ? help  q/Esc quit")
 	case "collection":
-		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  d dup  x del  u refresh  f/F fetch/all") + vlc + footerStyle.Render("  e/E edit/ext  r/R render/all  ? help  q/Esc quit")
+		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  d dup  x del  u refresh  f/F fetch/all") + vlc + footerStyle.Render("  e/E edit/ext  r/R render/all  o open  ? help  q/Esc quit")
 	case "cache":
-		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  x del  d doctor  D all  u refresh") + vlc + footerStyle.Render("  ? help  q/Esc quit")
+		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  x del  d doctor  D all  u refresh") + vlc + footerStyle.Render("  o open  ? help  q/Esc quit")
 	case "tools":
-		return footerStyle.Render("←/→ views  u refresh  ? help  q/Esc quit")
+		return footerStyle.Render("←/→ views  u refresh  o open  ? help  q/Esc quit")
 	}
-	return footerStyle.Render("←/→ views  u refresh  ? help  q/Esc quit")
+	return footerStyle.Render("←/→ views  u refresh  o open  ? help  q/Esc quit")
 }
 
 func busySpinner(tick int) string {
