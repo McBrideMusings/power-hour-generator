@@ -2,8 +2,10 @@ package render
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -232,7 +234,7 @@ func WriteConcatList(concatFile string, segments []TimelineSegmentPath) error {
 // ConcatResult holds the outcome of a concat run.
 type ConcatResult struct {
 	OutputPath string
-	Method     string // "stream_copy" or "re-encode"
+	Method     string // "single_copy", "stream_copy", or "re-encode"
 }
 
 // RunConcat concatenates segments using the ffmpeg concat demuxer. It tries
@@ -245,6 +247,17 @@ func RunConcat(ctx context.Context, concatFile, outputPath string, enc tools.Res
 
 	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
 		return ConcatResult{}, fmt.Errorf("prepare output dir: %w", err)
+	}
+
+	segments, err := readConcatList(concatFile)
+	if err != nil {
+		return ConcatResult{}, err
+	}
+	if len(segments) == 1 {
+		if err := copyFile(outputPath, segments[0]); err != nil {
+			return ConcatResult{}, fmt.Errorf("copy single segment: %w", err)
+		}
+		return ConcatResult{OutputPath: outputPath, Method: "single_copy"}, nil
 	}
 
 	// Try stream copy first (always works when all segments share the same codec).
@@ -321,4 +334,71 @@ func runFFmpeg(ctx context.Context, ffmpegPath string, args []string, stdout, st
 		cmd.Stderr = stderr
 	}
 	return cmd.Run()
+}
+
+func readConcatList(concatFile string) ([]string, error) {
+	data, err := os.ReadFile(concatFile)
+	if err != nil {
+		return nil, fmt.Errorf("read concat list: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	segments := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, "file '") || !strings.HasSuffix(line, "'") {
+			return nil, fmt.Errorf("parse concat list: unsupported line %q", line)
+		}
+		path := strings.TrimSuffix(strings.TrimPrefix(line, "file '"), "'")
+		path = strings.ReplaceAll(path, "'\\''", "'")
+		segments = append(segments, path)
+	}
+
+	return segments, nil
+}
+
+func copyFile(dst, src string) error {
+	if sameFilePath(dst, src) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func sameFilePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA == nil && errB == nil {
+		return absA == absB
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
