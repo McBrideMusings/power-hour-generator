@@ -72,7 +72,7 @@ func renderHelpOverlay(activeView int, width, height int) string {
 		b.WriteString("  x            Delete selected row\n")
 		b.WriteString("  e/E          Edit/ext\n")
 		b.WriteString("  a            Add slot: paste link or fuzzy-search cache\n")
-		b.WriteString("  Tab          Add slot: add best configured cache match\n")
+		b.WriteString("  Tab/Enter    Add slot: add selected cache match (Enter falls back to URL/batch)\n")
 		b.WriteString("  Tab          Inline edit: accept cache match / next field\n")
 		b.WriteString("  Ctrl+R       Inline link edit: probe metadata for the current URL\n")
 		b.WriteString("  f/F          Fetch selected/all\n")

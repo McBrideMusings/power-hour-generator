@@ -576,6 +576,154 @@ func TestAddClipArrowKeysSelectSuggestionForTab(t *testing.T) {
 	}
 }
 
+func TestAddClipEnterAddsBestCachedMatch(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"youtube:ninara": {
+				Identifier: "youtube:ninara",
+				Source:     "https://example.com/watch?v=ninara",
+				Title:      "Ninara",
+				Artist:     "Kora",
+			},
+		},
+		Links: map[string]string{
+			"https://example.com/watch?v=ninara": "youtube:ninara",
+		},
+	}
+	m.cfg.Cache = config.Default().Cache
+	collCfg := m.cfg.Collections["songs"]
+	collCfg.CacheSearchProfile = "song_lookup"
+	m.cfg.Collections["songs"] = collCfg
+	coll := m.collections["songs"]
+	coll.Config.CacheSearchProfile = "song_lookup"
+	m.collections["songs"] = coll
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "Ninara"
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = "Ninara"
+	m = m.refreshAddClipHint(0)
+
+	gotModel, cmd := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected no async command when Enter adds fuzzy cache match")
+	}
+	if len(got.collectionViews[0].rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(got.collectionViews[0].rows))
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.CustomFields["title"] != "Ninara" {
+		t.Fatalf("title = %q, want Ninara", row.CustomFields["title"])
+	}
+	if row.CustomFields["artist"] != "Kora" {
+		t.Fatalf("artist = %q, want Kora", row.CustomFields["artist"])
+	}
+	if row.Link != "https://example.com/watch?v=ninara" {
+		t.Fatalf("link = %q, want cached source URL", row.Link)
+	}
+}
+
+func TestAddClipEnterWithSelectedSuggestion(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{
+		Entries: map[string]cache.Entry{
+			"one": {Identifier: "one", Source: "https://example.com/1", Title: "Ninara", Artist: "Kora"},
+			"two": {Identifier: "two", Source: "https://example.com/2", Title: "Nine Ball", Artist: "Zach Bryan"},
+		},
+		Links: map[string]string{
+			"https://example.com/1": "one",
+			"https://example.com/2": "two",
+		},
+	}
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "ni"
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = "ni"
+	m = m.refreshAddClipHint(0)
+
+	downModel, _ := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyDown})
+	down := downModel.(Model)
+	gotModel, cmd := down.handleAddClipKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+	if cmd != nil {
+		t.Fatal("expected no async command when Enter adds selected fuzzy cache match")
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.CustomFields["title"] != "Nine Ball" {
+		t.Fatalf("title = %q, want Nine Ball", row.CustomFields["title"])
+	}
+}
+
+func TestAddClipEnterRefusesRawNonURLWithoutMatch(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{Entries: map[string]cache.Entry{}, Links: map[string]string{}}
+	m.cfg.Cache = config.Default().Cache
+	collCfg := m.cfg.Collections["songs"]
+	collCfg.CacheSearchProfile = "song_lookup"
+	m.cfg.Collections["songs"] = collCfg
+	coll := m.collections["songs"]
+	coll.Config.CacheSearchProfile = "song_lookup"
+	m.collections["songs"] = coll
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "xyzzy"
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = "xyzzy"
+	m = m.refreshAddClipHint(0)
+
+	gotModel, cmd := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+	if cmd != nil {
+		t.Fatal("expected no async command on refusal")
+	}
+	if len(got.collectionViews[0].rows) != 0 {
+		t.Fatalf("rows = %d, want 0 (row should not be added)", len(got.collectionViews[0].rows))
+	}
+	if got.statusMsg == "" {
+		t.Fatal("expected an inline refusal note, got empty statusMsg")
+	}
+	if !got.collectionViews[0].addFocus {
+		t.Fatal("expected add slot to remain focused after refusal")
+	}
+}
+
 func TestAddClipBackspaceAndCaretEditBuffer(t *testing.T) {
 	m := testCollectionModel(t)
 	m.mode = modeAddClip

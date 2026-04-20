@@ -82,30 +82,19 @@ func findConcatOutput(projectRoot string) (string, bool, int64, time.Time) {
 }
 
 // contentHeight returns total height available for the sequence and preview panels.
+// -13 reserves chrome plus one line for the unified help row at the bottom.
 func (v timelineView) contentHeight() int {
-	h := v.termHeight - 12 - v.outputExtraLines()
+	h := v.termHeight - 13
 	if h < 4 {
 		h = 4
 	}
 	return h
 }
 
-func (v timelineView) outputExtraLines() int {
-	if v.concatFocus && v.confirmDelete != "" {
-		return 1
-	}
-	return 0
-}
-
 func (v timelineView) sequenceLinesNeeded() int {
 	lines := len(v.sequence)
 	if lines == 0 {
 		lines = 1
-	}
-	if v.focusPanel == 0 && v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
-		if v.confirmDelete != "" || inlineRowNote(v.seqStatus[v.seqCursor], 0) != "" {
-			lines++
-		}
 	}
 	return lines
 }
@@ -158,11 +147,6 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		b.WriteString(cursor + faint.Render("not yet exported — press c to concatenate"))
 	}
 	b.WriteByte('\n')
-	if v.concatFocus && v.confirmDelete != "" {
-		b.WriteString("   ")
-		b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, max(12, v.termWidth-6))))
-		b.WriteByte('\n')
-	}
 	b.WriteByte('\n')
 
 	// --- Sequence entries panel ---
@@ -171,11 +155,6 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 
 	seqH := v.seqPanelHeight()
 	visibleSeq := seqH
-	if v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
-		if v.confirmDelete != "" || inlineRowNote(v.seqStatus[v.seqCursor], 0) != "" {
-			visibleSeq--
-		}
-	}
 	if visibleSeq < 1 {
 		visibleSeq = 1
 	}
@@ -221,21 +200,9 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			b.WriteString(fadeDim.Render("  " + fade))
 		}
 		b.WriteByte('\n')
-		if i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus && v.confirmDelete != "" {
-			b.WriteString("   ")
-			b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, max(12, v.termWidth-6))))
-			b.WriteByte('\n')
-			rendered++
-		} else if note := inlineRowNote(v.seqStatus[i], 0); note != "" && i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus {
-			b.WriteString("   ")
-			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, max(12, v.termWidth-6))))
-			b.WriteByte('\n')
-			rendered++
-		}
 	}
 
 	if len(v.sequence) == 0 {
-		b.WriteString(faint.Render("  No sequence entries. Press 'a' to add one."))
 		b.WriteByte('\n')
 	}
 
@@ -314,7 +281,30 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		b.WriteByte('\n')
 	}
 
+	b.WriteString(v.renderHelpRow())
+	b.WriteByte('\n')
+
 	return b.String()
+}
+
+// renderHelpRow returns the single inline help row for the timeline view.
+// Priority matches the collection/cache views: confirm-delete wins, then any
+// transient note on the focused row, then a default action hint. Timeline has
+// no inline-edit or add-slot (those happen via modal prompts), so the ladder
+// is shorter here but the shape is identical.
+func (v timelineView) renderHelpRow() string {
+	if v.confirmDelete != "" {
+		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
+	}
+	if v.focusPanel == 0 && !v.concatFocus && v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
+		if note := inlineRowNote(v.seqStatus[v.seqCursor], 0); note != "" {
+			return helpRowText(note, editStyle, v.termWidth)
+		}
+	}
+	if len(v.sequence) == 0 {
+		return helpRowText("no sequence entries — press a to add one", faint, v.termWidth)
+	}
+	return helpRowText("a add · d delete · J/K reorder · e edit · r render · c concat", faint, v.termWidth)
 }
 
 func timelineSliceLabel(raw string) string {
