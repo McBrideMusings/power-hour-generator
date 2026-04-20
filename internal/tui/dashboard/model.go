@@ -948,6 +948,18 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.cancelAddClip(), nil
 
 	case tea.KeyEnter:
+		trimmed := strings.TrimSpace(m.addBuffer)
+		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
+			if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
+				if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, profile); matched {
+					return m.addSuggestedCollectionRow(cvIdx, suggestion)
+				}
+				m = m.setCollectionCursorNote(cvIdx,
+					fmt.Sprintf("no cached match for %q — paste a URL or pick a suggestion", trimmed))
+				m.resetAddClipInput(cvIdx, true)
+				return m, nil
+			}
+		}
 		return m.dispatchAddBuffer(cvIdx, m.addBuffer)
 
 	case tea.KeyTab:
@@ -1037,40 +1049,33 @@ func (m Model) refreshAddClipHint(cvIdx int) Model {
 	v.addSelected = 0
 	v.addCursor = min(v.addCursor, len(v.addBuffer))
 	trimmed := strings.TrimSpace(v.addBuffer)
-	if trimmed == "" {
-		m.collectionViews[cvIdx] = v
-		return m
-	}
-	if looksLikeBatchImport(trimmed) {
-		v.addHint = "Enter imports the pasted rows."
-		m.collectionViews[cvIdx] = v
-		return m
-	}
-	if isURL(trimmed) {
-		profile, ok := m.collectionCacheSearchProfile(cvIdx)
-		if !ok {
-			profile = m.defaultCacheSearchProfile()
-		}
-		if match, ok := findCachedSongByLink(m.cacheIdx, cleanYouTubeURL(trimmed), profile); ok {
-			v.addHint = formatSuggestionHint("Known cached link. Enter adds:", []songSuggestion{match})
-		} else {
-			v.addHint = "Unknown link. Enter adds the row and auto-probes metadata."
-		}
-		m.collectionViews[cvIdx] = v
-		return m
-	}
-	if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
-		if suggestions := searchCachedSongs(m.cacheIdx, trimmed, profile, 3); len(suggestions) > 0 {
-			v.addSuggestions = suggestions
-			v.addSelected = min(v.addSelected, len(suggestions)-1)
-			v.addHint = "Up/Down chooses a match. Tab adds the selected match. Enter adds the raw value."
+
+	if trimmed != "" {
+		if looksLikeBatchImport(trimmed) {
+			v.addHint = "Enter imports the pasted rows."
+		} else if isURL(trimmed) {
+			profile, ok := m.collectionCacheSearchProfile(cvIdx)
+			if !ok {
+				profile = m.defaultCacheSearchProfile()
+			}
+			if match, ok := findCachedSongByLink(m.cacheIdx, cleanYouTubeURL(trimmed), profile); ok {
+				v.addHint = formatSuggestionHint("Known cached link. Enter adds:", []songSuggestion{match})
+			} else {
+				v.addHint = "Unknown link. Enter adds the row and auto-probes metadata."
+			}
+		} else if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
+			if suggestions := searchCachedSongs(m.cacheIdx, trimmed, profile, 3); len(suggestions) > 0 {
+				v.addSuggestions = suggestions
+				v.addSelected = min(v.addSelected, len(suggestions)-1)
+			}
 		}
 	}
+
 	m.collectionViews[cvIdx] = v
 	return m
 }
 
-func (m Model) resetAddClipInput(cvIdx int, keepFocus bool) {
+func (m *Model) resetAddClipInput(cvIdx int, keepFocus bool) {
 	m.addBuffer = ""
 	m.addCursor = 0
 	if cvIdx >= 0 && cvIdx < len(m.collectionViews) {
@@ -1127,38 +1132,95 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m.addSingleCollectionRow(cvIdx, value, true)
+	return m.addSingleCollectionRow(cvIdx, value)
+}
+
+// addRowOutcome describes the post-write behavior that a caller of
+// addCollectionRow wants: whether to keep the add slot focused for more pastes,
+// whether to flow into inline-edit mode when metadata is still incomplete,
+// whether to kick off an async metadata probe, and what note to show inline.
+type addRowOutcome struct {
+	stayInAddMode     bool
+	editOnEmptyFields bool
+	probeURL          string
+	note              string
+}
+
+// addCollectionRow is the single shared writer used by every add path
+// (suggestion, raw link, async result). Callers build the row themselves (so
+// they can pre-apply metadata from whatever source they have), then hand it
+// off along with an outcome describing what mode to land in. This keeps the
+// "append, scroll, persist, resolve" invariants in one place and lets the
+// two add flows implicitly share each other's behavior (e.g. typed entries
+// without metadata naturally flow into edit mode on the first empty field).
+func (m Model) addCollectionRow(cvIdx int, newRow csvplan.CollectionRow, outcome addRowOutcome) (tea.Model, tea.Cmd) {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m, nil
+	}
+	v := m.collectionViews[cvIdx]
+	newRow.Index = len(v.rows) + 1
+
+	v.rows = append(v.rows, newRow)
+	v.cursor = len(v.rows) - 1
+	v.autoScroll()
+	v.addFocus = outcome.stayInAddMode
+	m.collectionViews[cvIdx] = v
+
+	m = writeCollection(m, cvIdx)
+	m = reResolve(m)
+	m.resetAddClipInput(cvIdx, outcome.stayInAddMode)
+
+	var cmd tea.Cmd
+	if outcome.probeURL != "" {
+		if cv := m.collectionViews[cvIdx]; cv.cursor >= 0 && cv.cursor < len(cv.rows) {
+			m = m.setCollectionRowStatus(cvIdx, cv.rows[cv.cursor].Index, "probing")
+		}
+		cmd = probeMetadata(outcome.probeURL, cvIdx)
+	}
+
+	if outcome.editOnEmptyFields && cmd == nil {
+		rowIdx := len(m.collectionViews[cvIdx].rows) - 1
+		if fieldIdx, ok := firstEmptyImportantField(m.collectionViews[cvIdx], rowIdx); ok {
+			m = m.enterInlineEditOn(cvIdx, rowIdx, fieldIdx)
+		}
+	}
+
+	if strings.TrimSpace(outcome.note) != "" {
+		m = m.setCollectionCursorNote(cvIdx, outcome.note)
+	}
+	return m, cmd
+}
+
+// firstEmptyImportantField returns the column index of the first empty
+// title/artist field on the given row, or (0, false) if both are filled.
+// Used by addCollectionRow to decide whether to flow into inline-edit.
+func firstEmptyImportantField(v collectionView, rowIdx int) (int, bool) {
+	if rowIdx < 0 || rowIdx >= len(v.rows) {
+		return 0, false
+	}
+	row := v.rows[rowIdx]
+	for i, col := range v.columns {
+		switch col.field {
+		case "title", "artist":
+			if strings.TrimSpace(row.CustomFields[col.field]) == "" {
+				return i, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func (m Model) addSuggestedCollectionRow(cvIdx int, suggestion songSuggestion) (tea.Model, tea.Cmd) {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return m, nil
 	}
-	collName := m.collectionNames[cvIdx]
-	coll := m.collections[collName]
-	v := m.collectionViews[cvIdx]
-
+	coll := m.collections[m.collectionNames[cvIdx]]
 	newRow := project.BuildCollectionRow(coll, suggestion.Link)
-	newRow.Index = len(v.rows) + 1
 	applySuggestionToRow(coll, &newRow, suggestion)
-
-	v.rows = append(v.rows, newRow)
-	v.cursor = len(v.rows) - 1
-	v.autoScroll()
-	v.addFocus = true
-	v.addBuffer = ""
-	v.addCursor = 0
-	v.addHint = ""
-	v.addSuggestions = nil
-	v.addSelected = 0
-	m.collectionViews[cvIdx] = v
-
-	m = writeCollection(m, cvIdx)
-	m = reResolve(m)
-	m.addBuffer = ""
-	m.addCursor = 0
-	m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("added from cache: %s - %s", suggestion.Title, suggestion.Artist))
-	return m, nil
+	return m.addCollectionRow(cvIdx, newRow, addRowOutcome{
+		stayInAddMode: true,
+		note:          fmt.Sprintf("added from cache: %s - %s", suggestion.Title, suggestion.Artist),
+	})
 }
 
 // enterInlineEditOn puts the model into modeInlineEdit on the given row + field.
@@ -2514,10 +2576,17 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m.addSingleCollectionRow(cvIdx, value, false)
+	return m.addSingleCollectionRow(cvIdx, value)
 }
 
-func (m Model) addSingleCollectionRow(cvIdx int, value string, enterInlineEdit bool) (tea.Model, tea.Cmd) {
+// addSingleCollectionRow is the raw-value add path: a URL, a local file path,
+// or (now only in legacy callers) arbitrary text. It builds a row, pre-applies
+// cache metadata when the link is already known, and delegates the write to
+// addCollectionRow. The outcome is derived from the row state rather than a
+// boolean parameter: cached links stay in add mode with a recognition note,
+// unknown URLs stay in add mode and fire an async probe, and anything else
+// flows into inline-edit on the first empty title/artist field.
+func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.Cmd) {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return m, nil
 	}
@@ -2527,50 +2596,29 @@ func (m Model) addSingleCollectionRow(cvIdx int, value string, enterInlineEdit b
 		return m, nil
 	}
 
-	collName := m.collectionNames[cvIdx]
-	coll := m.collections[collName]
-	v := m.collectionViews[cvIdx]
-
+	coll := m.collections[m.collectionNames[cvIdx]]
 	newRow := project.BuildCollectionRow(coll, value)
-	newRow.Index = len(v.rows) + 1
+
+	cached := false
 	if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
 		if match, ok := findCachedSongByLink(m.cacheIdx, value, profile); ok {
 			applySuggestionToRow(coll, &newRow, match)
-		}
-	}
-
-	v.rows = append(v.rows, newRow)
-	v.cursor = len(v.rows) - 1
-	v.autoScroll()
-	v.addFocus = false
-	v.addBuffer = ""
-	m.collectionViews[cvIdx] = v
-
-	m = writeCollection(m, cvIdx)
-	m = reResolve(m)
-	m.addBuffer = ""
-
-	if enterInlineEdit {
-		m = m.enterInlineEditOn(cvIdx, len(m.collectionViews[cvIdx].rows)-1, 0)
-	}
-
-	if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
-		if _, ok := findCachedSongByLink(m.cacheIdx, value, profile); ok {
-			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("recognized cached link %s", value))
-			return m, nil
+			cached = true
 		}
 	} else if _, ok := findCachedEntryByLink(m.cacheIdx, value); ok {
-		m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("recognized cached link %s", value))
-		return m, nil
+		cached = true
 	}
-	if isURL(value) {
-		if cv := m.collectionViews[cvIdx]; cv.cursor >= 0 && cv.cursor < len(cv.rows) {
-			m = m.setCollectionRowStatus(cvIdx, cv.rows[cv.cursor].Index, "probing")
-		}
-		return m, probeMetadata(value, cvIdx)
+
+	outcome := addRowOutcome{stayInAddMode: true, editOnEmptyFields: true}
+	switch {
+	case cached:
+		outcome.note = fmt.Sprintf("recognized cached link %s", value)
+	case isURL(value):
+		outcome.probeURL = value
+	default:
+		outcome.note = "added"
 	}
-	m = m.setCollectionCursorNote(cvIdx, "added")
-	return m, nil
+	return m.addCollectionRow(cvIdx, newRow, outcome)
 }
 
 func (m Model) collectionCacheSearchProfile(cvIdx int) (config.CacheSearchProfile, bool) {

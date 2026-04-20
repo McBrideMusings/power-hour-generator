@@ -189,13 +189,13 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 }
 
 func (v collectionView) visibleRowCount() int {
-	// -10 instead of -9 to reserve a line for the persistent Add Clip slot.
+	// -10 reserves one line for the persistent help row at the bottom plus
+	// surrounding chrome (headers, section label).
 	h := v.termHeight - 10
-	h -= v.addSlotExtraLines()
-	if v.cursor >= 0 && v.cursor < len(v.rows) {
-		if v.confirmDelete != "" || inlineRowNote(v.rowStatus[v.rows[v.cursor].Index], v.tick) != "" {
-			h--
-		}
+	// The focused add-slot is the only help row that can exceed a single
+	// line: it optionally adds suggestion rows and a dynamic hint line.
+	if v.addFocus {
+		h -= v.addSlotExtraLines()
 	}
 	if h < 1 {
 		h = 1
@@ -344,33 +344,6 @@ func (v collectionView) view() string {
 			b.WriteString(strings.Join(parts[1:], "  "))
 		}
 		b.WriteByte('\n')
-		note := ""
-		useConfirmStyle := false
-		if i == v.cursor && v.confirmDelete != "" {
-			note = v.confirmDelete
-			useConfirmStyle = true
-		} else if isEditRow {
-			if statusNote := inlineRowNote(rawStatus, v.tick); statusNote != "" {
-				note = statusNote
-			} else {
-				note = editContextNote(v, row)
-			}
-		} else {
-			note = inlineRowNote(rawStatus, v.tick)
-		}
-		if note != "" && i == v.cursor {
-			b.WriteString(strings.Repeat(" ", gutterWidth+gutterGapWidth))
-			noteWidth := max(12, v.termWidth-gutterWidth-gutterGapWidth-2)
-			switch {
-			case useConfirmStyle:
-				b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
-			case isEditRow && !strings.HasPrefix(strings.TrimSpace(rawStatus), "note:") && strings.TrimSpace(rawStatus) != "probing":
-				b.WriteString(faint.Render(tui.TruncateWithEllipsis("+ "+note, noteWidth)))
-			default:
-				b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
-			}
-			b.WriteByte('\n')
-		}
 	}
 
 	if endRow < len(v.rows) {
@@ -378,62 +351,109 @@ func (v collectionView) view() string {
 		b.WriteByte('\n')
 	}
 
-	// Persistent "Add Clip" slot pinned below the data rows.
-	b.WriteString(v.renderAddSlot())
+	// Unified inline help row. All contextual messages (confirm-delete, edit
+	// mode, transient notes like "removed row", the focused add slot, and the
+	// default "press a to add a clip") render through the same footer element
+	// in a fixed priority order. Only one help row is ever visible.
+	b.WriteString(v.renderHelpRow())
 	b.WriteByte('\n')
 
 	return b.String()
 }
 
 func editContextNote(v collectionView, row csvplan.CollectionRow) string {
-	field := ""
+	header := fmt.Sprintf("Edit row %02d", row.Index)
 	if v.editFieldIdx >= 0 && v.editFieldIdx < len(v.columns) {
-		field = v.columns[v.editFieldIdx].field
+		header += " · " + v.columns[v.editFieldIdx].field
 	}
-	parts := []string{fmt.Sprintf("Edit mode row %02d", row.Index)}
-	if field != "" {
-		parts = append(parts, "field "+field)
+
+	parts := []string{header, "Enter save", "Esc cancel", "Tab next field"}
+	if hint := strings.TrimSpace(v.editHint); hint != "" {
+		parts = append(parts, hint)
 	}
-	if strings.TrimSpace(v.editHint) != "" {
-		parts = append(parts, strings.TrimSpace(v.editHint))
-	}
-	parts = append(parts, "Enter save", "Esc cancel")
 	return strings.Join(parts, " · ")
 }
 
-// renderAddSlot renders the persistent add-clip row at the bottom of the grid.
-// Single-line input is shown verbatim with a faint detection hint (· link / · path);
-// multi-line pastes collapse to a chip like `[CSV +52 lines]` so the buffer never
-// floods the UI. The user always commits with Enter.
-func (v collectionView) renderAddSlot() string {
-	cursor := "  "
-	marker := faint.Render("+ ")
-	if v.addFocus {
-		cursor = cursorStyle.Render("▸ ")
-		marker = cursorStyle.Render("+ ")
+// renderHelpRow returns the single inline help row for this view, picked
+// from a fixed priority ladder. The highest-priority populated source wins
+// and replaces every lower-priority default. The order matches what the
+// user is currently doing:
+//
+//  1. confirm-delete prompt (Y/N)
+//  2. inline-edit context (field being edited, keys)
+//  3. transient note / status on the cursor row ("removed row", "probing", …)
+//  4. focused add-slot (input + keys hint + suggestions)
+//  5. default action hint ("press a to add a clip")
+//
+// Only the add-slot branch can produce multiple lines (input + suggestions +
+// dynamic hint); all others render exactly one line via helpRowText.
+func (v collectionView) renderHelpRow() string {
+	// 1. Confirm-delete.
+	if v.confirmDelete != "" {
+		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
 	}
 
-	if !v.addFocus && v.addBuffer == "" {
-		return faint.Render("  + press a to add a clip")
+	// 2. Inline-edit context. If the edit row also carries a transient note,
+	// the note wins (so "saved" / "probing" are visible during the edit lull
+	// between keystrokes).
+	if v.editing && v.cursor >= 0 && v.cursor < len(v.rows) {
+		row := v.rows[v.cursor]
+		rawStatus := v.rowStatus[row.Index]
+		if note := inlineRowNote(rawStatus, v.tick); note != "" {
+			return helpRowText(note, editStyle, v.termWidth)
+		}
+		return helpRowText(editContextNote(v, row), faint, v.termWidth)
 	}
+
+	// 3. Transient note on the cursor row.
+	if v.cursor >= 0 && v.cursor < len(v.rows) {
+		row := v.rows[v.cursor]
+		if note := inlineRowNote(v.rowStatus[row.Index], v.tick); note != "" {
+			return helpRowText(note, editStyle, v.termWidth)
+		}
+	}
+
+	// 4. Focused add slot.
+	if v.addFocus {
+		return v.renderAddSlot()
+	}
+
+	// 5. Default.
+	return helpRowText("press a to add a clip", faint, v.termWidth)
+}
+
+// renderAddSlot renders the focused add-clip footer: the rendered input
+// with its cursor, a trailing keys hint on the same line, and optional
+// suggestions / dynamic hint on subsequent lines. This is the one help-row
+// branch that can span multiple lines; it still shares the same column and
+// "+ " marker as every other help row via helpRowRaw.
+func (v collectionView) renderAddSlot() string {
+	cursor := cursorStyle.Render("▸ ")
 
 	buf := v.addBuffer
 	body, detect := classifyAddBuffer(buf)
 
 	renderBody := body
-	if v.addFocus && !strings.Contains(body, "\n") {
+	if !strings.Contains(body, "\n") {
 		renderBody = renderCursorField(body, v.addCursor)
 	}
 	rendered := editStyle.Render(renderBody)
-	if v.addFocus {
-		if strings.Contains(body, "\n") {
-			rendered += editStyle.Render("█")
-		}
+	if strings.Contains(body, "\n") {
+		rendered += editStyle.Render("█")
 	}
 	if detect != "" {
 		rendered += "  " + faint.Render("· "+detect)
 	}
-	line := cursor + marker + rendered
+
+	keysHint := "Enter save · Esc cancel · paste URL or search cache"
+	if len(v.addSuggestions) > 0 {
+		keysHint = "↑/↓ select · Tab/Enter save selected · Esc cancel"
+	}
+
+	// The "▸" cursor replaces the leading two spaces of helpRowPrefix so the
+	// focused slot reads the same width as the idle/default help row.
+	line := cursor + "+ " + rendered + "  " + faint.Render(keysHint)
+
 	if strings.TrimSpace(v.addHint) == "" && len(v.addSuggestions) == 0 {
 		return line
 	}
@@ -444,13 +464,13 @@ func (v collectionView) renderAddSlot() string {
 	for i, suggestion := range v.addSuggestions {
 		b.WriteByte('\n')
 		label := renderSuggestionLabel(suggestion, query, i == v.addSelected)
-		b.WriteString(strings.Repeat(" ", 6))
+		b.WriteString(strings.Repeat(" ", len(helpRowPrefix)+2))
 		b.WriteString(tui.TruncateWithEllipsis(label, suggestionWidth))
 	}
 	if strings.TrimSpace(v.addHint) != "" {
+		noteWidth := max(12, v.termWidth-len(helpRowPrefix)-2)
 		b.WriteByte('\n')
-		noteWidth := max(12, v.termWidth-6)
-		b.WriteString(strings.Repeat(" ", 6))
+		b.WriteString(strings.Repeat(" ", len(helpRowPrefix)+2))
 		b.WriteString(faint.Render(tui.TruncateWithEllipsis(v.addHint, noteWidth)))
 	}
 	return b.String()

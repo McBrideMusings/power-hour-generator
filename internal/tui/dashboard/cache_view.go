@@ -118,17 +118,38 @@ func (v *cacheView) toggle() {
 }
 
 func (v cacheView) visibleRowCount() int {
-	h := v.termHeight - 9
-	entries := v.entries()
-	if v.cursor >= 0 && v.cursor < len(entries) {
-		if v.confirmDelete != "" || inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0) != "" {
-			h--
-		}
-	}
+	// -10 reserves one line for the unified help row at the bottom.
+	h := v.termHeight - 10
 	if h < 1 {
 		h = 1
 	}
 	return h
+}
+
+// renderHelpRow returns the single inline help row for the cache view,
+// picked from the same priority ladder as the collection view so every
+// table in the dashboard shares one help-row shape.
+func (v cacheView) renderHelpRow() string {
+	entries := v.entries()
+
+	if v.confirmDelete != "" {
+		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
+	}
+
+	if v.cursor >= 0 && v.cursor < len(entries) {
+		if note := inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0); note != "" {
+			return helpRowText(note, editStyle, v.termWidth)
+		}
+	}
+
+	if len(entries) == 0 {
+		if v.showAll {
+			return helpRowText("no cached sources — run 'fetch' to populate", faint, v.termWidth)
+		}
+		return helpRowText("no cached sources for this project — press f to show all", faint, v.termWidth)
+	}
+
+	return helpRowText("f toggle filter · d doctor · D doctor all · x remove", faint, v.termWidth)
 }
 
 func (v cacheView) view() string {
@@ -201,17 +222,6 @@ func (v cacheView) view() string {
 		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %s  %-14s  %s",
 			cursor, idx, statusWidth, status, flexWidth, title, faint.Render(fmt.Sprintf("%-*s", flexWidth, artist)), coll, faint.Render(fmt.Sprintf("%-*s", flexWidth, file))))
 		b.WriteByte('\n')
-		if i == v.cursor && v.confirmDelete != "" {
-			noteWidth := max(12, v.termWidth-8)
-			b.WriteString("        ")
-			b.WriteString(confirmStyle.Render(tui.TruncateWithEllipsis(v.confirmDelete, noteWidth)))
-			b.WriteByte('\n')
-		} else if note := inlineRowNote(rawStatus, 0); note != "" && i == v.cursor {
-			noteWidth := max(12, v.termWidth-8)
-			b.WriteString("        ")
-			b.WriteString(editStyle.Render(tui.TruncateWithEllipsis(note, noteWidth)))
-			b.WriteByte('\n')
-		}
 	}
 
 	if endRow < len(entries) {
@@ -219,14 +229,8 @@ func (v cacheView) view() string {
 		b.WriteByte('\n')
 	}
 
-	if len(entries) == 0 {
-		if v.showAll {
-			b.WriteString(faint.Render("  No cached sources. Run 'fetch' to populate."))
-		} else {
-			b.WriteString(faint.Render("  No cached sources for this project. Press 'f' to show all."))
-		}
-		b.WriteByte('\n')
-	}
+	b.WriteString(v.renderHelpRow())
+	b.WriteByte('\n')
 
 	return b.String()
 }
