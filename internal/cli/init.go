@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	songsPlanYAML = `columns: [title, artist, start_time, duration, link]
+	songsPlanYAML = `columns: [title, artist, name, start_time, duration, link]
 defaults:
     start_time: "0:00"
     duration: "60"
@@ -25,8 +25,8 @@ defaults:
     duration: "5"
 rows: []
 `
-	songsPlanCSV         = "title,artist,start_time,duration,link\n"
-	songsPlanTSV         = "title\tartist\tstart_time\tduration\tlink\n"
+	songsPlanCSV         = "title,artist,name,start_time,duration,link\n"
+	songsPlanTSV         = "title\tartist\tname\tstart_time\tduration\tlink\n"
 	interstitialsPlanCSV = "link,start_time,duration\n"
 	interstitialsPlanTSV = "link\tstart_time\tduration\n"
 )
