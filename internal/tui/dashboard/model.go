@@ -783,6 +783,14 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.refreshInlineEditHint(cvIdx)
 		return m, nil
 
+	case tea.KeySpace:
+		m.editValue = m.editValue[:m.editCursor] + " " + m.editValue[m.editCursor:]
+		m.editCursor++
+		m.collectionViews[cvIdx].editValue = m.editValue
+		m.collectionViews[cvIdx].editCursor = m.editCursor
+		m = m.refreshInlineEditHint(cvIdx)
+		return m, nil
+
 	case tea.KeyTab:
 		field := cols[m.editFieldIdx].field
 		commitField()
