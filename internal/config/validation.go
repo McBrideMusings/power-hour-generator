@@ -133,24 +133,11 @@ func (c Config) validateCacheConfig() []ValidationResult {
 		}
 	}
 
-	validateFields("cache.view.primary_fields", c.Cache.View.PrimaryFields)
-	validateFields("cache.view.secondary_fields", c.Cache.View.SecondaryFields)
-	for name, profile := range c.Cache.SearchProfiles {
-		validateFields(fmt.Sprintf("cache.search_profiles.%s.search_fields", name), profile.SearchFields)
-		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.title_fields", name), profile.Fill.TitleFields)
-		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.artist_fields", name), profile.Fill.ArtistFields)
-		validateFields(fmt.Sprintf("cache.search_profiles.%s.fill.link_fields", name), profile.Fill.LinkFields)
-	}
+	validateFields("cache.view.columns", c.Cache.View.Columns)
+	validateFields("cache.ytdlp.search_fields", c.Cache.Ytdlp.SearchFields)
 	for name, coll := range c.Collections {
-		profileName := strings.TrimSpace(coll.CacheSearchProfile)
-		if profileName == "" {
-			continue
-		}
-		if _, ok := c.Cache.SearchProfiles[profileName]; !ok {
-			results = append(results, ValidationResult{
-				Level:   "error",
-				Message: fmt.Sprintf("collection %q: cache_search_profile %q does not exist", name, profileName),
-			})
+		for key, fields := range coll.FieldMap {
+			validateFields(fmt.Sprintf("collections.%s.field_map.%s", name, key), fields)
 		}
 	}
 

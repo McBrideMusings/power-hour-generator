@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"powerhour/internal/cache"
-	"powerhour/internal/config"
 	"powerhour/internal/project"
 	"powerhour/pkg/csvplan"
 )
@@ -53,6 +52,34 @@ func cacheFieldValues(entry cache.Entry, field string) []string {
 	}
 }
 
+// setCacheEntryField writes value into the named field on the cache entry.
+// Returns true when the field is editable (a scalar string on Entry). Fields
+// that are not editable (links slice, identifier, cached_path) return false.
+func setCacheEntryField(entry *cache.Entry, field, value string) bool {
+	value = strings.TrimSpace(value)
+	switch strings.TrimSpace(field) {
+	case "title":
+		entry.Title = value
+	case "artist":
+		entry.Artist = value
+	case "album":
+		entry.Album = value
+	case "track":
+		entry.Track = value
+	case "uploader":
+		entry.Uploader = value
+	case "channel":
+		entry.Channel = value
+	case "upload_date":
+		entry.UploadDate = value
+	case "description":
+		entry.Description = value
+	default:
+		return false
+	}
+	return true
+}
+
 func firstConfiguredCacheValue(entry cache.Entry, fields []string) string {
 	for _, field := range fields {
 		for _, value := range cacheFieldValues(entry, field) {
@@ -90,15 +117,43 @@ func findCachedEntryByLink(idx *cache.Index, link string) (cache.Entry, bool) {
 	return entry, ok
 }
 
-func findCachedSongByLink(idx *cache.Index, link string, profile config.CacheSearchProfile) (songSuggestion, bool) {
+// cacheLookup bundles the collection's cache→field mapping and the global
+// yt-dlp search field list into a single value passed down the lookup stack.
+// A zero value is valid and falls back to sensible defaults.
+type cacheLookup struct {
+	fieldMap     map[string][]string
+	searchFields []string
+}
+
+func (l cacheLookup) titleFields() []string  { return l.resolve("title") }
+func (l cacheLookup) artistFields() []string { return l.resolve("artist") }
+func (l cacheLookup) linkFields() []string   { return l.resolve("link") }
+
+func (l cacheLookup) resolve(key string) []string {
+	if fields, ok := l.fieldMap[key]; ok && len(fields) > 0 {
+		return fields
+	}
+	switch key {
+	case "title":
+		return []string{"title", "track"}
+	case "artist":
+		return []string{"artist", "uploader", "channel"}
+	case "link":
+		return []string{"source", "links"}
+	default:
+		return nil
+	}
+}
+
+func findCachedSongByLink(idx *cache.Index, link string, lookup cacheLookup) (songSuggestion, bool) {
 	entry, ok := findCachedEntryByLink(idx, link)
 	if !ok {
 		return songSuggestion{}, false
 	}
-	return suggestionFromEntry(entry, profile)
+	return suggestionFromEntry(entry, lookup)
 }
 
-func searchCachedSongs(idx *cache.Index, query string, profile config.CacheSearchProfile, limit int) []songSuggestion {
+func searchCachedSongs(idx *cache.Index, query string, lookup cacheLookup, limit int) []songSuggestion {
 	if idx == nil || limit <= 0 {
 		return nil
 	}
@@ -109,11 +164,11 @@ func searchCachedSongs(idx *cache.Index, query string, profile config.CacheSearc
 
 	results := make([]songSuggestion, 0, limit)
 	for _, entry := range idx.Entries {
-		suggestion, ok := suggestionFromEntry(entry, profile)
+		suggestion, ok := suggestionFromEntry(entry, lookup)
 		if !ok {
 			continue
 		}
-		score := scoreSuggestion(query, entry, profile, suggestion)
+		score := scoreSuggestion(query, entry, lookup, suggestion)
 		if score <= 0 {
 			continue
 		}
@@ -140,13 +195,10 @@ func searchCachedSongs(idx *cache.Index, query string, profile config.CacheSearc
 	return results
 }
 
-func suggestionFromEntry(entry cache.Entry, profile config.CacheSearchProfile) (songSuggestion, bool) {
-	title := firstConfiguredCacheValue(entry, profile.Fill.TitleFields)
-	artist := firstConfiguredCacheValue(entry, profile.Fill.ArtistFields)
-	link := firstConfiguredCacheValue(entry, profile.Fill.LinkFields)
-	if link == "" {
-		link = firstConfiguredCacheValue(entry, []string{"source", "links"})
-	}
+func suggestionFromEntry(entry cache.Entry, lookup cacheLookup) (songSuggestion, bool) {
+	title := firstConfiguredCacheValue(entry, lookup.titleFields())
+	artist := firstConfiguredCacheValue(entry, lookup.artistFields())
+	link := firstConfiguredCacheValue(entry, lookup.linkFields())
 	if title == "" && artist == "" {
 		return songSuggestion{}, false
 	}
@@ -157,10 +209,14 @@ func suggestionFromEntry(entry cache.Entry, profile config.CacheSearchProfile) (
 	}, true
 }
 
-func scoreSuggestion(query string, entry cache.Entry, profile config.CacheSearchProfile, suggestion songSuggestion) int {
+func scoreSuggestion(query string, entry cache.Entry, lookup cacheLookup, suggestion songSuggestion) int {
 	score := 0
 	combined := normalizeSearchText(strings.TrimSpace(suggestion.Title + " " + suggestion.Artist))
-	for _, field := range profile.SearchFields {
+	searchFields := lookup.searchFields
+	if len(searchFields) == 0 {
+		searchFields = []string{"title", "artist"}
+	}
+	for _, field := range searchFields {
 		for _, raw := range cacheFieldValues(entry, field) {
 			value := normalizeSearchText(raw)
 			if value == "" {
@@ -281,8 +337,8 @@ func formatSuggestionHint(prefix string, suggestions []songSuggestion) string {
 	return fmt.Sprintf("%s %s", prefix, strings.Join(parts, " | "))
 }
 
-func bestCachedSongMatch(idx *cache.Index, query string, profile config.CacheSearchProfile) (songSuggestion, bool) {
-	suggestions := searchCachedSongs(idx, query, profile, 1)
+func bestCachedSongMatch(idx *cache.Index, query string, lookup cacheLookup) (songSuggestion, bool) {
+	suggestions := searchCachedSongs(idx, query, lookup, 1)
 	if len(suggestions) == 0 {
 		return songSuggestion{}, false
 	}

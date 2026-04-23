@@ -5,23 +5,36 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
-	"powerhour/internal/tui"
 )
 
 // cacheEntry is a flattened cache entry for display.
 type cacheEntry struct {
 	Identifier string
-	Primary    string
-	Secondary  string
 	Source     string
 	CachedPath string
-	Collection string // which collection uses this, empty if not referenced
+	// Values is a parallel slice to the configured cache view columns.
+	Values []string
+}
+
+// Label returns the first non-empty configured column value, falling back to
+// the cached filename. Used for confirm prompts and status messages that need
+// a human-readable identifier.
+func (e cacheEntry) Label() string {
+	for _, v := range e.Values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			return trimmed
+		}
+	}
+	return filepath.Base(e.CachedPath)
 }
 
 // cacheView shows cached source files, filtered to this project by default.
 type cacheView struct {
+	columns         []string
 	allEntries      []cacheEntry
 	filteredEntries []cacheEntry
 	showAll         bool // false = filtered to project, true = all cached
@@ -34,6 +47,13 @@ type cacheView struct {
 	// Inline confirm prompt rendered beneath the cursor row (set by model
 	// when modeConfirmDelete is active). Empty = no pending confirm.
 	confirmDelete string
+
+	// Inline edit state (set by model when modeCacheInlineEdit is active).
+	editing      bool
+	editFieldIdx int
+	editValue    string
+	editCursor   int
+	editHint     string
 
 	termWidth  int
 	termHeight int
@@ -52,6 +72,11 @@ func buildCollectionURLs(collectionLinks map[string]string) map[string]string {
 
 func newCacheView(cfg config.Config, idx *cache.Index, collectionLinks map[string]string) cacheView {
 	urls := buildCollectionURLs(collectionLinks)
+	columns := append([]string(nil), cfg.Cache.View.Columns...)
+	if len(columns) == 0 {
+		columns = []string{"title", "artist"}
+	}
+
 	var allEntries, filteredEntries []cacheEntry
 
 	if idx != nil {
@@ -60,43 +85,45 @@ func newCacheView(cfg config.Config, idx *cache.Index, collectionLinks map[strin
 				continue
 			}
 
-			// Determine which collection references this entry.
-			collName := ""
+			// An entry belongs to this project if any of its source identifiers
+			// are referenced by a collection row. Used only to populate
+			// filteredEntries — never surfaced as a column.
+			projectReferenced := false
 			if entry.Source != "" {
-				if c, ok := urls[entry.Source]; ok {
-					collName = c
+				if _, ok := urls[entry.Source]; ok {
+					projectReferenced = true
 				}
 			}
-			for _, link := range entry.Links {
-				if c, ok := urls[link]; ok {
-					collName = c
-					break
+			if !projectReferenced {
+				for _, link := range entry.Links {
+					if _, ok := urls[link]; ok {
+						projectReferenced = true
+						break
+					}
 				}
 			}
 
-			primary := firstConfiguredCacheValue(entry, cfg.Cache.View.PrimaryFields)
-			if primary == "" {
-				primary = filepath.Base(entry.CachedPath)
+			values := make([]string, len(columns))
+			for i, field := range columns {
+				values[i] = firstConfiguredCacheValue(entry, []string{field})
 			}
-			secondary := firstConfiguredCacheValue(entry, cfg.Cache.View.SecondaryFields)
 
 			ce := cacheEntry{
 				Identifier: entry.Identifier,
-				Primary:    primary,
-				Secondary:  secondary,
 				Source:     entry.Source,
 				CachedPath: entry.CachedPath,
-				Collection: collName,
+				Values:     values,
 			}
 
 			allEntries = append(allEntries, ce)
-			if collName != "" {
+			if projectReferenced {
 				filteredEntries = append(filteredEntries, ce)
 			}
 		}
 	}
 
 	return cacheView{
+		columns:         columns,
 		allEntries:      allEntries,
 		filteredEntries: filteredEntries,
 		rowStatus:       make(map[string]string),
@@ -136,6 +163,15 @@ func (v cacheView) renderHelpRow() string {
 		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
 	}
 
+	if v.editing && v.cursor >= 0 && v.cursor < len(entries) {
+		parts := []string{"Edit · " + v.currentEditField(),
+			"Enter save", "Esc cancel", "Tab next field"}
+		if hint := strings.TrimSpace(v.editHint); hint != "" {
+			parts = append(parts, hint)
+		}
+		return helpRowText(strings.Join(parts, " · "), faint, v.termWidth)
+	}
+
 	if v.cursor >= 0 && v.cursor < len(entries) {
 		if note := inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0); note != "" {
 			return helpRowText(note, editStyle, v.termWidth)
@@ -149,7 +185,14 @@ func (v cacheView) renderHelpRow() string {
 		return helpRowText("no cached sources for this project — press f to show all", faint, v.termWidth)
 	}
 
-	return helpRowText("f toggle filter · d doctor · D doctor all · x remove", faint, v.termWidth)
+	return helpRowText("e edit · D doctor problematic · f toggle filter · x remove", faint, v.termWidth)
+}
+
+func (v cacheView) currentEditField() string {
+	if v.editFieldIdx < 0 || v.editFieldIdx >= len(v.columns) {
+		return ""
+	}
+	return v.columns[v.editFieldIdx]
 }
 
 func (v cacheView) view() string {
@@ -167,18 +210,55 @@ func (v cacheView) view() string {
 	b.WriteString(sectionLabel.Render(header))
 	b.WriteByte('\n')
 
-	statusWidth := 10
-	fixedWidth := 4 + statusWidth + 14 + 5*2
-	flexWidth := 0
-	if v.termWidth > fixedWidth+30 {
-		flexWidth = (v.termWidth - fixedWidth) / 3
-	} else {
-		flexWidth = 12
+	// Column widths: fixed gutter (cursor + idx + status), then flex-distribute
+	// remaining terminal width across the configured data columns + FILE.
+	idxWidth := 4
+	statusWidth := 5
+	gutterWidth := idxWidth + statusWidth + 1
+	columnGapWidth := 2
+	gutterGapWidth := 4
+
+	dataColCount := len(v.columns) + 1 // +1 for FILE
+	totalGaps := 0
+	if dataColCount > 0 {
+		totalGaps += gutterGapWidth
+		totalGaps += (dataColCount - 1) * columnGapWidth
+	}
+	baseWidth := gutterWidth + totalGaps
+
+	tableWidth := v.termWidth - 20
+	if tableWidth < baseWidth {
+		tableWidth = baseWidth
 	}
 
-	b.WriteString(colHeader.Render(
-		fmt.Sprintf("%-4s  %-*s  %-*s  %-*s  %-14s  %-*s",
-			"#", statusWidth, "STATUS", flexWidth, "PRIMARY", flexWidth, "SECONDARY", "COLLECTION", flexWidth, "FILE")))
+	flexWidth := 10
+	if dataColCount > 0 && tableWidth > baseWidth+dataColCount*5 {
+		flexWidth = (tableWidth - baseWidth) / dataColCount
+	}
+	widths := make([]int, dataColCount)
+	headers := make([]string, dataColCount)
+	for i, col := range v.columns {
+		headers[i] = strings.ToUpper(col)
+	}
+	headers[dataColCount-1] = "FILE"
+	for i := range widths {
+		widths[i] = flexWidth
+		if widths[i] < len(headers[i]) {
+			widths[i] = len(headers[i])
+		}
+	}
+
+	// Header row.
+	headerParts := make([]string, 0, dataColCount)
+	for i, h := range headers {
+		headerParts = append(headerParts, renderCell(h, widths[i], colHeader))
+	}
+
+	b.WriteString(renderCell("#", gutterWidth, colHeader))
+	if len(headerParts) > 0 {
+		b.WriteString(strings.Repeat(" ", gutterGapWidth))
+		b.WriteString(renderRow(headerParts...))
+	}
 	b.WriteByte('\n')
 
 	visible := v.visibleRowCount()
@@ -193,9 +273,13 @@ func (v cacheView) view() string {
 		b.WriteByte('\n')
 	}
 
+	plain := lipgloss.NewStyle()
 	for i := startRow; i < endRow; i++ {
 		e := entries[i]
 
+		// Gutter: cursor + index + status (compact). idx and status are fixed
+		// widths and never exceed them, so ANSI wrapping the bare 2-char /
+		// N-char strings is safe without pre-padding.
 		cursor := "  "
 		idx := fmt.Sprintf("%02d", i+1)
 		if i == v.cursor {
@@ -204,23 +288,49 @@ func (v cacheView) view() string {
 		} else {
 			idx = faint.Render(idx)
 		}
+		rawStatus := strings.TrimSpace(v.rowStatus[e.Identifier])
+		statusDisplay := rawStatus
+		if statusDisplay == "" {
+			statusDisplay = "—"
+		}
+		// Pad status plain, then style.
+		statusCell := faint.Render(fmt.Sprintf("%-*s", statusWidth, truncateCollectionValue(statusDisplay, statusWidth)))
+		gutter := fmt.Sprintf("%s%s %s", cursor, idx, statusCell)
 
-		title := tui.TruncateWithEllipsis(e.Primary, flexWidth)
-		artist := tui.TruncateWithEllipsis(e.Secondary, flexWidth)
-		coll := tui.TruncateWithEllipsis(e.Collection, 14)
-		if coll == "" {
-			coll = faint.Render("—")
+		isEditRow := v.editing && i == v.cursor
+
+		cells := make([]string, 0, dataColCount)
+		for j, val := range e.Values {
+			if isEditRow && j == v.editFieldIdx {
+				cells = append(cells, renderCell(renderCursorField(v.editValue, v.editCursor), widths[j], editStyle))
+				continue
+			}
+			style := faint
+			if j == 0 && !isEditRow {
+				// First configured column renders plain like the collection view's title.
+				style = plain
+			}
+			if isEditRow {
+				style = editRowStyle
+			}
+			display := val
+			if strings.TrimSpace(display) == "" {
+				display = "—"
+				if !isEditRow {
+					style = faint
+				}
+			}
+			cells = append(cells, renderCell(display, widths[j], style))
 		}
-		rawStatus := v.rowStatus[e.Identifier]
-		status := tui.TruncateWithEllipsis(rawStatus, statusWidth)
-		if status == "" {
-			status = faint.Render("—")
-		} else {
-			status = faint.Render(status)
+		fileStyle := faint
+		if isEditRow {
+			fileStyle = editRowStyle
 		}
-		file := tui.TruncateWithEllipsis(filepath.Base(e.CachedPath), flexWidth)
-		b.WriteString(fmt.Sprintf("%s%s  %-*s  %-*s  %s  %-14s  %s",
-			cursor, idx, statusWidth, status, flexWidth, title, faint.Render(fmt.Sprintf("%-*s", flexWidth, artist)), coll, faint.Render(fmt.Sprintf("%-*s", flexWidth, file))))
+		cells = append(cells, renderCell(filepath.Base(e.CachedPath), widths[dataColCount-1], fileStyle))
+
+		b.WriteString(gutter)
+		b.WriteString(strings.Repeat(" ", gutterGapWidth))
+		b.WriteString(renderRow(cells...))
 		b.WriteByte('\n')
 	}
 

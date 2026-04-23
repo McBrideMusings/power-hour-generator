@@ -36,6 +36,7 @@ const (
 	modeInput                         // text input active
 	modeConfirmDelete                 // waiting for y/n
 	modeInlineEdit                    // editing a row's fields inline
+	modeCacheInlineEdit               // editing a cache entry's fields inline
 	modeAddClip                       // add-clip slot focused (paste link/path/CSV)
 )
 
@@ -537,6 +538,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleConfirmDeleteKey(msg)
 	case modeInlineEdit:
 		return m.handleInlineEditKey(msg)
+	case modeCacheInlineEdit:
+		return m.handleCacheInlineEditKey(msg)
 	case modeAddClip:
 		return m.handleAddClipKey(msg)
 	}
@@ -866,11 +869,8 @@ func (m Model) refreshInlineEditHint(cvIdx int) Model {
 	case "link":
 		link := strings.TrimSpace(m.editValue)
 		if link != "" {
-			profile, ok := m.collectionCacheSearchProfile(cvIdx)
-			if !ok {
-				profile = m.defaultCacheSearchProfile()
-			}
-			if match, ok := findCachedSongByLink(m.cacheIdx, link, profile); ok {
+			lookup := m.cacheLookupFor(cvIdx)
+			if match, ok := findCachedSongByLink(m.cacheIdx, link, lookup); ok {
 				_ = match
 				v.editHint = "cached"
 			} else if isURL(link) && strings.TrimSpace(v.rowStatus[v.rows[v.cursor].Index]) != "probing" {
@@ -901,11 +901,8 @@ func (m Model) applyCommittedLinkLookup(cvIdx, rowIdx int, field string, previou
 	v.rows[rowIdx].CustomFields[collectionLinkHeader(m.collections[collName])] = link
 	m.collectionViews[cvIdx] = v
 
-	profile, ok := m.collectionCacheSearchProfile(cvIdx)
-	if !ok {
-		profile = m.defaultCacheSearchProfile()
-	}
-	if match, ok := findCachedSongByLink(m.cacheIdx, link, profile); ok {
+	lookup := m.cacheLookupFor(cvIdx)
+	if match, ok := findCachedSongByLink(m.cacheIdx, link, lookup); ok {
 		applySuggestionToRow(m.collections[collName], &m.collectionViews[cvIdx].rows[rowIdx], match)
 		m = m.setCollectionRowNote(cvIdx, v.rows[rowIdx].Index, fmt.Sprintf("recognized cached link %s", link))
 		return m, nil
@@ -958,22 +955,21 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyEnter:
 		trimmed := strings.TrimSpace(m.addBuffer)
 		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
-			if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
-				if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, profile); matched {
-					return m.addSuggestedCollectionRow(cvIdx, suggestion)
-				}
-				m = m.setCollectionCursorNote(cvIdx,
-					fmt.Sprintf("no cached match for %q — paste a URL or pick a suggestion", trimmed))
-				m.resetAddClipInput(cvIdx, true)
-				return m, nil
+			lookup := m.cacheLookupFor(cvIdx)
+			if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched {
+				return m.addSuggestedCollectionRow(cvIdx, suggestion)
 			}
+			m = m.setCollectionCursorNote(cvIdx,
+				fmt.Sprintf("no cached match for %q — paste a URL or pick a suggestion", trimmed))
+			m.resetAddClipInput(cvIdx, true)
+			return m, nil
 		}
 		return m.dispatchAddBuffer(cvIdx, m.addBuffer)
 
 	case tea.KeyTab:
 		trimmed := strings.TrimSpace(m.addBuffer)
-		profile, ok := m.collectionCacheSearchProfile(cvIdx)
-		if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, profile); ok && matched && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
+		lookup := m.cacheLookupFor(cvIdx)
+		if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
 			return m.addSuggestedCollectionRow(cvIdx, suggestion)
 		}
 		return m, nil
@@ -1059,20 +1055,17 @@ func (m Model) refreshAddClipHint(cvIdx int) Model {
 	trimmed := strings.TrimSpace(v.addBuffer)
 
 	if trimmed != "" {
+		lookup := m.cacheLookupFor(cvIdx)
 		if looksLikeBatchImport(trimmed) {
 			v.addHint = "Enter imports the pasted rows."
 		} else if isURL(trimmed) {
-			profile, ok := m.collectionCacheSearchProfile(cvIdx)
-			if !ok {
-				profile = m.defaultCacheSearchProfile()
-			}
-			if match, ok := findCachedSongByLink(m.cacheIdx, cleanYouTubeURL(trimmed), profile); ok {
+			if match, ok := findCachedSongByLink(m.cacheIdx, cleanYouTubeURL(trimmed), lookup); ok {
 				v.addHint = formatSuggestionHint("Known cached link. Enter adds:", []songSuggestion{match})
 			} else {
 				v.addHint = "Unknown link. Enter adds the row and auto-probes metadata."
 			}
-		} else if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
-			if suggestions := searchCachedSongs(m.cacheIdx, trimmed, profile, 3); len(suggestions) > 0 {
+		} else {
+			if suggestions := searchCachedSongs(m.cacheIdx, trimmed, lookup, 3); len(suggestions) > 0 {
 				v.addSuggestions = suggestions
 				v.addSelected = min(v.addSelected, len(suggestions)-1)
 			}
@@ -1709,8 +1702,8 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		v.toggle()
-	case "d":
-		if len(entries) == 0 {
+	case "e":
+		if len(entries) == 0 || len(v.columns) == 0 {
 			m.cacheView = v
 			return m, nil
 		}
@@ -1720,8 +1713,14 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cacheView = v
 			return m, nil
 		}
+		v.editing = true
+		v.editFieldIdx = 0
+		v.editValue = entry.Values[0]
+		v.editCursor = len(v.editValue)
+		v.editHint = ""
+		m.mode = modeCacheInlineEdit
 		m.cacheView = v
-		return m.openDoctorOverlay([]cacheEntry{entry}), nil
+		return m, nil
 	case "D":
 		if len(entries) == 0 {
 			m.cacheView = v
@@ -1735,10 +1734,7 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		entry := entries[v.cursor]
-		title := entry.Primary
-		if title == "" {
-			title = filepath.Base(entry.CachedPath)
-		}
+		title := entry.Label()
 		m.deleteDesc = fmt.Sprintf("cache entry %q", title)
 		m.mode = modeConfirmDelete
 		v.confirmDelete = fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)
@@ -1791,6 +1787,137 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.cacheView = v
+	return m, nil
+}
+
+func (m Model) handleCacheInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	v := m.cacheView
+	entries := v.entries()
+	if !v.editing || len(entries) == 0 || v.cursor < 0 || v.cursor >= len(entries) || len(v.columns) == 0 {
+		m.mode = modeNormal
+		v.editing = false
+		m.cacheView = v
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeyEscape:
+		v.editing = false
+		v.editValue = ""
+		v.editCursor = 0
+		v.editHint = ""
+		m.cacheView = v
+		m.mode = modeNormal
+		return m, nil
+
+	case tea.KeyEnter:
+		return m.saveCacheEdit(v, true)
+
+	case tea.KeyTab:
+		tm, _ := m.saveCacheEdit(v, false)
+		m = tm.(Model)
+		v = m.cacheView
+		v.editFieldIdx = (v.editFieldIdx + 1) % len(v.columns)
+		newEntries := v.entries()
+		if v.cursor < len(newEntries) {
+			v.editValue = newEntries[v.cursor].Values[v.editFieldIdx]
+		} else {
+			v.editValue = ""
+		}
+		v.editCursor = len(v.editValue)
+		v.editing = true
+		m.cacheView = v
+		m.mode = modeCacheInlineEdit
+		return m, nil
+
+	case tea.KeyBackspace:
+		if v.editCursor > 0 {
+			v.editValue = v.editValue[:v.editCursor-1] + v.editValue[v.editCursor:]
+			v.editCursor--
+		}
+	case tea.KeyDelete:
+		if v.editCursor < len(v.editValue) {
+			v.editValue = v.editValue[:v.editCursor] + v.editValue[v.editCursor+1:]
+		}
+	case tea.KeyLeft:
+		if v.editCursor > 0 {
+			v.editCursor--
+		}
+	case tea.KeyRight:
+		if v.editCursor < len(v.editValue) {
+			v.editCursor++
+		}
+	case tea.KeyHome:
+		v.editCursor = 0
+	case tea.KeyEnd:
+		v.editCursor = len(v.editValue)
+	case tea.KeySpace:
+		v.editValue = v.editValue[:v.editCursor] + " " + v.editValue[v.editCursor:]
+		v.editCursor++
+	case tea.KeyRunes:
+		r := string(msg.Runes)
+		v.editValue = v.editValue[:v.editCursor] + r + v.editValue[v.editCursor:]
+		v.editCursor += len(r)
+	}
+
+	m.cacheView = v
+	return m, nil
+}
+
+// saveCacheEdit writes v.editValue into v.columns[v.editFieldIdx] for the
+// entry under the cursor and persists the index. When exitMode is true, the
+// model also returns to modeNormal and clears the edit state.
+func (m Model) saveCacheEdit(v cacheView, exitMode bool) (tea.Model, tea.Cmd) {
+	entries := v.entries()
+	entry := entries[v.cursor]
+	field := v.columns[v.editFieldIdx]
+
+	idx, err := cache.Load(m.pp)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Cache load error: %v", err)
+		v.editing = false
+		m.cacheView = v
+		m.mode = modeNormal
+		return m, nil
+	}
+	stored, ok := idx.GetByIdentifier(entry.Identifier)
+	if !ok {
+		m.statusMsg = "Cache entry not found"
+		v.editing = false
+		m.cacheView = v
+		m.mode = modeNormal
+		return m, nil
+	}
+	if !setCacheEntryField(&stored, field, v.editValue) {
+		m.statusMsg = fmt.Sprintf("field %q is not editable", field)
+		v.editing = false
+		m.cacheView = v
+		m.mode = modeNormal
+		return m, nil
+	}
+	idx.SetEntry(stored)
+	if err := cache.Save(m.pp, idx); err != nil {
+		m.statusMsg = fmt.Sprintf("Cache save error: %v", err)
+		v.editing = false
+		m.cacheView = v
+		m.mode = modeNormal
+		return m, nil
+	}
+	m.cacheIdx = idx
+
+	if exitMode {
+		v.editing = false
+		v.editValue = ""
+		v.editCursor = 0
+		m.cacheView = v
+		m.mode = modeNormal
+	} else {
+		m.cacheView = v
+	}
+	m = reloadState(m)
+	if exitMode {
+		m = m.setCacheCursorNote(fmt.Sprintf("saved %s", field))
+	}
 	return m, nil
 }
 
@@ -2608,12 +2735,9 @@ func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.C
 	newRow := project.BuildCollectionRow(coll, value)
 
 	cached := false
-	if profile, ok := m.collectionCacheSearchProfile(cvIdx); ok {
-		if match, ok := findCachedSongByLink(m.cacheIdx, value, profile); ok {
-			applySuggestionToRow(coll, &newRow, match)
-			cached = true
-		}
-	} else if _, ok := findCachedEntryByLink(m.cacheIdx, value); ok {
+	lookup := m.cacheLookupFor(cvIdx)
+	if match, ok := findCachedSongByLink(m.cacheIdx, value, lookup); ok {
+		applySuggestionToRow(coll, &newRow, match)
 		cached = true
 	}
 
@@ -2629,21 +2753,23 @@ func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.C
 	return m.addCollectionRow(cvIdx, newRow, outcome)
 }
 
-func (m Model) collectionCacheSearchProfile(cvIdx int) (config.CacheSearchProfile, bool) {
-	if cvIdx < 0 || cvIdx >= len(m.collectionNames) {
-		return config.CacheSearchProfile{}, false
+// cacheLookupFor returns the field map + search field list to use for add-clip
+// lookups against this collection. Falls back to defaults when the collection
+// is out of range or has no field_map declared.
+func (m Model) cacheLookupFor(cvIdx int) cacheLookup {
+	var fieldMap map[string][]string
+	if cvIdx >= 0 && cvIdx < len(m.collectionNames) {
+		if collCfg, ok := m.cfg.Collections[m.collectionNames[cvIdx]]; ok {
+			fieldMap = collCfg.ResolveCollectionFieldMap()
+		}
 	}
-	collName := m.collectionNames[cvIdx]
-	collCfg, ok := m.cfg.Collections[collName]
-	if !ok || strings.TrimSpace(collCfg.CacheSearchProfile) == "" {
-		return config.CacheSearchProfile{}, false
+	if fieldMap == nil {
+		fieldMap = config.DefaultCollectionFieldMap()
 	}
-	return m.cfg.CacheSearchProfile(collCfg.CacheSearchProfile)
-}
-
-func (m Model) defaultCacheSearchProfile() config.CacheSearchProfile {
-	profile, _ := m.cfg.CacheSearchProfile("song_lookup")
-	return profile
+	return cacheLookup{
+		fieldMap:     fieldMap,
+		searchFields: append([]string(nil), m.cfg.Cache.Ytdlp.SearchFields...),
+	}
 }
 
 func looksLikeBatchImport(value string) bool {
@@ -2772,10 +2898,7 @@ func (m Model) processDeleteCacheEntry() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	title := entry.Primary
-	if title == "" {
-		title = filepath.Base(entry.CachedPath)
-	}
+	title := entry.Label()
 
 	m = reloadState(m)
 	if m.cacheView.cursor >= len(m.cacheView.entries()) && m.cacheView.cursor > 0 {
@@ -2851,7 +2974,7 @@ func writeCollection(m Model, cvIdx int) Model {
 	return m
 }
 
-func (m Model) selectedAddClipSuggestion(cvIdx int, query string, profile config.CacheSearchProfile) (songSuggestion, bool) {
+func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLookup) (songSuggestion, bool) {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return songSuggestion{}, false
 	}
@@ -2859,7 +2982,7 @@ func (m Model) selectedAddClipSuggestion(cvIdx int, query string, profile config
 	if len(v.addSuggestions) > 0 && v.addSelected >= 0 && v.addSelected < len(v.addSuggestions) {
 		return v.addSuggestions[v.addSelected], true
 	}
-	return bestCachedSongMatch(m.cacheIdx, query, profile)
+	return bestCachedSongMatch(m.cacheIdx, query, lookup)
 }
 
 // reResolve re-resolves the timeline after mutations.

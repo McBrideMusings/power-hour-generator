@@ -265,9 +265,9 @@ func (v collectionView) view() string {
 	// Column headers. The row index/status gutter sits to the left of the data.
 	headerParts := make([]string, 0, len(v.columns))
 	for i, col := range v.columns {
-		headerParts = append(headerParts, colHeader.Render(fmt.Sprintf("%-*s", widths[i], col.header)))
+		headerParts = append(headerParts, renderCell(col.header, widths[i], colHeader))
 	}
-	b.WriteString(colHeader.Render(fmt.Sprintf("%-*s", gutterWidth, "#")))
+	b.WriteString(renderCell("#", gutterWidth, colHeader))
 	if len(headerParts) > 0 {
 		b.WriteString(strings.Repeat(" ", gutterGapWidth))
 		b.WriteString(strings.Join(headerParts, "  "))
@@ -318,24 +318,21 @@ func (v collectionView) view() string {
 
 			// Inline edit: show edit buffer with cursor on the active field.
 			if isEditRow && j == v.editFieldIdx {
-				display := renderCursorField(v.editValue, v.editCursor)
-				display = truncateCollectionValue(display, w)
-				parts = append(parts, editStyle.Render(fmt.Sprintf("%-*s", w, display)))
+				parts = append(parts, renderCell(renderCursorField(v.editValue, v.editCursor), w, editStyle))
 				continue
 			}
 			// Inline edit: highlight other fields on the edit row.
 			if isEditRow {
-				val = truncateCollectionValue(val, w)
-				parts = append(parts, editRowStyle.Render(fmt.Sprintf("%-*s", w, val)))
+				parts = append(parts, renderCell(val, w, editRowStyle))
 				continue
 			}
 
 			if state != rowRendered {
-				parts = append(parts, stateStyle.Render(fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w))))
+				parts = append(parts, renderCell(val, w, stateStyle))
 			} else if col.field == "title" {
-				parts = append(parts, fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w)))
+				parts = append(parts, renderCell(val, w, lipgloss.NewStyle()))
 			} else {
-				parts = append(parts, faint.Render(fmt.Sprintf("%-*s", w, truncateCollectionValue(val, w))))
+				parts = append(parts, renderCell(val, w, faint))
 			}
 		}
 		b.WriteString(parts[0])
