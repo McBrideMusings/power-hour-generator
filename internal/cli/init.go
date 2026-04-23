@@ -76,7 +76,12 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
-        cache_search_profile: song_lookup
+        # field_map controls how yt-dlp cache fields fill this collection's
+        # columns. Uncomment to override the defaults:
+        # field_map:
+        #     title:  [title, track]
+        #     artist: [artist, uploader, channel]
+        #     link:   [source, links]
     interstitials:
         plan: %s
         output_dir: interstitials
@@ -118,15 +123,15 @@ downloads:
     filename_template: $ID
 cache:
     view:
-        primary_fields: [title, track]
-        secondary_fields: [artist, uploader, channel]
-    search_profiles:
-        song_lookup:
-            search_fields: [title, artist]
-            fill:
-                title_fields: [title, track]
-                artist_fields: [artist, uploader, channel]
-                link_fields: [source, links]
+        # Each entry is a yt-dlp metadata field shown as its own column in the
+        # TUI cache view. Add more fields (uploader, channel, track, album,
+        # upload_date) to see additional data; empty cells can be edited via
+        # the doctor (press d).
+        columns: [title, artist]
+    ytdlp:
+        # Fields user-typed queries search against in the collection add-clip
+        # slot.
+        search_fields: [title, artist]
 library: {}
 segments_base_dir: segments
 `, songsPlan, interstitialsPlan)

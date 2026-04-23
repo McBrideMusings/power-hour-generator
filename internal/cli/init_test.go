@@ -132,9 +132,9 @@ func TestRenderDefaultConfigYAMLUsesRequestedPlanFormat(t *testing.T) {
 				}
 			}
 			for _, want := range []string{
-				"cache_search_profile: song_lookup",
-				"search_profiles:",
-				"primary_fields: [title, track]",
+				"columns: [title, artist]",
+				"ytdlp:",
+				"search_fields: [title, artist]",
 			} {
 				if !strings.Contains(rendered, want) {
 					t.Fatalf("rendered config missing %q", want)

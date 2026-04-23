@@ -493,10 +493,8 @@ func TestAddClipTabAddsBestCachedMatch(t *testing.T) {
 	}
 	m.cfg.Cache = config.Default().Cache
 	collCfg := m.cfg.Collections["songs"]
-	collCfg.CacheSearchProfile = "song_lookup"
 	m.cfg.Collections["songs"] = collCfg
 	coll := m.collections["songs"]
-	coll.Config.CacheSearchProfile = "song_lookup"
 	m.collections["songs"] = coll
 	m.mode = modeAddClip
 	m.addCvIdx = 0
@@ -604,10 +602,8 @@ func TestAddClipEnterAddsBestCachedMatch(t *testing.T) {
 	}
 	m.cfg.Cache = config.Default().Cache
 	collCfg := m.cfg.Collections["songs"]
-	collCfg.CacheSearchProfile = "song_lookup"
 	m.cfg.Collections["songs"] = collCfg
 	coll := m.collections["songs"]
-	coll.Config.CacheSearchProfile = "song_lookup"
 	m.collections["songs"] = coll
 	m.mode = modeAddClip
 	m.addCvIdx = 0
@@ -696,10 +692,8 @@ func TestAddClipEnterRefusesRawNonURLWithoutMatch(t *testing.T) {
 	m.cacheIdx = &cache.Index{Entries: map[string]cache.Entry{}, Links: map[string]string{}}
 	m.cfg.Cache = config.Default().Cache
 	collCfg := m.cfg.Collections["songs"]
-	collCfg.CacheSearchProfile = "song_lookup"
 	m.cfg.Collections["songs"] = collCfg
 	coll := m.collections["songs"]
-	coll.Config.CacheSearchProfile = "song_lookup"
 	m.collections["songs"] = coll
 	m.mode = modeAddClip
 	m.addCvIdx = 0
@@ -967,7 +961,7 @@ func testCollectionModel(t *testing.T) Model {
 		Name:       "songs",
 		Plan:       planPath,
 		OutputDir:  "songs",
-		Config:     config.CollectionConfig{OutputDir: "songs", CacheSearchProfile: "song_lookup"},
+		Config:     config.CollectionConfig{OutputDir: "songs"},
 		Rows:       []csvplan.CollectionRow{row},
 		Headers:    []string{"title", "artist", "link", "start_time", "duration"},
 		Delimiter:  ',',

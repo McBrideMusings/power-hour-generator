@@ -19,18 +19,22 @@ type OverlayEntry struct {
 
 // CollectionConfig defines a collection of clips with configurable CSV headers.
 type CollectionConfig struct {
-	Plan               string         `yaml:"plan"`
-	File               string         `yaml:"file,omitempty"`
-	Duration           int            `yaml:"duration,omitempty"`
-	OutputDir          string         `yaml:"output_dir"`
-	Fade               float64        `yaml:"fade,omitempty"`
-	FadeIn             float64        `yaml:"fade_in,omitempty"`
-	FadeOut            float64        `yaml:"fade_out,omitempty"`
-	Overlays           []OverlayEntry `yaml:"overlays,omitempty"`
-	LinkHeader         string         `yaml:"link_header"`
-	StartHeader        string         `yaml:"start_header"`
-	DurationHeader     string         `yaml:"duration_header"`
-	CacheSearchProfile string         `yaml:"cache_search_profile,omitempty"`
+	Plan           string         `yaml:"plan"`
+	File           string         `yaml:"file,omitempty"`
+	Duration       int            `yaml:"duration,omitempty"`
+	OutputDir      string         `yaml:"output_dir"`
+	Fade           float64        `yaml:"fade,omitempty"`
+	FadeIn         float64        `yaml:"fade_in,omitempty"`
+	FadeOut        float64        `yaml:"fade_out,omitempty"`
+	Overlays       []OverlayEntry `yaml:"overlays,omitempty"`
+	LinkHeader     string         `yaml:"link_header"`
+	StartHeader    string         `yaml:"start_header"`
+	DurationHeader string         `yaml:"duration_header"`
+	// FieldMap describes how yt-dlp metadata fields back this collection's
+	// canonical columns. Keys are collection columns ("title", "artist",
+	// "link"); values are ordered lists of cache entry fields consulted to
+	// fill that column. When unset, DefaultCollectionFieldMap is used.
+	FieldMap map[string][]string `yaml:"field_map,omitempty"`
 }
 
 // TimelineConfig defines the playback sequence for the power hour.
@@ -140,27 +144,48 @@ type Config struct {
 
 // CacheConfig controls how cache metadata is displayed and searched in the TUI.
 type CacheConfig struct {
-	View           CacheViewConfig               `yaml:"view"`
-	SearchProfiles map[string]CacheSearchProfile `yaml:"search_profiles,omitempty"`
+	View  CacheViewConfig  `yaml:"view"`
+	Ytdlp CacheYtdlpConfig `yaml:"ytdlp,omitempty"`
 }
 
-// CacheViewConfig controls the cache tab's metadata columns via ordered fallbacks.
+// CacheViewConfig controls the cache tab's displayed columns. Each entry names
+// a yt-dlp cache field to show as its own column, in order.
 type CacheViewConfig struct {
-	PrimaryFields   []string `yaml:"primary_fields,omitempty"`
-	SecondaryFields []string `yaml:"secondary_fields,omitempty"`
+	Columns []string `yaml:"columns,omitempty"`
 }
 
-// CacheSearchProfile controls add-slot fuzzy search and row fill behavior.
-type CacheSearchProfile struct {
-	SearchFields []string        `yaml:"search_fields,omitempty"`
-	Fill         CacheFillConfig `yaml:"fill,omitempty"`
+// CacheYtdlpConfig controls how cached yt-dlp metadata is searched when the
+// user types a query into a collection's add-clip slot.
+type CacheYtdlpConfig struct {
+	SearchFields []string `yaml:"search_fields,omitempty"`
 }
 
-// CacheFillConfig controls which cache metadata fills row fields, in order.
-type CacheFillConfig struct {
-	TitleFields  []string `yaml:"title_fields,omitempty"`
-	ArtistFields []string `yaml:"artist_fields,omitempty"`
-	LinkFields   []string `yaml:"link_fields,omitempty"`
+// DefaultCollectionFieldMap returns the fallback cache→collection field
+// mapping used when a collection does not declare its own field_map.
+func DefaultCollectionFieldMap() map[string][]string {
+	return map[string][]string{
+		"title":  {"title", "track"},
+		"artist": {"artist", "uploader", "channel"},
+		"link":   {"source", "links"},
+	}
+}
+
+// ResolveCollectionFieldMap returns the collection's field map merged over the
+// default mapping, so missing keys fall back to the default order.
+func (c CollectionConfig) ResolveCollectionFieldMap() map[string][]string {
+	out := DefaultCollectionFieldMap()
+	for key, values := range c.FieldMap {
+		key = strings.TrimSpace(strings.ToLower(key))
+		if key == "" {
+			continue
+		}
+		cleaned := normalizeCacheFieldList(values)
+		if len(cleaned) == 0 {
+			continue
+		}
+		out[key] = cleaned
+	}
+	return out
 }
 
 // ToolPins captures optional version pinning for managed external tools.
@@ -305,13 +330,12 @@ func Default() Config {
 		},
 		Collections: map[string]CollectionConfig{
 			"songs": {
-				Plan:               "songs.yaml",
-				OutputDir:          "songs",
-				Overlays:           []OverlayEntry{{Type: "song-info"}},
-				LinkHeader:         "link",
-				StartHeader:        "start_time",
-				DurationHeader:     "duration",
-				CacheSearchProfile: "song_lookup",
+				Plan:           "songs.yaml",
+				OutputDir:      "songs",
+				Overlays:       []OverlayEntry{{Type: "song-info"}},
+				LinkHeader:     "link",
+				StartHeader:    "start_time",
+				DurationHeader: "duration",
 			},
 			"interstitials": {
 				Plan:           "interstitials.yaml",
@@ -344,18 +368,10 @@ func Default() Config {
 		Downloads: DownloadsConfig{FilenameTemplate: "$ID"},
 		Cache: CacheConfig{
 			View: CacheViewConfig{
-				PrimaryFields:   []string{"title", "track"},
-				SecondaryFields: []string{"artist", "uploader", "channel"},
+				Columns: []string{"title", "artist"},
 			},
-			SearchProfiles: map[string]CacheSearchProfile{
-				"song_lookup": {
-					SearchFields: []string{"title", "artist"},
-					Fill: CacheFillConfig{
-						TitleFields:  []string{"title", "track"},
-						ArtistFields: []string{"artist", "uploader", "channel"},
-						LinkFields:   []string{"source", "links"},
-					},
-				},
+			Ytdlp: CacheYtdlpConfig{
+				SearchFields: []string{"title", "artist"},
 			},
 		},
 		SegmentsBaseDir: "segments",
@@ -672,8 +688,6 @@ func (c *Config) applyCollectionDefaults() {
 			collection.DurationHeader = "duration"
 		}
 
-		collection.CacheSearchProfile = strings.TrimSpace(collection.CacheSearchProfile)
-
 		// Apply default output directory
 		if strings.TrimSpace(collection.OutputDir) == "" {
 			collection.OutputDir = name
@@ -687,56 +701,14 @@ func (c *CacheConfig) applyDefaults(defaults CacheConfig) {
 	if c == nil {
 		return
 	}
-	c.View.PrimaryFields = normalizeCacheFieldList(c.View.PrimaryFields)
-	c.View.SecondaryFields = normalizeCacheFieldList(c.View.SecondaryFields)
-	if len(c.View.PrimaryFields) == 0 {
-		c.View.PrimaryFields = append([]string(nil), defaults.View.PrimaryFields...)
+	c.View.Columns = normalizeCacheFieldList(c.View.Columns)
+	if len(c.View.Columns) == 0 {
+		c.View.Columns = append([]string(nil), defaults.View.Columns...)
 	}
-	if len(c.View.SecondaryFields) == 0 {
-		c.View.SecondaryFields = append([]string(nil), defaults.View.SecondaryFields...)
+	c.Ytdlp.SearchFields = normalizeCacheFieldList(c.Ytdlp.SearchFields)
+	if len(c.Ytdlp.SearchFields) == 0 {
+		c.Ytdlp.SearchFields = append([]string(nil), defaults.Ytdlp.SearchFields...)
 	}
-	if c.SearchProfiles == nil {
-		c.SearchProfiles = map[string]CacheSearchProfile{}
-	}
-	for name, profile := range defaults.SearchProfiles {
-		existing, ok := c.SearchProfiles[name]
-		if !ok {
-			c.SearchProfiles[name] = profile
-			continue
-		}
-		existing.applyDefaults(profile)
-		c.SearchProfiles[name] = existing
-	}
-}
-
-func (p *CacheSearchProfile) applyDefaults(defaults CacheSearchProfile) {
-	if p == nil {
-		return
-	}
-	p.SearchFields = normalizeCacheFieldList(p.SearchFields)
-	p.Fill.TitleFields = normalizeCacheFieldList(p.Fill.TitleFields)
-	p.Fill.ArtistFields = normalizeCacheFieldList(p.Fill.ArtistFields)
-	p.Fill.LinkFields = normalizeCacheFieldList(p.Fill.LinkFields)
-	if len(p.SearchFields) == 0 {
-		p.SearchFields = append([]string(nil), defaults.SearchFields...)
-	}
-	if len(p.Fill.TitleFields) == 0 {
-		p.Fill.TitleFields = append([]string(nil), defaults.Fill.TitleFields...)
-	}
-	if len(p.Fill.ArtistFields) == 0 {
-		p.Fill.ArtistFields = append([]string(nil), defaults.Fill.ArtistFields...)
-	}
-	if len(p.Fill.LinkFields) == 0 {
-		p.Fill.LinkFields = append([]string(nil), defaults.Fill.LinkFields...)
-	}
-}
-
-func (c Config) CacheSearchProfile(name string) (CacheSearchProfile, bool) {
-	if len(c.Cache.SearchProfiles) == 0 {
-		return CacheSearchProfile{}, false
-	}
-	profile, ok := c.Cache.SearchProfiles[strings.TrimSpace(name)]
-	return profile, ok
 }
 
 func normalizeCacheFieldList(fields []string) []string {

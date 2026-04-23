@@ -235,8 +235,11 @@ func TestValidateStrict_SegmentTemplate_UnknownToken(t *testing.T) {
 func TestValidateStrict_CacheConfig_Valid(t *testing.T) {
 	cfg := Default()
 	cfg.Collections["songs"] = CollectionConfig{
-		Plan:               "songs.yaml",
-		CacheSearchProfile: "song_lookup",
+		Plan: "songs.yaml",
+		FieldMap: map[string][]string{
+			"title":  {"title", "track"},
+			"artist": {"artist", "uploader"},
+		},
 	}
 
 	results := cfg.validateCacheConfig()
@@ -247,7 +250,7 @@ func TestValidateStrict_CacheConfig_Valid(t *testing.T) {
 
 func TestValidateStrict_CacheConfig_UnknownField(t *testing.T) {
 	cfg := Default()
-	cfg.Cache.View.PrimaryFields = []string{"bogus"}
+	cfg.Cache.View.Columns = []string{"bogus"}
 
 	results := cfg.validateCacheConfig()
 	if len(results) != 1 {
@@ -255,11 +258,13 @@ func TestValidateStrict_CacheConfig_UnknownField(t *testing.T) {
 	}
 }
 
-func TestValidateStrict_CacheConfig_MissingProfileReference(t *testing.T) {
+func TestValidateStrict_CacheConfig_UnknownCollectionFieldMap(t *testing.T) {
 	cfg := Default()
 	cfg.Collections["songs"] = CollectionConfig{
-		Plan:               "songs.yaml",
-		CacheSearchProfile: "missing",
+		Plan: "songs.yaml",
+		FieldMap: map[string][]string{
+			"title": {"bogus"},
+		},
 	}
 
 	results := cfg.validateCacheConfig()
