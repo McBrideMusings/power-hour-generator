@@ -1,0 +1,8 @@
+project_name = "Power Hour Generator"
+python_min   = "3.11"
+generator_commit = "8387ca4ec9d0c707a7812c25f6601b0d365f5915+dirty"
+archetypes = ["go-cli"]
+
+[commands.deploy]
+run  = "go build ./... && go install ./cmd/powerhour"
+desc = "Build and install powerhour CLI to PATH"
