@@ -274,12 +274,26 @@ func (v collectionView) view() string {
 	}
 	b.WriteByte('\n')
 
-	// Visible rows.
+	// Visible rows. Reserve lines for scroll indicators before computing
+	// endRow so indicators don't push content past the footer.
 	visible := v.visibleRowCount()
 	startRow := v.scrollTop
+	if startRow > 0 {
+		visible--
+	}
 	endRow := startRow + visible
 	if endRow > len(v.rows) {
 		endRow = len(v.rows)
+	}
+	if endRow < len(v.rows) {
+		visible--
+		if visible < 0 {
+			visible = 0
+		}
+		endRow = startRow + visible
+		if endRow > len(v.rows) {
+			endRow = len(v.rows)
+		}
 	}
 
 	if startRow > 0 {

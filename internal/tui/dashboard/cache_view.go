@@ -263,9 +263,26 @@ func (v cacheView) view() string {
 
 	visible := v.visibleRowCount()
 	startRow := v.scrollTop
+
+	// Reserve a line for the up indicator if scrolled, and a line for the
+	// down indicator if there will be entries below — so that indicators
+	// don't push content past the footer.
+	if startRow > 0 {
+		visible--
+	}
 	endRow := startRow + visible
 	if endRow > len(entries) {
 		endRow = len(entries)
+	}
+	if endRow < len(entries) {
+		visible--
+		if visible < 0 {
+			visible = 0
+		}
+		endRow = startRow + visible
+		if endRow > len(entries) {
+			endRow = len(entries)
+		}
 	}
 
 	if startRow > 0 {
@@ -291,10 +308,11 @@ func (v cacheView) view() string {
 		rawStatus := strings.TrimSpace(v.rowStatus[e.Identifier])
 		statusDisplay := rawStatus
 		if statusDisplay == "" {
-			statusDisplay = "—"
+			statusDisplay = "-"
 		}
-		// Pad status plain, then style.
-		statusCell := faint.Render(fmt.Sprintf("%-*s", statusWidth, truncateCollectionValue(statusDisplay, statusWidth)))
+		// Use lipgloss Width for visual-column-accurate padding (fmt %-*s is
+		// byte-based and breaks on multi-byte characters like em dash).
+		statusCell := faint.Width(statusWidth).Render(truncateCollectionValue(statusDisplay, statusWidth))
 		gutter := fmt.Sprintf("%s%s %s", cursor, idx, statusCell)
 
 		isEditRow := v.editing && i == v.cursor
