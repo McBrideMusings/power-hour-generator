@@ -310,21 +310,22 @@ func (v collectionView) view() string {
 		stateStyle := rowStateStyles[state]
 
 		cursor := "  "
-		idx := fmt.Sprintf("%02d", row.Index)
+		rawIdx := fmt.Sprintf("%-*s", idxWidth-2, fmt.Sprintf("%02d", row.Index))
+		var idx string
 		if i == v.cursor && !v.addFocus {
 			cursor = cursorStyle.Render("▸ ")
-			idx = cursorStyle.Render(idx)
+			idx = cursorStyle.Render(rawIdx)
 		} else if state != rowRendered {
-			idx = stateStyle.Render(idx)
+			idx = stateStyle.Render(rawIdx)
 		} else {
-			idx = faint.Render(idx)
+			idx = faint.Render(rawIdx)
 		}
 
 		isEditRow := v.editing && i == v.cursor
 
 		rawStatus := v.rowStatus[row.Index]
 		status := compactRowStatus(rawStatus, v.tick)
-		gutter := fmt.Sprintf("%s%-*s %-*s", cursor, idxWidth-2, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
+		gutter := fmt.Sprintf("%s%s %-*s", cursor, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
 		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])

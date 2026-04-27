@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -205,16 +206,19 @@ func (o *cacheDoctorOverlay) handleKey(msg tea.KeyMsg) (done bool, applyNow bool
 		o.activeField = 1
 		return false, false
 	case tea.KeyLeft:
+		text := o.activeText()
 		cur := o.activeCursor()
 		if cur > 0 {
-			o.setActiveCursor(cur - 1)
+			_, size := utf8.DecodeLastRuneInString(text[:cur])
+			o.setActiveCursor(cur - size)
 		}
 		return false, false
 	case tea.KeyRight:
 		text := o.activeText()
 		cur := o.activeCursor()
 		if cur < len(text) {
-			o.setActiveCursor(cur + 1)
+			_, size := utf8.DecodeRuneInString(text[cur:])
+			o.setActiveCursor(cur + size)
 		}
 		return false, false
 	case tea.KeySpace:
@@ -226,7 +230,8 @@ func (o *cacheDoctorOverlay) handleKey(msg tea.KeyMsg) (done bool, applyNow bool
 		text := o.activeText()
 		cur := o.activeCursor()
 		if cur > 0 {
-			o.setActiveText(text[:cur-1]+text[cur:], cur-1)
+			_, size := utf8.DecodeLastRuneInString(text[:cur])
+			o.setActiveText(text[:cur-size]+text[cur:], cur-size)
 		}
 		return false, false
 	case tea.KeyRunes:
