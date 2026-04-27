@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -11,11 +10,10 @@ import (
 var cursorCharStyle = lipgloss.NewStyle().Reverse(true)
 
 // renderCell truncates plain text to width, pads it to width, then applies the
-// style. Style-last is the critical part: fmt's %-*s counts bytes, not visual
-// width, so padding ANSI-wrapped strings produces the wrong column width.
+// style. Uses lipgloss Width() for padding so Unicode values don't misalign columns.
 func renderCell(value string, width int, style lipgloss.Style) string {
 	v := truncateCollectionValue(value, width)
-	return style.Render(fmt.Sprintf("%-*s", width, v))
+	return style.Width(width).Render(v)
 }
 
 func renderRow(cells ...string) string {

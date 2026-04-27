@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"powerhour/internal/tui"
 )
@@ -16,7 +17,7 @@ func truncateCollectionValue(value string, max int) string {
 	if value == "" || max <= 0 {
 		return ""
 	}
-	if len(value) <= max {
+	if utf8.RuneCountInString(value) <= max {
 		return value
 	}
 	if !looksLikeFilesystemPath(value) || isURL(value) {
@@ -30,12 +31,12 @@ func truncateCollectionValue(value string, max int) string {
 
 	dir := value[:lastSep+1]
 	base := value[lastSep+1:]
-	if len(base) >= max {
+	if utf8.RuneCountInString(base) >= max {
 		return tui.TruncateWithEllipsis(base, max)
 	}
 
-	remaining := max - len(base)
-	if len(dir) <= remaining {
+	remaining := max - utf8.RuneCountInString(base)
+	if utf8.RuneCountInString(dir) <= remaining {
 		return dir + base
 	}
 	if remaining <= 3 {

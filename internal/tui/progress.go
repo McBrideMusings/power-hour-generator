@@ -389,17 +389,18 @@ func NonEmptyOrDash(value string) string {
 	return value
 }
 
-// TruncateWithEllipsis truncates a string and adds "..." if it exceeds max length.
+// TruncateWithEllipsis truncates a string and adds "..." if it exceeds max runes.
 func TruncateWithEllipsis(value string, max int) string {
 	if max <= 0 {
 		return ""
 	}
 	value = strings.TrimSpace(value)
-	if len(value) <= max {
+	runes := []rune(value)
+	if len(runes) <= max {
 		return value
 	}
 	if max <= 3 {
-		return value[:max]
+		return string(runes[:max])
 	}
-	return value[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }

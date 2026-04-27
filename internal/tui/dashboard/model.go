@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -720,7 +721,8 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyRight:
 		if m.editCursor < len(m.editValue) {
-			m.editCursor++
+			_, size := utf8.DecodeRuneInString(m.editValue[m.editCursor:])
+			m.editCursor += size
 		}
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
@@ -730,7 +732,8 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyLeft:
 		if m.editCursor > 0 {
-			m.editCursor--
+			_, size := utf8.DecodeLastRuneInString(m.editValue[:m.editCursor])
+			m.editCursor -= size
 		}
 		v.editFieldIdx = m.editFieldIdx
 		v.editValue = m.editValue
@@ -770,8 +773,9 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyBackspace:
 		if m.editCursor > 0 && len(m.editValue) > 0 {
-			m.editValue = m.editValue[:m.editCursor-1] + m.editValue[m.editCursor:]
-			m.editCursor--
+			_, size := utf8.DecodeLastRuneInString(m.editValue[:m.editCursor])
+			m.editValue = m.editValue[:m.editCursor-size] + m.editValue[m.editCursor:]
+			m.editCursor -= size
 		}
 		m.collectionViews[cvIdx].editValue = m.editValue
 		m.collectionViews[cvIdx].editCursor = m.editCursor
@@ -1833,20 +1837,24 @@ func (m Model) handleCacheInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyBackspace:
 		if v.editCursor > 0 {
-			v.editValue = v.editValue[:v.editCursor-1] + v.editValue[v.editCursor:]
-			v.editCursor--
+			_, size := utf8.DecodeLastRuneInString(v.editValue[:v.editCursor])
+			v.editValue = v.editValue[:v.editCursor-size] + v.editValue[v.editCursor:]
+			v.editCursor -= size
 		}
 	case tea.KeyDelete:
 		if v.editCursor < len(v.editValue) {
-			v.editValue = v.editValue[:v.editCursor] + v.editValue[v.editCursor+1:]
+			_, size := utf8.DecodeRuneInString(v.editValue[v.editCursor:])
+			v.editValue = v.editValue[:v.editCursor] + v.editValue[v.editCursor+size:]
 		}
 	case tea.KeyLeft:
 		if v.editCursor > 0 {
-			v.editCursor--
+			_, size := utf8.DecodeLastRuneInString(v.editValue[:v.editCursor])
+			v.editCursor -= size
 		}
 	case tea.KeyRight:
 		if v.editCursor < len(v.editValue) {
-			v.editCursor++
+			_, size := utf8.DecodeRuneInString(v.editValue[v.editCursor:])
+			v.editCursor += size
 		}
 	case tea.KeyHome:
 		v.editCursor = 0
