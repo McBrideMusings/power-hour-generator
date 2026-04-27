@@ -350,7 +350,7 @@ func (o *cacheDoctorOverlay) view() string {
 	fmt.Fprintf(&b, " %s\n", titleLabel)
 	fmt.Fprintf(&b, "   Current:  %s\n", faint.Render(currentTitle))
 	if o.activeField == 0 {
-		fmt.Fprintf(&b, "   New:      %s\n", editStyle.Render(renderCursorField(o.editTitle, o.titleCursor)))
+		fmt.Fprintf(&b, "   New:      %s\n", renderEditField(o.editTitle, o.titleCursor))
 	} else {
 		fmt.Fprintf(&b, "   New:      %s\n", o.editTitle)
 	}
@@ -367,7 +367,7 @@ func (o *cacheDoctorOverlay) view() string {
 	fmt.Fprintf(&b, " %s\n", artistLabel)
 	fmt.Fprintf(&b, "   Current:  %s\n", faint.Render(currentArtist))
 	if o.activeField == 1 {
-		fmt.Fprintf(&b, "   New:      %s\n", editStyle.Render(renderCursorField(o.editArtist, o.artistCursor)))
+		fmt.Fprintf(&b, "   New:      %s\n", renderEditField(o.editArtist, o.artistCursor))
 		if suggestions := o.artistSuggestions(); len(suggestions) > 0 {
 			for i, s := range suggestions {
 				prefix := "   "
@@ -450,19 +450,6 @@ func (o *cacheDoctorOverlay) doctorFooter() string {
 	return footerStyle.Render(footer)
 }
 
-// renderCursorField renders a text value with a block cursor at the given position.
-func renderCursorField(text string, cursor int) string {
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor > len(text) {
-		cursor = len(text)
-	}
-	if cursor == len(text) {
-		return text + "█"
-	}
-	return text[:cursor] + "█" + text[cursor:]
-}
 
 func confidenceLabel(conf string) string {
 	switch conf {

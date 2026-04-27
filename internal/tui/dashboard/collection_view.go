@@ -332,7 +332,7 @@ func (v collectionView) view() string {
 
 			// Inline edit: show edit buffer with cursor on the active field.
 			if isEditRow && j == v.editFieldIdx {
-				parts = append(parts, renderCell(renderCursorField(v.editValue, v.editCursor), w, editStyle))
+				parts = append(parts, renderEditCell(v.editValue, v.editCursor, w))
 				continue
 			}
 			// Inline edit: highlight other fields on the edit row.
@@ -444,13 +444,11 @@ func (v collectionView) renderAddSlot() string {
 	buf := v.addBuffer
 	body, detect := classifyAddBuffer(buf)
 
-	renderBody := body
-	if !strings.Contains(body, "\n") {
-		renderBody = renderCursorField(body, v.addCursor)
-	}
-	rendered := editStyle.Render(renderBody)
+	var rendered string
 	if strings.Contains(body, "\n") {
-		rendered += editStyle.Render("█")
+		rendered = editStyle.Render(body) + editStyle.Render("█")
+	} else {
+		rendered = renderEditField(body, v.addCursor)
 	}
 	if detect != "" {
 		rendered += "  " + faint.Render("· "+detect)
