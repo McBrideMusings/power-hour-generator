@@ -418,7 +418,15 @@ func (o *cacheDoctorOverlay) view() string {
 		b.WriteByte('\n')
 	}
 
-	return b.String()
+	output := b.String()
+	if o.termHeight > 0 {
+		maxLines := o.termHeight - 5
+		if maxLines > 0 && strings.Count(output, "\n") > maxLines {
+			parts := strings.SplitN(output, "\n", maxLines+1)
+			output = strings.Join(parts[:maxLines], "\n") + "\n"
+		}
+	}
+	return output
 }
 
 // doctorFooter returns the footer text for the doctor overlay.

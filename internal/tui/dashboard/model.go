@@ -381,6 +381,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cacheView.termWidth = msg.Width
 		m.cacheView.termHeight = msg.Height
 		m.toolsView.termWidth = msg.Width
+		m.toolsView.termHeight = msg.Height
 		if m.doctorOverlay != nil {
 			m.doctorOverlay.termWidth = msg.Width
 			m.doctorOverlay.termHeight = msg.Height
@@ -1703,7 +1704,7 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "f":
 		v.toggle()
 	case "e":
-		if len(entries) == 0 || len(v.columns) == 0 {
+		if len(entries) == 0 || v.cursor >= len(entries) || len(v.columns) == 0 {
 			m.cacheView = v
 			return m, nil
 		}
@@ -1746,7 +1747,7 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cacheView = v
 			return m, nil
 		}
-		if len(entries) == 0 {
+		if len(entries) == 0 || v.cursor >= len(entries) {
 			m.cacheView = v
 			return m, nil
 		}
@@ -3115,6 +3116,7 @@ func (m Model) refreshFromDisk() Model {
 		refreshed.cacheView.termWidth = refreshed.termWidth
 		refreshed.cacheView.termHeight = refreshed.termHeight
 		refreshed.toolsView.termWidth = refreshed.termWidth
+		refreshed.toolsView.termHeight = refreshed.termHeight
 		for i := range refreshed.collectionViews {
 			refreshed.collectionViews[i].termWidth = refreshed.termWidth
 			refreshed.collectionViews[i].termHeight = refreshed.termHeight

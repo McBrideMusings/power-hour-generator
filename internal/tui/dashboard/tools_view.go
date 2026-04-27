@@ -7,8 +7,9 @@ import (
 
 // toolsView shows tool status information as a full tab view.
 type toolsView struct {
-	tools     []ToolStatus
-	termWidth int
+	tools      []ToolStatus
+	termWidth  int
+	termHeight int
 }
 
 func newToolsView(tools []ToolStatus) toolsView {
@@ -46,7 +47,15 @@ func (v toolsView) view() string {
 		b.WriteByte('\n')
 	}
 
-	return b.String()
+	output := b.String()
+	if v.termHeight > 0 {
+		maxLines := v.termHeight - 5
+		if maxLines > 0 && strings.Count(output, "\n") > maxLines {
+			parts := strings.SplitN(output, "\n", maxLines+1)
+			output = strings.Join(parts[:maxLines], "\n") + "\n"
+		}
+	}
+	return output
 }
 
 func nonEmptyOrDash(s string) string {
