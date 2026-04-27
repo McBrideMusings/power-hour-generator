@@ -320,7 +320,7 @@ func (v cacheView) view() string {
 		cells := make([]string, 0, dataColCount)
 		for j, val := range e.Values {
 			if isEditRow && j == v.editFieldIdx {
-				cells = append(cells, renderCell(renderCursorField(v.editValue, v.editCursor), widths[j], editStyle))
+				cells = append(cells, renderEditCell(v.editValue, v.editCursor, widths[j]))
 				continue
 			}
 			style := faint
