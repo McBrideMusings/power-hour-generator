@@ -332,11 +332,19 @@ func (v collectionView) view() string {
 			w := widths[j]
 
 			// Inline edit: show edit buffer with cursor on the active field.
+			// The edit cell overflows into adjacent columns: compute X offset of
+			// this column and stretch to the terminal right margin, then stop
+			// rendering further columns (they fall within the overflow region).
 			if isEditRow && j == v.editFieldIdx {
-				parts = append(parts, renderEditCell(v.editValue, v.editCursor, w))
-				continue
+				xOffset := gutterWidth + gutterGapWidth
+				for k := 0; k < j; k++ {
+					xOffset += widths[k] + columnGapWidth
+				}
+				overflowWidth := max(w, v.termWidth-xOffset-2)
+				parts = append(parts, renderEditCell(v.editValue, v.editCursor, overflowWidth))
+				break
 			}
-			// Inline edit: highlight other fields on the edit row.
+			// Inline edit: highlight other fields on the edit row (before the edit field).
 			if isEditRow {
 				parts = append(parts, renderCell(val, w, editRowStyle))
 				continue
