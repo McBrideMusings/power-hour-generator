@@ -17,3 +17,4 @@ tmp/
 .worktrees
 .superpowers/
 docs/superpowers/
+*.local.*
