@@ -959,7 +959,7 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		trimmed := strings.TrimSpace(m.addBuffer)
-		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
+		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) && !isLocalVideoFile(trimmed) {
 			lookup := m.cacheLookupFor(cvIdx)
 			if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched {
 				return m.addSuggestedCollectionRow(cvIdx, suggestion)
@@ -974,7 +974,7 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyTab:
 		trimmed := strings.TrimSpace(m.addBuffer)
 		lookup := m.cacheLookupFor(cvIdx)
-		if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
+		if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched && !isURL(trimmed) && !looksLikeBatchImport(trimmed) && !isLocalVideoFile(trimmed) {
 			return m.addSuggestedCollectionRow(cvIdx, suggestion)
 		}
 		return m, nil

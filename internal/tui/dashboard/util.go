@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -10,6 +12,32 @@ import (
 // isURL returns true if the string looks like a URL (http, https, or youtube shortlink).
 func isURL(s string) bool {
 	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") || strings.HasPrefix(s, "youtu")
+}
+
+// videoFileExtensions lists extensions treated as playable video sources
+// for the Add Clip slot's local-file path.
+var videoFileExtensions = map[string]bool{
+	".mp4": true, ".mkv": true, ".webm": true, ".avi": true, ".mov": true,
+	".m4v": true, ".flv": true, ".wmv": true, ".mpg": true, ".mpeg": true,
+	".ts": true, ".m2ts": true,
+}
+
+// isLocalVideoFile reports whether s is a path to an existing, readable video
+// file on disk (not a URL). Used to let the Add Clip slot accept any local
+// video path — not just ones under the project root — without routing it
+// through the cache-suggestion search.
+func isLocalVideoFile(s string) bool {
+	if s == "" || isURL(s) {
+		return false
+	}
+	if !videoFileExtensions[strings.ToLower(filepath.Ext(s))] {
+		return false
+	}
+	info, err := os.Stat(s)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return true
 }
 
 func truncateCollectionValue(value string, max int) string {
