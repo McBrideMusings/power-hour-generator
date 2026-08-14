@@ -1419,6 +1419,27 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		}
 		return m, nil
 
+	case "alt+v":
+		if !m.vlcAvailable() {
+			m.statusMsg = "vlc not found — install VLC to preview clips"
+			return m, nil
+		}
+		if len(v.rows) == 0 {
+			return m, nil
+		}
+		vlcPath := m.vlcPath()
+		row := v.rows[v.cursor]
+		m = m.setCollectionRowNote(cvIdx, row.Index, "opening vlc...")
+		srcPath := m.resolveVideoPath(row)
+		if srcPath == "" {
+			m.statusMsg = "No rendered or cached file found"
+			return m, nil
+		}
+		if err := playFileInVLC(vlcPath, srcPath); err != nil {
+			m.statusMsg = fmt.Sprintf("vlc error: %v", err)
+		}
+		return m, nil
+
 	case "V":
 		if !m.vlcAvailable() {
 			m.statusMsg = "vlc not found — install VLC to preview clips"

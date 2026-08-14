@@ -16,7 +16,11 @@ func renderFooter(m Model) string {
 	case "timeline":
 		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  x del  u refresh") + vlc + footerStyle.Render("  e/E edit/ext  r render  c concat  o open  ? help  q/Esc quit")
 	case "collection":
-		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  d dup  x del  u refresh  f/F fetch/all") + vlc + footerStyle.Render("  e/E edit/ext  r/R render/all  o open  ? help  q/Esc quit")
+		altV := ""
+		if m.vlcAvailable() {
+			altV = footerStyle.Render("  ⌥v uncut")
+		}
+		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  d dup  x del  u refresh  f/F fetch/all") + vlc + altV + footerStyle.Render("  e/E edit/ext  r/R render/all  o open  ? help  q/Esc quit")
 	case "cache":
 		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  x del  d doctor  D all  u refresh") + vlc + footerStyle.Render("  o open  ? help  q/Esc quit")
 	case "tools":
