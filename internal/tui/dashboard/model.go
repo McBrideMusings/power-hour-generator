@@ -969,6 +969,13 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
+		if isLocalVideoFile(trimmed) {
+			if err := probeLocalVideoFile(trimmed); err != nil {
+				m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("%s: %v", trimmed, err))
+				m.resetAddClipInput(cvIdx, true)
+				return m, nil
+			}
+		}
 		return m.dispatchAddBuffer(cvIdx, m.addBuffer)
 
 	case tea.KeyTab:

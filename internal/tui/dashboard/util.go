@@ -1,11 +1,16 @@
 package dashboard
 
 import (
+	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"powerhour/internal/tools"
 	"powerhour/internal/tui"
 )
 
@@ -38,6 +43,37 @@ func isLocalVideoFile(s string) bool {
 		return false
 	}
 	return true
+}
+
+// probeLocalVideoFile runs ffprobe against path and reports whether it
+// contains a decodable video stream. isLocalVideoFile only checks the
+// extension, which passes a renamed non-video file; this catches that case
+// at add time instead of at render time. Bounded by a timeout since path may
+// be on a slow network mount.
+func probeLocalVideoFile(path string) error {
+	ffprobePath, err := tools.Lookup("ffprobe")
+	if err != nil {
+		return nil // tool not detected yet; don't block add on this
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, ffprobePath,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=codec_type",
+		"-of", "csv=p=0",
+		path,
+	)
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("not a readable video file: %w", err)
+	}
+	if !strings.Contains(string(out), "video") {
+		return fmt.Errorf("file has no video stream")
+	}
+	return nil
 }
 
 func truncateCollectionValue(value string, max int) string {
