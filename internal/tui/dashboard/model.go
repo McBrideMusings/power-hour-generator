@@ -29,6 +29,10 @@ import (
 
 type tickMsg time.Time
 
+// errorNoteTicks controls how long a per-row error note (e.g. a failed
+// fetch) stays visible before expiring, at 150ms per tick (~15s).
+const errorNoteTicks = 100
+
 // interactionMode tracks what the user is doing.
 type interactionMode int
 
@@ -2275,7 +2279,16 @@ func (m Model) drainJobEvents() Model {
 				}
 				for i := range m.collectionViews {
 					m.collectionViews[i].activity = ""
-					m.collectionViews[i].rowStatus = make(map[int]string)
+					if m.collectionViews[i].rowStatusUntil == nil {
+						m.collectionViews[i].rowStatusUntil = make(map[int]int)
+					}
+					for rowIndex, status := range m.collectionViews[i].rowStatus {
+						if strings.HasPrefix(strings.TrimSpace(status), "note:") {
+							m.collectionViews[i].rowStatusUntil[rowIndex] = m.tick + errorNoteTicks
+							continue
+						}
+						delete(m.collectionViews[i].rowStatus, rowIndex)
+					}
 				}
 				m.cacheView.activity = ""
 				m.cacheView.rowStatus = make(map[string]string)
@@ -2334,7 +2347,7 @@ func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.Colle
 		events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "fetching"}
 		result, err := svc.Resolve(ctx, idx, row.ToRow(), cache.ResolveOptions{})
 		if err != nil {
-			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "error"}
+			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "note:ERROR - " + strings.TrimSpace(err.Error())}
 			events <- jobCompletedEvent{label: "Fetch", err: err}
 			return
 		}
@@ -2344,7 +2357,7 @@ func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.Colle
 		case cache.ResolveStatusCached, cache.ResolveStatusMatched:
 			finalStatus = "cached"
 		case cache.ResolveStatusMissing:
-			finalStatus = "error"
+			finalStatus = "note:ERROR - source could not be resolved"
 		}
 		events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: finalStatus}
 	}

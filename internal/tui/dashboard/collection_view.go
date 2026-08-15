@@ -420,7 +420,11 @@ func (v collectionView) renderHelpRow() string {
 		row := v.rows[v.cursor]
 		rawStatus := v.rowStatus[row.Index]
 		if note := inlineRowNote(rawStatus, v.tick); note != "" {
-			return helpRowText(note, editStyle, v.termWidth)
+			noteStyle := editStyle
+			if isErrorRowNote(rawStatus) {
+				noteStyle = errorNoteStyle
+			}
+			return helpRowText(note, noteStyle, v.termWidth)
 		}
 		return helpRowText(editContextNote(v, row), faint, v.termWidth)
 	}
@@ -428,8 +432,13 @@ func (v collectionView) renderHelpRow() string {
 	// 3. Transient note on the cursor row.
 	if v.cursor >= 0 && v.cursor < len(v.rows) {
 		row := v.rows[v.cursor]
-		if note := inlineRowNote(v.rowStatus[row.Index], v.tick); note != "" {
-			return helpRowText(note, editStyle, v.termWidth)
+		rawStatus := v.rowStatus[row.Index]
+		if note := inlineRowNote(rawStatus, v.tick); note != "" {
+			noteStyle := editStyle
+			if isErrorRowNote(rawStatus) {
+				noteStyle = errorNoteStyle
+			}
+			return helpRowText(note, noteStyle, v.termWidth)
 		}
 	}
 
@@ -634,5 +643,16 @@ func inlineRowNote(raw string, tick int) string {
 	if !strings.HasPrefix(status, "note:") {
 		return ""
 	}
-	return strings.TrimSpace(strings.TrimPrefix(status, "note:"))
+	note := strings.TrimSpace(strings.TrimPrefix(status, "note:"))
+	if strings.HasPrefix(note, "ERROR - ") {
+		return "└─▶ " + note
+	}
+	return note
+}
+
+// isErrorRowNote reports whether raw is a "note:ERROR - ..." row status, so
+// callers can style it distinctly from ordinary transient notes.
+func isErrorRowNote(raw string) bool {
+	note := strings.TrimPrefix(strings.TrimSpace(raw), "note:")
+	return strings.HasPrefix(strings.TrimSpace(note), "ERROR - ")
 }

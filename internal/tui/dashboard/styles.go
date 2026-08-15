@@ -36,6 +36,9 @@ var (
 	// Inline confirm prompt (e.g. delete? [y/n]).
 	confirmStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Bold(true)
 
+	// Inline error note (e.g. a failed fetch).
+	errorNoteStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+
 	// Inline edit styles.
 	editStyle                = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Underline(true)
 	editRowStyle             = lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
