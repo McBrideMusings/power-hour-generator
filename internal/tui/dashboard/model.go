@@ -1182,6 +1182,9 @@ func (m Model) addCollectionRow(cvIdx int, newRow csvplan.CollectionRow, outcome
 	m = writeCollection(m, cvIdx)
 	m = reResolve(m)
 	m.resetAddClipInput(cvIdx, outcome.stayInAddMode)
+	if !outcome.stayInAddMode {
+		m.mode = modeNormal
+	}
 
 	var cmd tea.Cmd
 	if outcome.probeURL != "" {
@@ -1231,7 +1234,7 @@ func (m Model) addSuggestedCollectionRow(cvIdx int, suggestion songSuggestion) (
 	newRow := project.BuildCollectionRow(coll, suggestion.Link)
 	applySuggestionToRow(coll, &newRow, suggestion)
 	return m.addCollectionRow(cvIdx, newRow, addRowOutcome{
-		stayInAddMode: true,
+		stayInAddMode: false,
 		note:          fmt.Sprintf("added from cache: %s - %s", suggestion.Title, suggestion.Artist),
 	})
 }
@@ -2755,9 +2758,9 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 // or (now only in legacy callers) arbitrary text. It builds a row, pre-applies
 // cache metadata when the link is already known, and delegates the write to
 // addCollectionRow. The outcome is derived from the row state rather than a
-// boolean parameter: cached links stay in add mode with a recognition note,
-// unknown URLs stay in add mode and fire an async probe, and anything else
-// flows into inline-edit on the first empty title/artist field.
+// boolean parameter: adding a single clip always exits add mode afterward
+// (press "a" again for another), but still fires an async probe for unknown
+// URLs and flows into inline-edit on the first empty title/artist field.
 func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.Cmd) {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return m, nil
@@ -2778,7 +2781,7 @@ func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.C
 		cached = true
 	}
 
-	outcome := addRowOutcome{stayInAddMode: true, editOnEmptyFields: true}
+	outcome := addRowOutcome{stayInAddMode: false, editOnEmptyFields: true}
 	switch {
 	case cached:
 		outcome.note = fmt.Sprintf("recognized cached link %s", value)
