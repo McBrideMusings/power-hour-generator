@@ -97,12 +97,16 @@ func collectionHasField(coll project.Collection, field string) bool {
 		return false
 	}
 	for _, header := range coll.Headers {
-		if strings.TrimSpace(header) == field {
+		if strings.EqualFold(strings.TrimSpace(header), field) {
 			return true
 		}
 	}
-	_, ok := coll.Defaults[field]
-	return ok
+	for key := range coll.Defaults {
+		if strings.EqualFold(strings.TrimSpace(key), field) {
+			return true
+		}
+	}
+	return false
 }
 
 func findCachedEntryByLink(idx *cache.Index, link string) (cache.Entry, bool) {

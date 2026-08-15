@@ -37,12 +37,12 @@ const errorNoteTicks = 100
 type interactionMode int
 
 const (
-	modeNormal        interactionMode = iota
-	modeInput                         // text input active
-	modeConfirmDelete                 // waiting for y/n
-	modeInlineEdit                    // editing a row's fields inline
-	modeCacheInlineEdit               // editing a cache entry's fields inline
-	modeAddClip                       // add-clip slot focused (paste link/path/CSV)
+	modeNormal          interactionMode = iota
+	modeInput                           // text input active
+	modeConfirmDelete                   // waiting for y/n
+	modeInlineEdit                      // editing a row's fields inline
+	modeCacheInlineEdit                 // editing a cache entry's fields inline
+	modeAddClip                         // add-clip slot focused (paste link/path/CSV)
 )
 
 // Model is the top-level bubbletea model for the dashboard.
@@ -443,10 +443,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.TrimSpace(v.rows[ri].Link) == msg.link {
 					rowIndex = v.rows[ri].Index
 					if msg.err == nil {
-						if msg.title != "" {
+						coll := m.collections[m.collectionNames[cvIdx]]
+						if msg.title != "" && collectionHasField(coll, "title") {
 							v.rows[ri].CustomFields["title"] = msg.title
 						}
-						if msg.artist != "" {
+						if msg.artist != "" && collectionHasField(coll, "artist") {
 							v.rows[ri].CustomFields["artist"] = msg.artist
 						}
 					}
