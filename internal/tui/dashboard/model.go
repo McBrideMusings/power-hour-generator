@@ -109,6 +109,15 @@ type Model struct {
 	doctorOverlay *cacheDoctorOverlay
 
 	job dashboardJobState
+
+	// pendingAutoRerenders holds rows that went stale from an edit while a
+	// render job was already active; drained once that job completes.
+	pendingAutoRerenders []pendingAutoRerender
+}
+
+type pendingAutoRerender struct {
+	cvIdx    int
+	rowIndex int
 }
 
 type dashboardJobState struct {
@@ -460,6 +469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				collName := m.collectionNames[cvIdx]
 				m.collectionViews[cvIdx].columns = discoverColumns(v.rows, m.collections[collName].Headers)
 				m = writeCollection(m, cvIdx)
+				m = maybeAutoRerenderRow(m, cvIdx, rowIndex)
 			}
 			if rowFound {
 				if msg.err != nil {
@@ -2301,6 +2311,7 @@ func (m Model) drainJobEvents() Model {
 				m.cacheView.rowStatus = make(map[string]string)
 				m.job = dashboardJobState{}
 				m = reloadState(m)
+				m = drainPendingAutoRerenders(m)
 				return m
 			}
 		default:
@@ -3047,7 +3058,27 @@ func maybeAutoRerenderRow(m Model, cvIdx int, rowIndex int) Model {
 		if i >= len(v.states) || v.states[i] != rowStale {
 			return m
 		}
+		if m.job.active {
+			m.pendingAutoRerenders = append(m.pendingAutoRerenders, pendingAutoRerender{cvIdx: cvIdx, rowIndex: rowIndex})
+			return m
+		}
 		return m.startCollectionRenderJob(cvIdx, []csvplan.CollectionRow{row}, false)
+	}
+	return m
+}
+
+// drainPendingAutoRerenders starts a queued auto-rerender left over from a row
+// going stale while another render job was already in flight. Only one job
+// can run at a time, so this starts at most one and leaves the rest queued.
+func drainPendingAutoRerenders(m Model) Model {
+	for len(m.pendingAutoRerenders) > 0 {
+		next := m.pendingAutoRerenders[0]
+		m.pendingAutoRerenders = m.pendingAutoRerenders[1:]
+		before := m.job.active
+		m = maybeAutoRerenderRow(m, next.cvIdx, next.rowIndex)
+		if m.job.active && !before {
+			return m
+		}
 	}
 	return m
 }
