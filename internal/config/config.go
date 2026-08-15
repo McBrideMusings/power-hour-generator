@@ -140,6 +140,15 @@ type Config struct {
 	Library         LibraryConfig               `yaml:"library"`
 	SegmentsBaseDir string                      `yaml:"segments_base_dir"`
 	Encoding        EncodingConfig              `yaml:"encoding,omitempty"`
+	TUI             TUIConfig                   `yaml:"tui,omitempty"`
+}
+
+// TUIConfig controls interactive dashboard behavior.
+type TUIConfig struct {
+	// AutoRerender re-renders a collection row automatically after an inline
+	// edit leaves its segment stale (start_time/duration/overlay inputs
+	// changed since the last render).
+	AutoRerender bool `yaml:"auto_rerender,omitempty"`
 }
 
 // CacheConfig controls how cache metadata is displayed and searched in the TUI.
@@ -375,6 +384,9 @@ func Default() Config {
 			},
 		},
 		SegmentsBaseDir: "segments",
+		TUI: TUIConfig{
+			AutoRerender: true,
+		},
 	}
 }
 

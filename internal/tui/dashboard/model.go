@@ -171,7 +171,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 	// Build collection views.
 	collViews := make([]collectionView, len(names))
 	for i, name := range names {
-		collViews[i] = newCollectionView(collections[name], pp, cfg, idx)
+		collViews[i] = newCollectionView(collections[name], pp, cfg, idx, rs)
 	}
 
 	// Build summaries and cache status.
@@ -711,6 +711,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		field := cols[m.editFieldIdx].field
+		editedRowIndex := v.rows[v.cursor].Index
 		commitField()
 		m, cmd := m.applyCommittedLinkLookup(cvIdx, v.cursor, field, m.editOriginal, m.editValue)
 		v.editing = false
@@ -719,6 +720,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m = writeCollection(m, cvIdx)
 		m = reResolve(m)
+		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
 		if field != "link" || cmd == nil {
 			m = m.setCollectionRowNote(cvIdx, v.rows[v.cursor].Index, "saved")
 		}
@@ -748,9 +750,11 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyDown:
 		field := cols[m.editFieldIdx].field
+		editedRowIndex := v.rows[v.cursor].Index
 		commitField()
 		m, cmd := m.applyCommittedLinkLookup(cvIdx, v.cursor, field, m.editOriginal, m.editValue)
 		m = writeCollection(m, cvIdx)
+		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
 		v = m.collectionViews[cvIdx]
 		if v.cursor < len(v.rows)-1 {
 			v.cursor++
@@ -763,9 +767,11 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyUp:
 		field := cols[m.editFieldIdx].field
+		editedRowIndex := v.rows[v.cursor].Index
 		commitField()
 		m, cmd := m.applyCommittedLinkLookup(cvIdx, v.cursor, field, m.editOriginal, m.editValue)
 		m = writeCollection(m, cvIdx)
+		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
 		v = m.collectionViews[cvIdx]
 		if v.cursor > 0 {
 			v.cursor--
@@ -2481,11 +2487,6 @@ func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, collName st
 			}
 		}
 	}
-	currentKeys := make(map[string]bool, len(segments))
-	for _, seg := range segments {
-		currentKeys[seg.OutputPath] = true
-	}
-	renderstate.Prune(rs, currentKeys)
 	if err := rs.Save(pp.RenderStateFile); err != nil {
 		events <- jobCompletedEvent{label: "Render", err: err}
 		return
@@ -3028,6 +3029,29 @@ func writeCollection(m Model, cvIdx int) Model {
 	return m
 }
 
+// maybeAutoRerenderRow re-renders a single row in the background when the
+// `tui.auto_rerender` config toggle is on and the row's segment just went
+// stale (its rendered output no longer matches its current input hash).
+func maybeAutoRerenderRow(m Model, cvIdx int, rowIndex int) Model {
+	if !m.cfg.TUI.AutoRerender {
+		return m
+	}
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m
+	}
+	v := m.collectionViews[cvIdx]
+	for i, row := range v.rows {
+		if row.Index != rowIndex {
+			continue
+		}
+		if i >= len(v.states) || v.states[i] != rowStale {
+			return m
+		}
+		return m.startCollectionRenderJob(cvIdx, []csvplan.CollectionRow{row}, false)
+	}
+	return m
+}
+
 func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLookup) (songSuggestion, bool) {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return songSuggestion{}, false
@@ -3113,7 +3137,7 @@ func reloadState(m Model) Model {
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
 		coll := m.collections[collName]
-		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, idx)
+		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, idx, rs)
 	}
 	return m
 }
@@ -3226,7 +3250,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	m.collections[collName] = coll
 	m.collectionViews[cvIdx].rows = rows
 	m.collectionViews[cvIdx].columns = discoverColumns(rows, coll.Headers)
-	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx)
+	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx, m.renderState)
 	if m.collectionViews[cvIdx].cursor >= len(rows) {
 		m.collectionViews[cvIdx].cursor = max(0, len(rows)-1)
 	}

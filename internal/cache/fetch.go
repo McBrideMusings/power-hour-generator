@@ -240,7 +240,6 @@ func (s *Service) logWriter(base io.Writer) io.Writer {
 	return io.MultiWriter(base, s.logOutput)
 }
 
-
 func TryLinkOrCopy(src, dest string) (bool, error) {
 	if err := os.Link(src, dest); err == nil {
 		return true, nil

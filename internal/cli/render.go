@@ -120,4 +120,3 @@ func clipDisplayTitle(clip project.Clip) string {
 	}
 	return string(clip.ClipType)
 }
-

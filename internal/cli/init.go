@@ -134,6 +134,11 @@ cache:
         search_fields: [title, artist]
 library: {}
 segments_base_dir: segments
+tui:
+    # Auto re-render a row in the dashboard right after an inline edit
+    # (start_time/duration/etc.) leaves its segment stale. Set to false to
+    # only see the stale-row color and re-render manually.
+    auto_rerender: true
 `, songsPlan, interstitialsPlan)
 }
 

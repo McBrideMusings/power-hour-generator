@@ -208,7 +208,6 @@ func buildOutputPath(pp paths.ProjectPaths, collClip project.CollectionClip, row
 	return filepath.Join(outputDir, filename)
 }
 
-
 func writeCollectionValidationJSON(cmd *cobra.Command, collectionName string, collection project.Collection, rows []collectionValidationRow) error {
 	payload := struct {
 		Collection string                      `json:"collection"`

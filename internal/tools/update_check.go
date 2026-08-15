@@ -347,4 +347,3 @@ func FormatUpdateHint(tool, currentVersion string) string {
 	notice := UpdateNotice{Tool: tool, InstallMethod: entry.InstallMethod}
 	return fmt.Sprintf("update available: %s (%s)", entry.LatestVersion, notice.UpdateCommand())
 }
-

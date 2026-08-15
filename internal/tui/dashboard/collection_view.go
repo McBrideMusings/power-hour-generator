@@ -13,6 +13,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
+	renderstate "powerhour/internal/render/state"
 	"powerhour/internal/tui"
 	"powerhour/pkg/csvplan"
 )
@@ -24,12 +25,14 @@ const (
 	rowRendered    rowState = iota // segment exists on disk
 	rowNotRendered                 // cached but segment not rendered
 	rowNotCached                   // source not in cache
+	rowStale                       // rendered, but input changed since last render
 )
 
 var rowStateStyles = map[rowState]lipgloss.Style{
 	rowRendered:    lipgloss.NewStyle(),                                   // default
 	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("214")), // amber
 	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("9")),   // bright red
+	rowStale:       lipgloss.NewStyle().Foreground(lipgloss.Color("213")), // pink
 }
 
 // collectionColumn describes a dynamic column in the collection table.
@@ -137,8 +140,8 @@ func discoverColumns(rows []csvplan.CollectionRow, declaredColumns []string) []c
 	return cols
 }
 
-func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index) collectionView {
-	states := computeRowStates(coll, pp, cfg, idx)
+func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *renderstate.RenderState) collectionView {
+	states := computeRowStates(coll, pp, cfg, idx, rs)
 	return collectionView{
 		name:           coll.Name,
 		planPath:       coll.Plan,
@@ -151,8 +154,10 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 	}
 }
 
-func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index) []rowState {
+func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *renderstate.RenderState) []rowState {
 	states := make([]rowState, len(coll.Rows))
+	filenameTemplate := cfg.SegmentFilenameTemplate()
+	fades := effectiveFadesForCollection(cfg, coll)
 	for i, row := range coll.Rows {
 		link := strings.TrimSpace(row.Link)
 		isURL := isURL(link)
@@ -178,14 +183,56 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 		}
 
 		// Check rendered segment.
-		segPath := resolveRenderedSegmentPath(pp, cfg, coll.Name, coll, row)
-		if _, err := os.Stat(segPath); err == nil {
-			states[i] = rowRendered
-		} else {
+		seg := resolveRenderedSegment(pp, cfg, coll.Name, coll, row)
+		if _, err := os.Stat(seg.OutputPath); err != nil {
 			states[i] = rowNotRendered
+			continue
 		}
+
+		if rs != nil {
+			if prior, ok := rs.Segments[seg.OutputPath]; ok {
+				if fadeVals, ok := fades[row.Index]; ok {
+					seg.Clip.FadeInSeconds = fadeVals[0]
+					seg.Clip.FadeOutSeconds = fadeVals[1]
+				}
+				currentHash := renderstate.SegmentInputHash(seg, filenameTemplate)
+				if currentHash != prior.InputHash {
+					states[i] = rowStale
+					continue
+				}
+			}
+		}
+		states[i] = rowRendered
 	}
 	return states
+}
+
+// effectiveFadesForCollection resolves the per-row fade-in/fade-out seconds
+// that the real render job would apply, including any timeline sequence-entry
+// overrides layered on top of the collection's own fade config — the same
+// resolution project.ApplySequenceEntryFades performs during rendering. This
+// keeps staleness hashing consistent with what was actually rendered.
+func effectiveFadesForCollection(cfg config.Config, coll project.Collection) map[int][2]float64 {
+	collCfg := cfg.Collections[coll.Name]
+	baseIn, baseOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
+
+	clips := make([]project.CollectionClip, len(coll.Rows))
+	for i, row := range coll.Rows {
+		clip := project.Clip{
+			ClipType:       project.ClipType(coll.Name),
+			Row:            row.ToRow(),
+			FadeInSeconds:  baseIn,
+			FadeOutSeconds: baseOut,
+		}
+		clips[i] = project.CollectionClip{CollectionName: coll.Name, Clip: clip}
+	}
+	project.ApplySequenceEntryFades(cfg, clips)
+
+	fades := make(map[int][2]float64, len(clips))
+	for _, cc := range clips {
+		fades[cc.Clip.Row.Index] = [2]float64{cc.Clip.FadeInSeconds, cc.Clip.FadeOutSeconds}
+	}
+	return fades
 }
 
 func (v collectionView) visibleRowCount() int {

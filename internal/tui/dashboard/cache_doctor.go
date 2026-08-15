@@ -343,7 +343,6 @@ func (o *cacheDoctorOverlay) view() string {
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 
-
 	// Title field.
 	titleLabel := "TITLE"
 	if o.activeField == 0 {
@@ -455,7 +454,6 @@ func (o *cacheDoctorOverlay) doctorFooter() string {
 	return footerStyle.Render(footer)
 }
 
-
 func confidenceLabel(conf string) string {
 	switch conf {
 	case "high":
@@ -479,14 +477,14 @@ func confidenceStyle(conf string) lipgloss.Style {
 }
 
 var reasonMap = map[string]string{
-	"used track as title":                    "used track metadata as title",
-	"applied artist alias":                   "matched a known artist alias",
-	"split artist/title from title field":    "split \"Artist - Title\" format",
+	"used track as title":                     "used track metadata as title",
+	"applied artist alias":                    "matched a known artist alias",
+	"split artist/title from title field":     "split \"Artist - Title\" format",
 	"mapped uploader/channel to artist alias": "matched uploader/channel to known artist",
-	"removed video suffix noise":             "cleaned title (removed Official Video, HD, etc.)",
-	"removed repeated artist from title":     "removed artist name repeated in title",
-	"fell back to uploader":                  "used uploader as artist (no better source)",
-	"fell back to channel":                   "used channel name as artist (no better source)",
+	"removed video suffix noise":              "cleaned title (removed Official Video, HD, etc.)",
+	"removed repeated artist from title":      "removed artist name repeated in title",
+	"fell back to uploader":                   "used uploader as artist (no better source)",
+	"fell back to channel":                    "used channel name as artist (no better source)",
 }
 
 func humanizeReasons(reasons []string) string {

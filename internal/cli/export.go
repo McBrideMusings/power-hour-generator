@@ -27,10 +27,10 @@ func newExportCmd() *cobra.Command {
 }
 
 type exportOutput struct {
-	Project     string                       `json:"project"`
-	Config      exportConfig                 `json:"config"`
-	Collections map[string]exportCollection  `json:"collections"`
-	Timeline    []exportTimelineEntry        `json:"timeline,omitempty"`
+	Project     string                      `json:"project"`
+	Config      exportConfig                `json:"config"`
+	Collections map[string]exportCollection `json:"collections"`
+	Timeline    []exportTimelineEntry       `json:"timeline,omitempty"`
 }
 
 type exportConfig struct {

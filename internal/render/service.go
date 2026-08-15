@@ -38,13 +38,13 @@ type Options struct {
 
 // Segment encapsulates the information required to render a clip.
 type Segment struct {
-	Clip        project.Clip
-	Overlays    []config.OverlayEntry
-	SourcePath  string
-	CachedPath  string
-	Entry       cache.Entry
-	OutputPath  string // Optional: if set, overrides default path calculation
-	StoredHash  string // Hash from render state; if set, used for change detection
+	Clip       project.Clip
+	Overlays   []config.OverlayEntry
+	SourcePath string
+	CachedPath string
+	Entry      cache.Entry
+	OutputPath string // Optional: if set, overrides default path calculation
+	StoredHash string // Hash from render state; if set, used for change detection
 }
 
 // Result captures the outcome of a render attempt.

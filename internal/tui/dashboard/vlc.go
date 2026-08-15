@@ -128,8 +128,10 @@ func vlcRunning() bool {
 	}
 }
 
-// resolveRenderedSegmentPath returns the rendered segment output path for a collection row.
-func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, row csvplan.CollectionRow) string {
+// resolveRenderedSegment builds the render.Segment a collection row would
+// produce, including its OutputPath — the same construction the render
+// service and `status` command use, so hashes and paths stay consistent.
+func resolveRenderedSegment(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, row csvplan.CollectionRow) render.Segment {
 	collCfg := cfg.Collections[collName]
 	fadeIn, fadeOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
 
@@ -158,7 +160,13 @@ func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, collNa
 	if !filepath.IsAbs(outputDir) {
 		outputDir = filepath.Join(pp.SegmentsDir, outputDir)
 	}
-	return filepath.Join(outputDir, render.SegmentBaseName(tmpl, seg)+".mp4")
+	seg.OutputPath = filepath.Join(outputDir, render.SegmentBaseName(tmpl, seg)+".mp4")
+	return seg
+}
+
+// resolveRenderedSegmentPath returns the rendered segment output path for a collection row.
+func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, row csvplan.CollectionRow) string {
+	return resolveRenderedSegment(pp, cfg, collName, coll, row).OutputPath
 }
 
 // resolveAllTimelineSegmentPaths returns all rendered segment paths in timeline order.

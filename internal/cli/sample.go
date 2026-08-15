@@ -248,4 +248,3 @@ func formatSampleTime(seconds float64) string {
 	}
 	return fmt.Sprintf("%d:%02d", m, s)
 }
-
