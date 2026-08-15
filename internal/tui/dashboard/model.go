@@ -469,7 +469,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				collName := m.collectionNames[cvIdx]
 				m.collectionViews[cvIdx].columns = discoverColumns(v.rows, m.collections[collName].Headers)
 				m = writeCollection(m, cvIdx)
-				m = maybeAutoRerenderRow(m, cvIdx, rowIndex)
+				m = maybeAutoRenderRow(m, cvIdx, rowIndex)
 			}
 			if rowFound {
 				if msg.err != nil {
@@ -730,7 +730,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m = writeCollection(m, cvIdx)
 		m = reResolve(m)
-		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
+		m = maybeAutoRenderRow(m, cvIdx, editedRowIndex)
 		if field != "link" || cmd == nil {
 			m = m.setCollectionRowNote(cvIdx, v.rows[v.cursor].Index, "saved")
 		}
@@ -764,7 +764,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		commitField()
 		m, cmd := m.applyCommittedLinkLookup(cvIdx, v.cursor, field, m.editOriginal, m.editValue)
 		m = writeCollection(m, cvIdx)
-		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
+		m = maybeAutoRenderRow(m, cvIdx, editedRowIndex)
 		v = m.collectionViews[cvIdx]
 		if v.cursor < len(v.rows)-1 {
 			v.cursor++
@@ -781,7 +781,7 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		commitField()
 		m, cmd := m.applyCommittedLinkLookup(cvIdx, v.cursor, field, m.editOriginal, m.editValue)
 		m = writeCollection(m, cvIdx)
-		m = maybeAutoRerenderRow(m, cvIdx, editedRowIndex)
+		m = maybeAutoRenderRow(m, cvIdx, editedRowIndex)
 		v = m.collectionViews[cvIdx]
 		if v.cursor > 0 {
 			v.cursor--
@@ -1202,6 +1202,7 @@ func (m Model) addCollectionRow(cvIdx int, newRow csvplan.CollectionRow, outcome
 
 	m = writeCollection(m, cvIdx)
 	m = reResolve(m)
+	m = maybeAutoRenderRow(m, cvIdx, newRow.Index)
 	m.resetAddClipInput(cvIdx, outcome.stayInAddMode)
 	if !outcome.stayInAddMode {
 		m.mode = modeNormal
@@ -3040,10 +3041,14 @@ func writeCollection(m Model, cvIdx int) Model {
 	return m
 }
 
-// maybeAutoRerenderRow re-renders a single row in the background when the
-// `tui.auto_rerender` config toggle is on and the row's segment just went
-// stale (its rendered output no longer matches its current input hash).
-func maybeAutoRerenderRow(m Model, cvIdx int, rowIndex int) Model {
+// maybeAutoRenderRow brings a single row's rendered segment back in sync in
+// the background when the `tui.auto_rerender` config toggle is on: an
+// uncached row is fetched first, and a cached-but-unrendered or stale row is
+// rendered. Covers both edits to an already-rendered row (goes stale) and a
+// freshly added row (starts uncached/unrendered) with the same logic — the
+// fetch-completion and render-completion paths both drain the pending queue
+// below, so a new row's fetch chains straight into its render.
+func maybeAutoRenderRow(m Model, cvIdx int, rowIndex int) Model {
 	if !m.cfg.TUI.AutoRerender {
 		return m
 	}
@@ -3055,27 +3060,39 @@ func maybeAutoRerenderRow(m Model, cvIdx int, rowIndex int) Model {
 		if row.Index != rowIndex {
 			continue
 		}
-		if i >= len(v.states) || v.states[i] != rowStale {
+		if i >= len(v.states) {
 			return m
 		}
-		if m.job.active {
-			m.pendingAutoRerenders = append(m.pendingAutoRerenders, pendingAutoRerender{cvIdx: cvIdx, rowIndex: rowIndex})
+		switch v.states[i] {
+		case rowStale, rowNotRendered:
+			if m.job.active {
+				m.pendingAutoRerenders = append(m.pendingAutoRerenders, pendingAutoRerender{cvIdx: cvIdx, rowIndex: rowIndex})
+				return m
+			}
+			return m.startCollectionRenderJob(cvIdx, []csvplan.CollectionRow{row}, false)
+		case rowNotCached:
+			if m.job.active {
+				m.pendingAutoRerenders = append(m.pendingAutoRerenders, pendingAutoRerender{cvIdx: cvIdx, rowIndex: rowIndex})
+				return m
+			}
+			return m.startCollectionFetchJob(cvIdx, []csvplan.CollectionRow{row}, false)
+		default:
 			return m
 		}
-		return m.startCollectionRenderJob(cvIdx, []csvplan.CollectionRow{row}, false)
 	}
 	return m
 }
 
-// drainPendingAutoRerenders starts a queued auto-rerender left over from a row
-// going stale while another render job was already in flight. Only one job
-// can run at a time, so this starts at most one and leaves the rest queued.
+// drainPendingAutoRerenders starts a queued auto-render left over from a row
+// needing attention while another job was already in flight — including a
+// freshly fetched row whose next step is to render. Only one job can run at
+// a time, so this starts at most one and leaves the rest queued.
 func drainPendingAutoRerenders(m Model) Model {
 	for len(m.pendingAutoRerenders) > 0 {
 		next := m.pendingAutoRerenders[0]
 		m.pendingAutoRerenders = m.pendingAutoRerenders[1:]
 		before := m.job.active
-		m = maybeAutoRerenderRow(m, next.cvIdx, next.rowIndex)
+		m = maybeAutoRenderRow(m, next.cvIdx, next.rowIndex)
 		if m.job.active && !before {
 			return m
 		}

@@ -154,7 +154,7 @@ tui:
   auto_rerender: true
 ```
 
-`tui.auto_rerender` (default `true`) controls whether the dashboard (`powerhour tui`) automatically re-renders a collection row in the background right after an inline edit (`start_time`, `duration`, etc.) leaves its segment stale. A stale row — one whose current data no longer matches what was last rendered — is always shown in a distinct color regardless of this setting; turning it off just stops the automatic re-render, leaving you to trigger it manually with `r`.
+`tui.auto_rerender` (default `true`) controls whether the dashboard (`powerhour tui`) automatically brings a row's rendered segment back in sync in the background: an inline edit (`start_time`, `duration`, etc.) that leaves a rendered row stale triggers a re-render, and adding a new row triggers a fetch (if needed) followed by a render. A stale row — one whose current data no longer matches what was last rendered — is always shown in a distinct color regardless of this setting; turning it off just stops the automatic fetch/render, leaving you to trigger it manually with `r`.
 
 ## Full Example
 
