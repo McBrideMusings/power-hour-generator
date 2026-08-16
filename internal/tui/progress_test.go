@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 )
 
 func TestRowUpdateMsg(t *testing.T) {
@@ -150,11 +151,19 @@ func TestTruncateWithEllipsis(t *testing.T) {
 		{"abcd", 3, "abc"},
 		{"", 5, ""},
 		{"hello", 0, ""},
+		// Wide characters (emoji, CJK) occupy 2 terminal columns per rune.
+		// The cutoff must budget by visual width, not rune count.
+		{"🎵 Hello", 8, "🎵 Hello"},
+		{"🎵 Hello", 7, "🎵 H..."},
+		{"日本語テスト", 7, "日本..."},
 	}
 	for _, tt := range tests {
 		got := TruncateWithEllipsis(tt.input, tt.max)
 		if got != tt.want {
 			t.Errorf("TruncateWithEllipsis(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
+		}
+		if width := runewidth.StringWidth(got); width > tt.max && tt.max > 0 {
+			t.Errorf("TruncateWithEllipsis(%q, %d) visual width = %d, want <= %d", tt.input, tt.max, width, tt.max)
 		}
 	}
 }
