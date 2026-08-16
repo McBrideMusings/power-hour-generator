@@ -333,6 +333,97 @@ func TestWriteCSV_SpecialCharacters(t *testing.T) {
 	}
 }
 
+func TestWriteCSV_MergesUnlistedRowFields(t *testing.T) {
+	dir := t.TempDir()
+	csvPath := filepath.Join(dir, "songs.csv")
+	yamlPath := filepath.Join(dir, "songs.yaml")
+
+	headers := []string{"title", "artist", "link", "start_time", "duration"}
+	rows := []CollectionRow{
+		{
+			Index: 1, Link: "https://youtube.com/watch?v=abc",
+			StartRaw: "1:30", Start: 90 * time.Second, DurationSeconds: 60,
+			CustomFields: map[string]string{
+				"title": "Song One", "artist": "Artist A",
+				"link": "https://youtube.com/watch?v=abc", "start_time": "1:30", "duration": "60",
+				"mood": "upbeat",
+			},
+		},
+	}
+
+	if err := WriteCSV(csvPath, headers, rows, ','); err != nil {
+		t.Fatalf("WriteCSV: %v", err)
+	}
+	if err := WriteYAML(yamlPath, headers, nil, rows); err != nil {
+		t.Fatalf("WriteYAML: %v", err)
+	}
+
+	// The written header line must contain the merged field, appended after
+	// the originally-passed headers.
+	data, err := os.ReadFile(csvPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	firstLine := strings.SplitN(string(data), "\n", 2)[0]
+	wantHeaderLine := "title,artist,link,start_time,duration,mood"
+	if firstLine != wantHeaderLine {
+		t.Fatalf("header line = %q, want %q", firstLine, wantHeaderLine)
+	}
+
+	csvLoaded, err := LoadCollection(csvPath, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollection: %v", err)
+	}
+	if len(csvLoaded) != 1 {
+		t.Fatalf("expected 1 CSV row, got %d", len(csvLoaded))
+	}
+	if got := csvLoaded[0].CustomFields["mood"]; got != "upbeat" {
+		t.Fatalf("csv mood = %q, want %q", got, "upbeat")
+	}
+
+	yamlResult, err := LoadCollectionYAML(yamlPath, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollectionYAML: %v", err)
+	}
+	if len(yamlResult.Rows) != 1 {
+		t.Fatalf("expected 1 YAML row, got %d", len(yamlResult.Rows))
+	}
+	if got := yamlResult.Rows[0].CustomFields["mood"]; got != "upbeat" {
+		t.Fatalf("yaml mood = %q, want %q", got, "upbeat")
+	}
+
+	// CSV and YAML reloads must agree field-for-field.
+	for field, want := range yamlResult.Rows[0].CustomFields {
+		if got := csvLoaded[0].CustomFields[field]; got != want {
+			t.Errorf("field %q: csv = %q, yaml = %q", field, got, want)
+		}
+	}
+	for field, want := range csvLoaded[0].CustomFields {
+		if got := yamlResult.Rows[0].CustomFields[field]; got != want {
+			t.Errorf("field %q: yaml = %q, csv = %q", field, got, want)
+		}
+	}
+}
+
+func TestWriteCSV_EmptyRowsLeavesHeadersUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty.csv")
+
+	headers := []string{"title", "artist", "start_time", "duration", "link"}
+	if err := WriteCSV(path, headers, nil, ','); err != nil {
+		t.Fatalf("WriteCSV: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	firstLine := strings.SplitN(string(data), "\n", 2)[0]
+	if firstLine != "title,artist,start_time,duration,link" {
+		t.Fatalf("header line = %q, want unchanged headers", firstLine)
+	}
+}
+
 func TestReadHeaders(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.csv")

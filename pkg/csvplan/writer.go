@@ -12,7 +12,10 @@ import (
 
 // WriteCSV writes collection rows back to a CSV/TSV file using atomic write
 // (temp file + rename). Headers and delimiter are preserved from the original.
+// Headers are merged with any new fields discovered in the row data.
 func WriteCSV(path string, headers []string, rows []CollectionRow, delimiter rune) error {
+	headers = MergeHeaders(headers, rows)
+
 	if delimiter == 0 {
 		delimiter = ','
 	}
