@@ -9,9 +9,22 @@ Power Hour Generator (`powerhour`) is a Go CLI that orchestrates `yt-dlp` and `f
 ## Build & Test Commands
 
 ```bash
-# Format code
-gofmt -w $(find cmd internal pkg -name '*.go')
+# Build the CLI binary
+admin build
 
+# Run the full test suite
+admin test
+
+# Run static analysis (vet)
+admin vet
+
+# Format all code
+admin fmt
+```
+
+For more granular control, use the underlying Go commands:
+
+```bash
 # Build all packages
 go build ./...
 
@@ -30,6 +43,9 @@ go test ./pkg/csvplan/...
 
 # Vet
 go vet ./...
+
+# Format code
+gofmt -w $(find cmd internal pkg -name '*.go')
 ```
 
 ## Architecture
