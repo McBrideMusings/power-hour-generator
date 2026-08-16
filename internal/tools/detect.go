@@ -117,6 +117,13 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 					}
 					needUpdate = true
 				}
+				if entry.Checksum == "" {
+					if cs, csErr := computeChecksum(mainPath); csErr == nil {
+						entry.Checksum = cs
+						status.Checksum = cs
+						needUpdate = true
+					}
+				}
 				if entry.InstallMethod == "" {
 					entry.InstallMethod = detectInstallMethod(mainPath)
 					status.InstallMethod = entry.InstallMethod
@@ -198,16 +205,24 @@ func detectOne(ctx context.Context, def ToolDefinition, entry ManifestEntry) (St
 	method := detectInstallMethod(systemPaths[def.Binaries[0].ID])
 	status.InstallMethod = method
 
+	checksum, csErr := computeChecksum(systemPaths[def.Binaries[0].ID])
+	if csErr != nil {
+		status.Notes = append(status.Notes, fmt.Sprintf("checksum error: %v", csErr))
+	} else {
+		status.Checksum = checksum
+	}
+
 	newEntry := ManifestEntry{
 		Tool:          def.Name,
 		Version:       version,
 		Source:        SourceSystem,
 		Paths:         systemPaths,
+		Checksum:      status.Checksum,
 		InstalledAt:   time.Now().UTC().Format(time.RFC3339),
 		InstallMethod: method,
 	}
 
-	if entry.Tool == "" || entry.Source != SourceSystem || !equalPathMaps(entry.Paths, systemPaths) || entry.Version != version {
+	if entry.Tool == "" || entry.Source != SourceSystem || !equalPathMaps(entry.Paths, systemPaths) || entry.Version != version || entry.Checksum != newEntry.Checksum {
 		dirty = true
 		entry = newEntry
 	}
