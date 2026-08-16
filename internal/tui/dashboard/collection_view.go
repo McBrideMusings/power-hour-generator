@@ -157,7 +157,7 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *renderstate.RenderState) []rowState {
 	states := make([]rowState, len(coll.Rows))
 	filenameTemplate := cfg.SegmentFilenameTemplate()
-	fades := effectiveFadesForCollection(cfg, coll)
+	fades := project.EffectiveCollectionFades(cfg, coll)
 	for i, row := range coll.Rows {
 		link := strings.TrimSpace(row.Link)
 		isURL := isURL(link)
@@ -205,34 +205,6 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 		states[i] = rowRendered
 	}
 	return states
-}
-
-// effectiveFadesForCollection resolves the per-row fade-in/fade-out seconds
-// that the real render job would apply, including any timeline sequence-entry
-// overrides layered on top of the collection's own fade config — the same
-// resolution project.ApplySequenceEntryFades performs during rendering. This
-// keeps staleness hashing consistent with what was actually rendered.
-func effectiveFadesForCollection(cfg config.Config, coll project.Collection) map[int][2]float64 {
-	collCfg := cfg.Collections[coll.Name]
-	baseIn, baseOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
-
-	clips := make([]project.CollectionClip, len(coll.Rows))
-	for i, row := range coll.Rows {
-		clip := project.Clip{
-			ClipType:       project.ClipType(coll.Name),
-			Row:            row.ToRow(),
-			FadeInSeconds:  baseIn,
-			FadeOutSeconds: baseOut,
-		}
-		clips[i] = project.CollectionClip{CollectionName: coll.Name, Clip: clip}
-	}
-	project.ApplySequenceEntryFades(cfg, clips)
-
-	fades := make(map[int][2]float64, len(clips))
-	for _, cc := range clips {
-		fades[cc.Clip.Row.Index] = [2]float64{cc.Clip.FadeInSeconds, cc.Clip.FadeOutSeconds}
-	}
-	return fades
 }
 
 func (v collectionView) visibleRowCount() int {
