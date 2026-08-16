@@ -7,79 +7,102 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
-	"powerhour/internal/tui"
 	"powerhour/pkg/csvplan"
 )
 
-func TestGutterStatusPaddingWithVisualWidth(t *testing.T) {
-	tests := []struct {
-		name          string
-		status        string
-		statusWidth   int
-		expectedWidth int
-	}{
-		{"ASCII status", "cached", 5, 5},
-		{"ASCII status short", "---", 5, 5},
-		{"ASCII status render", "render", 5, 5},
-		{"emoji status", "🎵 ok", 5, 5},
-		{"wide char status", "日本語", 5, 5},
-		{"mixed emoji and text", "✓ done", 5, 5},
+// TestCollectionViewGutterWidthStableAcrossStatuses renders the real
+// collectionView.view() output (not a hand-rebuilt copy of the padding
+// logic) and measures the actual gutter segment preceding each row's data
+// columns. The gutter must always occupy the same visual width regardless
+// of whether the status token is ASCII, an emoji, or CJK.
+//
+// Gutter width is idxWidth(4) + statusWidth(5) + 1 separator = 10
+// (collection_view.go:260-262), plus gutterGapWidth(4) before the data
+// columns (collection_view.go:264,390) = 14 total. These constants are
+// unexported, so the expected width is hardcoded here and tied back to
+// those line numbers rather than recomputed.
+func TestCollectionViewGutterWidthStableAcrossStatuses(t *testing.T) {
+	const wantPrefixWidth = 14 // gutterWidth(10) + gutterGapWidth(4)
+
+	statuses := []string{
+		"cached",   // ASCII, compacts to "C"
+		"rendered", // ASCII, compacts to "OK"
+		"-----",    // ASCII, passes through default branch
+		"🎵🎵",       // emoji, passes through default branch verbatim
+		"📺 test",   // emoji + ASCII
+		"✓ ok",     // emoji + ASCII
+		"日本語",      // CJK, passes through default branch verbatim
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Replicate the padding logic from the fix
-			truncatedStatus := tui.TruncateWithEllipsis(tt.status, tt.statusWidth)
-			paddedStatus := lipgloss.NewStyle().Width(tt.statusWidth).Render(truncatedStatus)
+	rows := make([]csvplan.CollectionRow, len(statuses))
+	states := make([]rowState, len(statuses))
+	rowStatus := make(map[int]string, len(statuses))
+	markers := make([]string, len(statuses))
+	for i, status := range statuses {
+		marker := "MARKER" + string(rune('0'+i))
+		markers[i] = marker
+		rows[i] = csvplan.CollectionRow{
+			Index: i,
+			CustomFields: map[string]string{
+				"title": marker,
+			},
+		}
+		states[i] = rowRendered
+		rowStatus[i] = status
+	}
 
-			// Verify the padded status has the correct visual width
-			visualWidth := lipgloss.Width(paddedStatus)
-			if visualWidth != tt.expectedWidth {
-				t.Errorf("paddedStatus visual width = %d, want %d (status=%q, truncated=%q, rendered=%q)",
-					visualWidth, tt.expectedWidth, tt.status, truncatedStatus, paddedStatus)
+	v := collectionView{
+		name:       "songs",
+		rows:       rows,
+		states:     states,
+		columns:    []collectionColumn{{field: "title", header: "TITLE"}},
+		rowStatus:  rowStatus,
+		cursor:     0,
+		termWidth:  120,
+		termHeight: 60,
+	}
+
+	rendered := v.view()
+	lines := strings.Split(rendered, "\n")
+
+	var prefixWidths []int
+	for i, status := range statuses {
+		marker := markers[i]
+		var line string
+		found := false
+		for _, l := range lines {
+			if strings.Contains(l, marker) {
+				line = l
+				found = true
+				break
 			}
-		})
+		}
+		if !found {
+			t.Fatalf("status %q (marker %s): marker not found in rendered view:\n%s", status, marker, rendered)
+		}
+
+		idx := strings.Index(line, marker)
+		if idx < 0 {
+			t.Fatalf("status %q (marker %s): marker index lookup failed on line %q", status, marker, line)
+		}
+		prefix := line[:idx]
+		gotWidth := lipgloss.Width(prefix)
+		prefixWidths = append(prefixWidths, gotWidth)
+
+		if gotWidth != wantPrefixWidth {
+			t.Errorf("status %q: gutter prefix width = %d, want %d (marker offset=%d, line=%q)",
+				status, gotWidth, wantPrefixWidth, idx, line)
+		}
 	}
-}
 
-func TestGutterGutterFormatConsistency(t *testing.T) {
-	// Test that the gutter format consistently produces stable visual width
-	// across different status strings (ASCII, emoji, wide chars)
-	statusTests := []string{
-		"-----",
-		"cached",
-		"render",
-		"🎵",      // single emoji
-		"✓ ok",   // emoji with text
-		"日本語",    // wide characters
-		"📺 test", // emoji and ASCII
-	}
-
-	statusWidth := 5
-
-	for _, status := range statusTests {
-		t.Run(status, func(t *testing.T) {
-			// Simulate the gutter construction:
-			// cursor (2 visual width) + idx (2 visual width) + space (1) + paddedStatus (5 visual width)
-			truncatedStatus := tui.TruncateWithEllipsis(status, statusWidth)
-			paddedStatus := lipgloss.NewStyle().Width(statusWidth).Render(truncatedStatus)
-
-			// The gutter format is: "%s%s %s" where cursor is 2 chars, idx is 2 chars, paddedStatus is statusWidth
-			cursor := "  " // either "  " or "▸ " both 2 chars
-			idx := "01"    // 2 chars
-
-			// Construct gutter the same way as in the actual code
-			gutter := cursor + idx + " " + paddedStatus
-
-			// Verify the gutter has stable visual width
-			expectedGutterWidth := 2 + 2 + 1 + statusWidth // cursor + idx + space + paddedStatus
-			actualGutterWidth := lipgloss.Width(gutter)
-
-			if actualGutterWidth != expectedGutterWidth {
-				t.Errorf("gutter visual width = %d, want %d (status=%q, paddedStatus=%q, gutter=%q)",
-					actualGutterWidth, expectedGutterWidth, status, paddedStatus, gutter)
-			}
-		})
+	// A uniform-but-wrong padding scheme (e.g. padding every status to the
+	// same wrong width) would still pass the fixed-constant check above only
+	// if that wrong width happened to equal wantPrefixWidth. Guard against
+	// silent drift by also requiring every row to agree with row 0.
+	for i, w := range prefixWidths {
+		if w != prefixWidths[0] {
+			t.Errorf("status %q: gutter prefix width %d does not match row 0's width %d", statuses[i], w, prefixWidths[0])
+		}
 	}
 }
 
