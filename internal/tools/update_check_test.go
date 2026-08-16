@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -82,8 +83,7 @@ func TestUpdateCheckCacheTTL(t *testing.T) {
 	_ = json.Unmarshal(raw, &loaded)
 
 	entry := loaded.Entries["yt-dlp"]
-	stale := time.Since(entry.CheckedAt) > updateCheckTTL
-	if !stale {
+	if entry.fresh(time.Now()) {
 		t.Error("expected entry to be stale (> 24h)")
 	}
 }
@@ -101,9 +101,127 @@ func TestUpdateCheckCacheFresh(t *testing.T) {
 	}
 
 	entry := cache.Entries["yt-dlp"]
-	stale := time.Since(entry.CheckedAt) > updateCheckTTL
-	if stale {
+	if !entry.fresh(time.Now()) {
 		t.Error("expected entry to be fresh")
+	}
+}
+
+func TestUpdateCheckEntryFresh(t *testing.T) {
+	now := time.Now()
+	tests := []struct {
+		name  string
+		entry UpdateCheckEntry
+		want  bool
+	}{
+		{
+			name:  "success within 24h TTL is fresh",
+			entry: UpdateCheckEntry{CheckedAt: now.Add(-23 * time.Hour), CheckFailed: false},
+			want:  true,
+		},
+		{
+			name:  "success past 24h TTL is stale",
+			entry: UpdateCheckEntry{CheckedAt: now.Add(-25 * time.Hour), CheckFailed: false},
+			want:  false,
+		},
+		{
+			name:  "failed within backoff is fresh",
+			entry: UpdateCheckEntry{CheckedAt: now.Add(-5 * time.Minute), CheckFailed: true},
+			want:  true,
+		},
+		{
+			name:  "failed past backoff is stale",
+			entry: UpdateCheckEntry{CheckedAt: now.Add(-2 * time.Hour), CheckFailed: true},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.entry.fresh(now); got != tt.want {
+				t.Errorf("fresh() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCheckForUpdates_FailedEntryWithinBackoffSkipsRecheck proves that a
+// cached failed entry inside its backoff window is treated as fresh, so
+// CheckForUpdates does not re-run the check (and therefore does not spawn
+// a `brew` subprocess) — acceptance criterion #1.
+func TestCheckForUpdates_FailedEntryWithinBackoffSkipsRecheck(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	checkedAt := time.Now().Add(-5 * time.Minute)
+	seed := UpdateCheckCache{
+		Entries: map[string]UpdateCheckEntry{
+			"ffmpeg": {
+				Tool:          "ffmpeg",
+				CheckedAt:     checkedAt,
+				CheckFailed:   true,
+				InstallMethod: InstallMethodHomebrew,
+			},
+		},
+	}
+	saveUpdateCheckCache(seed)
+
+	statuses := []Status{
+		{Tool: "ffmpeg", Satisfied: true, Version: "7.0", InstallMethod: InstallMethodHomebrew},
+	}
+	notices := CheckForUpdates(context.Background(), statuses)
+	if len(notices) != 0 {
+		t.Errorf("expected no notices for a cached failure, got %v", notices)
+	}
+
+	after := loadUpdateCheckCache()
+	entry, ok := after.Entries["ffmpeg"]
+	if !ok {
+		t.Fatal("expected ffmpeg entry to remain in cache")
+	}
+	if !entry.CheckedAt.Equal(checkedAt) {
+		t.Errorf("CheckedAt changed (%v -> %v); a fresh failed entry should not be re-checked", checkedAt, entry.CheckedAt)
+	}
+	if !entry.CheckFailed {
+		t.Error("expected CheckFailed to remain true")
+	}
+}
+
+// TestCheckForUpdates_SuccessClearsFailedState proves acceptance criterion
+// #4: a successful check after a failure clears the failed state. Uses
+// yt-dlp with a cached release entry so no network call is made.
+func TestCheckForUpdates_SuccessClearsFailedState(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Seed a stale, failed entry for yt-dlp (past the failed backoff).
+	seed := UpdateCheckCache{
+		Entries: map[string]UpdateCheckEntry{
+			"yt-dlp": {
+				Tool:        "yt-dlp",
+				CheckedAt:   time.Now().Add(-2 * time.Hour),
+				CheckFailed: true,
+			},
+		},
+	}
+	saveUpdateCheckCache(seed)
+
+	// Seed the release cache so checkLatestYtDlp succeeds without a network call.
+	cacheLatestRelease("yt-dlp", releaseSpec{Version: "2099.01.01"})
+
+	statuses := []Status{
+		{Tool: "yt-dlp", Satisfied: true, Version: "2024.07.16"},
+	}
+	notices := CheckForUpdates(context.Background(), statuses)
+	if len(notices) != 1 {
+		t.Fatalf("expected one update notice, got %v", notices)
+	}
+
+	after := loadUpdateCheckCache()
+	entry, ok := after.Entries["yt-dlp"]
+	if !ok {
+		t.Fatal("expected yt-dlp entry in cache")
+	}
+	if entry.CheckFailed {
+		t.Error("expected CheckFailed to be cleared after a successful check")
 	}
 }
 
