@@ -132,7 +132,7 @@ gofmt -w $(find cmd internal pkg -name '*.go')
 - Mock command runners in cache tests (`runner.go` abstraction).
 - `test_helpers_test.go` in render package for shared test utilities.
 - `newCacheService` var in `fetch.go` is typed for testability; `newCacheServiceWithStatus` adds status callback support.
-- Known pre-existing failure: `TestBuildFilterGraphIncludesOverlays` in `internal/render/filters_test.go` — unrelated to config/timeline work.
+- `TestBuildFilterGraphIncludesOverlays` in `internal/render/filters_test.go` was once a known failure; it passes as of 2026-08-15. There is no known failing test — treat any failure you see as yours.
 - `config` cannot import `render` (import cycle via `project`). When config validation needs render-owned data (e.g. valid template tokens), pass it as a parameter from the CLI layer.
 
 ## Documentation Site
@@ -149,7 +149,7 @@ Sections: guide, architecture, development, roadmap.
 ## Notes
 
 - Repo root has a prebuilt `powerhour` binary and a `powerhour-1` directory (likely a scratch/sample project or duplicate build artifact) alongside the source — both are untracked build/sample outputs, not part of the source tree.
-- `admin.toml` defines only one task (`deploy`); this repo uses the `admin` task runner — read `docs/admin-tool.md` conventions before adding tasks, per the user's global instructions.
+- `admin.toml` declares the `go-cli` archetype and two explicit tasks, `deploy` and `test`; the archetype supplies `build`, `clean`, `fmt`, and `vet` on top, so `admin` lists six. `admin test` is the entry point for the Go test suite. Read `~/.claude/docs/admin-tool.md` conventions before adding tasks, per the user's global instructions.
 
 ## Agent Behavior
 
