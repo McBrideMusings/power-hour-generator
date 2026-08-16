@@ -130,12 +130,24 @@ type proxyLocation struct {
 
 var lookupProxyLocation = fetchProxyLocation
 
+// redactProxy returns a proxy string with any inline userinfo (user:pass@)
+// stripped, keeping the scheme/host/port so logs stay useful for debugging
+// without leaking credentials. Unparsable or host-less input is never
+// echoed back verbatim.
+func redactProxy(proxy string) string {
+	u, err := url.Parse(proxy)
+	if err != nil || u.Host == "" {
+		return "<redacted>"
+	}
+	return u.Redacted()
+}
+
 func writeProxyBanner(ctx context.Context, w io.Writer, proxy string) {
 	if w == nil || strings.TrimSpace(proxy) == "" {
 		return
 	}
 
-	fmt.Fprintf(w, "[powerhour] yt-dlp proxy: %s\n", proxy)
+	fmt.Fprintf(w, "[powerhour] yt-dlp proxy: %s\n", redactProxy(proxy))
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -173,7 +185,7 @@ func writeProxyBanner(ctx context.Context, w io.Writer, proxy string) {
 func fetchProxyLocation(ctx context.Context, proxy string) (proxyLocation, error) {
 	proxyURL, err := url.Parse(proxy)
 	if err != nil {
-		return proxyLocation{}, fmt.Errorf("parse proxy url: %w", err)
+		return proxyLocation{}, fmt.Errorf("parse proxy url: invalid proxy URL")
 	}
 
 	transport := &http.Transport{
