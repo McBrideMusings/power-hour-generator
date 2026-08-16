@@ -559,3 +559,78 @@ func TestResolveTimeline(t *testing.T) {
 		})
 	}
 }
+
+// TestEffectiveCollectionFades pins the fade-override resolution shared by
+// `status` and the TUI dashboard (issue #166): both surfaces must compute
+// staleness against the same fade-in/fade-out seconds, including any
+// timeline sequence-entry override layered on top of the collection's base
+// fade config.
+func TestEffectiveCollectionFades(t *testing.T) {
+	t.Run("no override falls back to collection base fade", func(t *testing.T) {
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": {Fade: 2.0},
+			},
+			Timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs"},
+				},
+			},
+		}
+		coll := makeCollectionWithRows("songs", 2)
+
+		got := EffectiveCollectionFades(cfg, coll)
+
+		for _, idx := range []int{1, 2} {
+			fadeIn, fadeOut := got[idx][0], got[idx][1]
+			if fadeIn != 1.0 || fadeOut != 1.0 {
+				t.Errorf("row %d: fadeIn=%v fadeOut=%v, want 1.0/1.0 (base fade split)", idx, fadeIn, fadeOut)
+			}
+		}
+	})
+
+	t.Run("sequence entry override wins over collection base fade", func(t *testing.T) {
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": {Fade: 2.0},
+			},
+			Timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs", Fade: 4.0},
+				},
+			},
+		}
+		coll := makeCollectionWithRows("songs", 1)
+
+		got := EffectiveCollectionFades(cfg, coll)
+
+		fadeIn, fadeOut := got[1][0], got[1][1]
+		if fadeIn != 2.0 || fadeOut != 2.0 {
+			t.Errorf("fadeIn=%v fadeOut=%v, want 2.0/2.0 (override fade split)", fadeIn, fadeOut)
+		}
+	})
+
+	t.Run("same collection referenced twice with different entry fades", func(t *testing.T) {
+		cfg := config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": {Fade: 2.0},
+			},
+			Timeline: config.TimelineConfig{
+				Sequence: []config.SequenceEntry{
+					{Collection: "songs", Slice: "start:1", Fade: 4.0},
+					{Collection: "songs", FadeIn: 3.0, FadeOut: 0.5},
+				},
+			},
+		}
+		coll := makeCollectionWithRows("songs", 2)
+
+		got := EffectiveCollectionFades(cfg, coll)
+
+		if in, out := got[1][0], got[1][1]; in != 2.0 || out != 2.0 {
+			t.Errorf("row 1: fadeIn=%v fadeOut=%v, want 2.0/2.0 (first entry's fade override)", in, out)
+		}
+		if in, out := got[2][0], got[2][1]; in != 3.0 || out != 0.5 {
+			t.Errorf("row 2: fadeIn=%v fadeOut=%v, want 3.0/0.5 (second entry's fade_in/fade_out override)", in, out)
+		}
+	})
+}
