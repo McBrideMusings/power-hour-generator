@@ -35,6 +35,7 @@ internal/
   paths/                    # Project directory layout resolution
   tools/                    # External tool detection and installation
   tui/                      # Bubbletea progress display (StatusWriter, ProgressModel)
+    dashboard/              # Full-screen dashboard app (powerhour tui)
   logx/                     # File-based logging (project + global ~/.powerhour/logs/)
 
 pkg/
@@ -67,3 +68,4 @@ pkg/
 - [CSV Loading](/architecture/csv-loading) — Plan file parsing and schema validation
 - [Tool Management](/architecture/tools) — Detection, installation, and version caching
 - [TUI System](/architecture/tui) — Bubbletea progress display and status feedback
+- [TUI Dashboard](/architecture/dashboard) — Full-screen interactive dashboard (`powerhour tui`): views, interaction modes, write-back paths
