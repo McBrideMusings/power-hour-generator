@@ -11,6 +11,7 @@ export default defineConfig({
       { text: 'CLI', link: '/cli' },
       { text: 'Architecture', link: '/architecture/overview' },
       { text: 'Development', link: '/development/setup' },
+      { text: 'Specs', link: '/specs/' },
     ],
 
     sidebar: {
@@ -52,6 +53,15 @@ export default defineConfig({
             { text: 'Code Style', link: '/development/code-style' },
             { text: 'Troubleshooting', link: '/development/troubleshooting' },
             { text: 'Deployment', link: '/development/deployment' },
+          ],
+        },
+      ],
+      '/specs/': [
+        {
+          text: 'Specs',
+          items: [
+            { text: 'Overview', link: '/specs/' },
+            { text: 'Index Badge at Concat Time', link: '/specs/concat-time-index' },
           ],
         },
       ],
