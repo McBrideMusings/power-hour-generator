@@ -159,9 +159,26 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		visibleSeq = 1
 	}
 	startSeq := v.seqScrollTop
+
+	// Reserve a line for the up indicator if scrolled, and a line for the
+	// down indicator if there will be entries below — so that indicators
+	// don't push content past the footer.
+	if startSeq > 0 {
+		visibleSeq--
+	}
 	endSeq := startSeq + visibleSeq
 	if endSeq > len(v.sequence) {
 		endSeq = len(v.sequence)
+	}
+	if endSeq < len(v.sequence) {
+		visibleSeq--
+		if visibleSeq < 0 {
+			visibleSeq = 0
+		}
+		endSeq = startSeq + visibleSeq
+		if endSeq > len(v.sequence) {
+			endSeq = len(v.sequence)
+		}
 	}
 
 	if startSeq > 0 {
@@ -229,10 +246,31 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteByte('\n')
 
 	resH := v.resPanelHeight()
+	visibleRes := resH
+	if visibleRes < 1 {
+		visibleRes = 1
+	}
 	startRes := v.resScrollTop
-	endRes := startRes + resH
+
+	// Reserve a line for the up indicator if scrolled, and a line for the
+	// down indicator if there will be entries below — so that indicators
+	// don't push content past the footer.
+	if startRes > 0 {
+		visibleRes--
+	}
+	endRes := startRes + visibleRes
 	if endRes > len(v.resolved) {
 		endRes = len(v.resolved)
+	}
+	if endRes < len(v.resolved) {
+		visibleRes--
+		if visibleRes < 0 {
+			visibleRes = 0
+		}
+		endRes = startRes + visibleRes
+		if endRes > len(v.resolved) {
+			endRes = len(v.resolved)
+		}
 	}
 
 	if startRes > 0 {
