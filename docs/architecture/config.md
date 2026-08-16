@@ -29,7 +29,7 @@ Profiles are referenced by name from `clips.overlay_profile`, `clips.<type>.over
 
 ## Collections vs Legacy Clips
 
-Collections and `clips.song` are mutually exclusive. When `collections` is defined in the config, collection-aware code paths are used. The legacy clips architecture is being removed (see [PH-1](/tickets/PH-1)).
+Collections and `clips.song` are mutually exclusive. When `collections` is defined in the config, collection-aware code paths are used. The legacy clips architecture has been removed in favor of collections.
 
 ## Validation
 

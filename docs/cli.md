@@ -33,22 +33,13 @@ powerhour status --project <dir> [--json]
 go run ./cmd/powerhour status --project <dir> [--json]
 ```
 
-### `powerhour config show`
+### `powerhour config`
 
 Print the effective configuration (defaults applied) as YAML.
 
 ```bash
-powerhour config show --project <dir>
-go run ./cmd/powerhour config show --project <dir>
-```
-
-### `powerhour config edit`
-
-Open the project configuration in `$EDITOR`, creating a starter file when missing.
-
-```bash
-powerhour config edit --project <dir>
-go run ./cmd/powerhour config edit --project <dir>
+powerhour config --project <dir>
+go run ./cmd/powerhour config --project <dir>
 ```
 
 ### `powerhour add`
@@ -158,6 +149,19 @@ go run ./cmd/powerhour concat --project <dir> [--output <path>] [--dry-run]
 
 Tries stream copy first for speed. If segments have mismatched codecs, falls back to re-encoding using the resolved encoding defaults (global defaults merged with project overrides).
 
+### `powerhour tui`
+
+Launch the interactive dashboard.
+
+```bash
+powerhour tui --project <dir>
+go run ./cmd/powerhour tui --project <dir>
+```
+
+The dashboard is the primary day-to-day interface for managing projects. It provides a full-screen terminal UI for viewing and editing collections, cache entries, render state, and the timeline. Views are navigated with arrow keys and numbers (1-9 to jump directly). Collections are edited inline, and rows can be reordered, deleted, or modified without leaving the dashboard. The cache view allows filtering and metadata inspection. The timeline view shows the resolved sequence of clips that will be concatenated.
+
+Requires at least one configured collection to launch.
+
 ### `powerhour convert`
 
 Convert a CSV/TSV plan file to YAML format with permissive column detection.
@@ -194,46 +198,120 @@ powerhour validate segments --project <dir> [--index <n>] [--json]
 go run ./cmd/powerhour validate segments --project <dir> [--index <n>] [--json]
 ```
 
-## Cache Management
+### `powerhour validate collection`
 
-### `powerhour cache add`
-
-Register a manually-downloaded video into the project cache. This is useful for age-restricted, geo-blocked, or otherwise unavailable content that yt-dlp cannot fetch automatically.
+Validate a specific collection with detailed row information.
 
 ```bash
-powerhour cache add <url> <file-path> [flags]
-go run ./cmd/powerhour cache add <url> <file-path> [flags]
+powerhour validate collection --project <dir> --collection <name>
+go run ./cmd/powerhour validate collection --project <dir> --collection <name>
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--collection <name>` | Collection name to validate (required) |
+
+### `powerhour doctor`
+
+Check project health.
+
+```bash
+powerhour doctor --project <dir> [--json]
+go run ./cmd/powerhour doctor --project <dir> [--json]
+```
+
+Runs a series of health checks including configuration validity, tool availability, filter support, cache index integrity, and render state consistency. Reports issues with suggested remediation steps. Results can be output as structured JSON for programmatic use.
+
+### `powerhour export`
+
+Export project data as JSON.
+
+```bash
+powerhour export --project <dir> [--timeline] [--json]
+go run ./cmd/powerhour export --project <dir> [--timeline] [--json]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--timeline` | Include resolved timeline in output |
+
+Exports the project configuration, all collection rows, and optionally the resolved timeline sequence (useful for external tools that build on the power hour workflow).
+
+## Cache Management
+
+### `powerhour cache add`
+
+Register a video into the project cache.
+
+```bash
+powerhour cache add <file-or-id> [flags]
+go run ./cmd/powerhour cache add <file-or-id> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--url <url>` | Source URL (auto-detected from filename if omitted) |
 | `--title "..."` | Override title metadata |
 | `--artist "..."` | Override artist metadata |
 | `--dry-run` | Preview what would happen without making changes |
 | `--no-probe` | Skip ffprobe metadata extraction |
 
-The command first attempts a yt-dlp metadata query (`--dump-json --skip-download`) to identify the video. If that fails (e.g., age-restricted content), it falls back to:
+The command accepts a local file path, a yt-dlp-style filename like `"Title [HWl1Tu9oZmY].webm"`, or a bare YouTube ID. When a local file is provided, the URL is auto-detected from the file's metadata or can be supplied explicitly with `--url`. Downloads by ID if the argument is not a file on disk.
 
-1. Extracting the video ID from the URL (YouTube, Vimeo, etc.)
-2. Prompting interactively for platform and video ID if URL parsing fails
-3. Prompting for title and artist when not provided via flags
+Examples:
+
+```bash
+# Local file, auto-resolves URL from yt-dlp metadata
+powerhour cache HWl1Tu9oZmY.webm
+
+# yt-dlp filename format
+powerhour cache "Title [HWl1Tu9oZmY].webm"
+
+# Downloads by YouTube ID
+powerhour cache HWl1Tu9oZmY
+
+# Explicit URL override
+powerhour cache song.webm --url https://youtu.be/example
+```
 
 The file is copied (or hardlinked) into the project's active cache directory, probed with ffprobe, and registered in the index with a link mapping from the URL to the canonical identifier.
 
-### `powerhour migrate`
+### `powerhour cache remove`
 
-Move project-local cache files into the global cache (`~/.powerhour/cache/`).
+Remove a cache entry.
 
 ```bash
-powerhour migrate --project <dir> [--dry-run]
-go run ./cmd/powerhour migrate --project <dir> [--dry-run]
+powerhour cache remove <identifier> [flags]
+go run ./cmd/powerhour cache remove <identifier> [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--dry-run` | Print what would be moved without moving files |
+| `--dry-run` | Show what would be removed without deleting |
+| `--keep-file` | Remove index entry but leave cached file on disk |
 
-Files are moved (not copied) and the global index is updated. Entries already present in the global cache with a live file are skipped. After migration, the project will use the global cache automatically.
+The identifier can be a YouTube video ID (e.g., `dQw4w9WgXcQ`), a full identifier (e.g., `youtube:dQw4w9WgXcQ`), or a filename or path substring matching the cached file. For URL-backed entries, the cached file is deleted; for local files, only the index entry is removed.
+
+### `powerhour cache doctor`
+
+Inspect and repair cached title/artist metadata.
+
+```bash
+powerhour cache doctor [flags]
+go run ./cmd/powerhour cache doctor [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Include cache entries not referenced by the current project |
+| `--write` | Apply high-confidence fixes non-interactively |
+| `--yes` | Accept all fixes when used with `--write` |
+| `--requery` | Re-query yt-dlp metadata for URL-backed entries before normalization |
+| `--index <n\|n-m>` | Limit to specific 1-based row index or range (repeatable) |
+| `--identifier <id>` | Limit to specific cache identifier(s) (repeatable) |
+| `--artist <substring>` | Filter by current or proposed artist substring |
+
+Applies metadata normalization heuristics to detect and fix common issues: "Artist - Title" format splitting, video suffix removal ("Official Video", "HD", etc.), uploader fallback, and track number extraction. Interactive by default; use `--write` for non-interactive batch mode.
 
 ## Tool Management
 
@@ -284,3 +362,133 @@ Probes available hardware encoders (VideoToolbox, NVENC, AMF) and software encod
 Defaults are saved to `~/.powerhour/encoding.yaml` and apply globally. Per-project overrides can be set in the `encoding:` block of `powerhour.yaml`.
 
 In non-TTY environments, the command probes and auto-saves best defaults without the interactive carousel.
+
+## Library
+
+The library is a global shared cache of media sources at `~/.powerhour/cache/` (configurable). Multiple projects can import from and contribute to the shared library, reducing redundant downloads and enabling efficient media reuse across power hour projects.
+
+### `powerhour library list`
+
+List all sources in the library.
+
+```bash
+powerhour library list [--json]
+go run ./cmd/powerhour library list [--json]
+```
+
+### `powerhour library search`
+
+Search library sources by identifier, title, or artist.
+
+```bash
+powerhour library search <query> [--json]
+go run ./cmd/powerhour library search <query> [--json]
+```
+
+### `powerhour library info`
+
+Show detailed information about a library source.
+
+```bash
+powerhour library info <identifier> [--json]
+go run ./cmd/powerhour library info <identifier> [--json]
+```
+
+### `powerhour library import`
+
+Import a project's local cache into the library.
+
+```bash
+powerhour library import --project <dir> [--dry-run]
+go run ./cmd/powerhour library import --project <dir> [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--project <dir>` | Path to the project directory to import from (required) |
+| `--dry-run` | Print actions without moving files |
+
+Moves project-local cache files into the global library, updating the global index. Entries already present in the library with a live file are skipped. After import, the project will use the global library automatically for subsequent operations.
+
+### `powerhour library prune`
+
+Remove sources not used recently.
+
+```bash
+powerhour library prune [--dry-run] [--older-than <duration>]
+go run ./cmd/powerhour library prune [--dry-run] [--older-than <duration>]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | List what would be removed without deleting |
+| `--older-than <duration>` | Prune entries not used within this duration (default: `90d`, e.g., `30d`, `6m`, `1y`) |
+
+### `powerhour library verify`
+
+Check integrity of library sources via ffprobe.
+
+```bash
+powerhour library verify [--fix] [--json]
+go run ./cmd/powerhour library verify [--fix] [--json]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--fix` | Re-download corrupt or missing URL sources |
+
+Verifies that all library files are readable and not corrupted. With `--fix`, attempts to re-download any corrupt or missing URL-backed sources.
+
+## Cleanup
+
+### `powerhour clean segments`
+
+Remove all rendered segments and render state.
+
+```bash
+powerhour clean segments [--dry-run]
+go run ./cmd/powerhour clean segments [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | List what would be removed without deleting |
+
+### `powerhour clean logs`
+
+Remove all log files.
+
+```bash
+powerhour clean logs [--dry-run]
+go run ./cmd/powerhour clean logs [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | List what would be removed without deleting |
+
+### `powerhour clean orphans`
+
+Remove segment files not in the current plan.
+
+```bash
+powerhour clean orphans [--dry-run]
+go run ./cmd/powerhour clean orphans [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | List what would be removed without deleting |
+
+### `powerhour clean all`
+
+Remove segments, logs, render state, and concat artifacts.
+
+```bash
+powerhour clean all [--dry-run]
+go run ./cmd/powerhour clean all [--dry-run]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | List what would be removed without deleting |
