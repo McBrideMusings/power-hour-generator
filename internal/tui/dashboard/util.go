@@ -123,21 +123,7 @@ func looksLikeFilesystemPath(s string) bool {
 // widthSuffix returns the trailing runes of s whose combined visual width is
 // <= max, cutting only at rune boundaries.
 func widthSuffix(s string, max int) string {
-	if max <= 0 {
-		return ""
-	}
-	runes := []rune(s)
-	width := 0
-	start := len(runes)
-	for i := len(runes) - 1; i >= 0; i-- {
-		rw := runewidth.RuneWidth(runes[i])
-		if width+rw > max {
-			break
-		}
-		width += rw
-		start = i
-	}
-	return string(runes[start:])
+	return tui.TruncateToWidth(s, max, tui.TruncateOptions{KeepSuffix: true})
 }
 
 // trailingPathSuffix returns as much of the trailing path components of dir
