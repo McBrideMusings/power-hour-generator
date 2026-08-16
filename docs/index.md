@@ -22,4 +22,6 @@ features:
     details: Profile-based overlay system with title cards, artist credits, index badges, and custom segments — all with independent fade timing.
   - title: Collections System
     details: Organize songs, interstitials, bumpers, and outros as independent collections with custom CSV headers and output directories.
+  - title: Interactive Dashboard
+    details: Run `powerhour tui` for a full-screen dashboard covering fetch, render, and concat in one interface.
 ---

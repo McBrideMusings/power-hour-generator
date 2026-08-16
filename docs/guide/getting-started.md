@@ -56,6 +56,20 @@ rows:
     link: https://youtu.be/fJ9rUzIMcZQ
 ```
 
+### The one-command path
+
+Once your config and plan files are in place, one command produces the finished video:
+
+```bash
+powerhour concat --project my-power-hour
+```
+
+`concat` auto-renders any segments that haven't been rendered yet, and `render` auto-fetches any sources that haven't been cached yet — so a fresh project with only a config and plan files goes straight to the final output. Nothing needs to be run first.
+
+Prefer a visual view of that process? `powerhour tui --project my-power-hour` opens a full-screen dashboard covering fetch, render, and concat in one interface — see [`powerhour tui`](/cli#powerhour-tui) for details.
+
+The steps below walk through fetch, render, and concat individually, for anyone who wants control over each stage.
+
 ### 4. Fetch source videos
 
 ```bash
@@ -103,6 +117,7 @@ my-power-hour/
 ## What's Next
 
 - [CLI](/cli) — all available commands and flags
+- [`powerhour tui`](/cli#powerhour-tui) — full-screen dashboard for fetch, render, and concat
 - [Configuration](/guide/configuration) — customize video, audio, and overlay settings
 - [Overlays](/guide/overlays) — configure text overlays with profiles
 - [Collections](/guide/collections) — organize multiple clip types
