@@ -39,7 +39,7 @@ func TestTimelineViewFitsContentBudgetWithBothScrollIndicators(t *testing.T) {
 	for i := range m.timelineView.resolved {
 		m.timelineView.resolved[i] = project.TimelineEntry{
 			Collection: "songs",
-			Index:      i + 1,  // 1-based index for row lookup
+			Index:      i + 1, // 1-based index for row lookup
 			Sequence:   i,
 		}
 	}
@@ -63,8 +63,8 @@ func TestTimelineViewFitsContentBudgetWithBothScrollIndicators(t *testing.T) {
 	m.timelineView.collections = m.collections
 
 	// Scroll both panels to mid-list so both up and down indicators will render.
-	m.timelineView.seqScrollTop = 10  // not at top → up indicator
-	m.timelineView.resScrollTop = 20  // not at top → up indicator
+	m.timelineView.seqScrollTop = 10 // not at top → up indicator
+	m.timelineView.resScrollTop = 20 // not at top → up indicator
 
 	view := m.timelineView.view(nil)
 
@@ -113,7 +113,7 @@ func TestTimelineViewWastesNoRowWithoutScrollIndicators(t *testing.T) {
 	// Small resolved list that also fits without scrolling.
 	// Choose a count small enough that it doesn't trigger the down indicator.
 	m.timelineView.resolved = []project.TimelineEntry{
-		{Collection: "songs", Index: 1, Sequence: 0},  // 1-based index for row lookup
+		{Collection: "songs", Index: 1, Sequence: 0}, // 1-based index for row lookup
 		{Collection: "songs", Index: 2, Sequence: 1},
 		{Collection: "songs", Index: 3, Sequence: 2},
 	}
@@ -124,17 +124,17 @@ func TestTimelineViewWastesNoRowWithoutScrollIndicators(t *testing.T) {
 			{
 				Index:           0,
 				DurationSeconds: 60,
-				CustomFields: map[string]string{"title": "Song A", "artist": "Artist"},
+				CustomFields:    map[string]string{"title": "Song A", "artist": "Artist"},
 			},
 			{
 				Index:           1,
 				DurationSeconds: 60,
-				CustomFields: map[string]string{"title": "Song B", "artist": "Artist"},
+				CustomFields:    map[string]string{"title": "Song B", "artist": "Artist"},
 			},
 			{
 				Index:           2,
 				DurationSeconds: 60,
-				CustomFields: map[string]string{"title": "Song C", "artist": "Artist"},
+				CustomFields:    map[string]string{"title": "Song C", "artist": "Artist"},
 			},
 		},
 	}
