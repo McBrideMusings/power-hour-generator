@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/paths"
 )
@@ -72,6 +73,35 @@ func TestRenderHeaderUnchangedAtWideTerminal(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output missing %q; got:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderSegmentsWithBudgetEmoji(t *testing.T) {
+	// Each 🎬 is 1 rune but 2 terminal columns; budgeting by rune count would
+	// let this segment overflow the width.
+	segments := []headerSegment{
+		{"🎬🎬🎬🎬🎬", lipgloss.NewStyle()}, // 5 runes, 10 columns
+	}
+
+	for _, width := range []int{1, 4, 5, 9, 10, 11} {
+		out := renderSegmentsWithBudget(segments, width)
+		if w := runewidth.StringWidth(out); w > width {
+			t.Fatalf("width=%d: rendered width = %d, want <= %d (out: %q)", width, w, width, out)
+		}
+	}
+}
+
+func TestRenderSegmentsWithBudgetCJK(t *testing.T) {
+	// Each CJK character is 1 rune but 2 terminal columns.
+	segments := []headerSegment{
+		{"日本語テキスト", lipgloss.NewStyle()}, // 7 runes, 14 columns
+	}
+
+	for _, width := range []int{1, 4, 5, 13, 14, 15} {
+		out := renderSegmentsWithBudget(segments, width)
+		if w := runewidth.StringWidth(out); w > width {
+			t.Fatalf("width=%d: rendered width = %d, want <= %d (out: %q)", width, w, width, out)
 		}
 	}
 }

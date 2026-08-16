@@ -5,6 +5,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 var cursorCharStyle = lipgloss.NewStyle().Reverse(true)
@@ -37,7 +38,9 @@ func renderEditField(value string, cursor int) string {
 }
 
 // renderEditCell renders value in a fixed-width edit cell with reverse-video
-// cursor highlighting. cursor is a byte offset into value.
+// cursor highlighting. cursor is a byte offset into value. width is a visual
+// column count (via go-runewidth), so wide runes (CJK, most emoji) are
+// budgeted at their real terminal width instead of one rune each.
 func renderEditCell(value string, cursor int, width int) string {
 	if width <= 0 {
 		return ""
@@ -49,24 +52,67 @@ func renderEditCell(value string, cursor int, width int) string {
 		cursor = len(value)
 	}
 
-	runes := []rune(value)
-	runeOffset := utf8.RuneCountInString(value[:cursor])
+	truncated := runewidth.StringWidth(value) > width
+	content := truncateRunesToWidth(value, width)
+	contentWidth := runewidth.StringWidth(string(content))
+	if pad := width - contentWidth; pad > 0 {
+		content = append(content, []rune(strings.Repeat(" ", pad))...)
+	}
 
-	if len(runes) > width {
-		runes = append(runes[:width-1], '…')
-		if runeOffset > width-1 {
-			runeOffset = width - 1
+	// cursorCol is the visual column the byte cursor sits at in the
+	// (untruncated) value, so a wide rune before the cursor pushes it right
+	// by its real width rather than by one rune.
+	cursorCol := runewidth.StringWidth(value[:cursor])
+	if truncated {
+		// Past the truncation cut: land on the ellipsis cell, not the
+		// trailing pad that fills a dropped-wide-rune gap.
+		if cursorCol > contentWidth-1 {
+			cursorCol = contentWidth - 1
 		}
-	}
-	if pad := width - len(runes); pad > 0 {
-		runes = append(runes, []rune(strings.Repeat(" ", pad))...)
-	}
-	// Cursor at end-of-string for a full-width value falls on the last cell.
-	if runeOffset >= len(runes) {
-		runeOffset = len(runes) - 1
+	} else if cursorCol > width-1 {
+		// End-of-string on an untruncated value still falls through to a
+		// trailing pad cell (typing position after the last character).
+		cursorCol = width - 1
 	}
 
-	return editStyle.Render(string(runes[:runeOffset])) +
-		cursorCharStyle.Render(string(runes[runeOffset:runeOffset+1])) +
-		editStyle.Render(string(runes[runeOffset+1:]))
+	idx := len(content) - 1
+	col := 0
+	for i, r := range content {
+		rw := runewidth.RuneWidth(r)
+		if cursorCol >= col && cursorCol < col+rw {
+			idx = i
+			break
+		}
+		col += rw
+	}
+	if idx < 0 {
+		idx = 0
+	}
+
+	return editStyle.Render(string(content[:idx])) +
+		cursorCharStyle.Render(string(content[idx:idx+1])) +
+		editStyle.Render(string(content[idx+1:]))
+}
+
+// truncateRunesToWidth returns value's runes, truncated with a trailing '…'
+// so the result's visual width does not exceed width. A wide rune that would
+// straddle the cut is dropped rather than split, which can leave the result
+// one column narrower than width — the caller pads to make up the gap.
+func truncateRunesToWidth(value string, width int) []rune {
+	if runewidth.StringWidth(value) <= width {
+		return []rune(value)
+	}
+
+	budget := width - 1 // reserve one column for the ellipsis
+	var content []rune
+	w := 0
+	for _, r := range value {
+		rw := runewidth.RuneWidth(r)
+		if w+rw > budget {
+			break
+		}
+		content = append(content, r)
+		w += rw
+	}
+	return append(content, '…')
 }
