@@ -365,3 +365,139 @@ func TestDoctorOverlayRequeryDiscardsUnknownIdentifier(t *testing.T) {
 		t.Error("requeryStatus should explain the discard")
 	}
 }
+
+// TestRememberArtistGrowsPool verifies that rememberArtist appends a new
+// artist name to the overlay's knownArtists pool.
+func TestRememberArtistGrowsPool(t *testing.T) {
+	o := newTestDoctorOverlay([]string{"Beatles", "Rolling Stones"}, 80, 40)
+	initialLen := len(o.knownArtists)
+
+	o.rememberArtist("Queen")
+
+	if got := len(o.knownArtists); got != initialLen+1 {
+		t.Errorf("knownArtists length = %d, want %d", got, initialLen+1)
+	}
+	if !contains(o.knownArtists, "Queen") {
+		t.Errorf("Queen not found in knownArtists: %v", o.knownArtists)
+	}
+}
+
+// TestRememberArtistDeduplicates verifies that rememberArtist does not add
+// duplicate artist names, including case-insensitive duplicates.
+func TestRememberArtistDeduplicates(t *testing.T) {
+	o := newTestDoctorOverlay([]string{"Beatles", "Rolling Stones"}, 80, 40)
+	initialLen := len(o.knownArtists)
+
+	// Exact duplicate
+	o.rememberArtist("Beatles")
+	if got := len(o.knownArtists); got != initialLen {
+		t.Errorf("after exact duplicate: knownArtists length = %d, want %d (no growth)", got, initialLen)
+	}
+
+	// Case variant
+	o.rememberArtist("beatles")
+	if got := len(o.knownArtists); got != initialLen {
+		t.Errorf("after case variant: knownArtists length = %d, want %d (no growth)", got, initialLen)
+	}
+
+	// Different name should grow
+	o.rememberArtist("Queen")
+	if got := len(o.knownArtists); got != initialLen+1 {
+		t.Errorf("after new name: knownArtists length = %d, want %d", got, initialLen+1)
+	}
+}
+
+// TestRememberArtistTrimsWhitespace verifies that rememberArtist trims
+// leading/trailing whitespace and skips empty names.
+func TestRememberArtistTrimsWhitespace(t *testing.T) {
+	o := newTestDoctorOverlay([]string{"Beatles"}, 80, 40)
+	initialLen := len(o.knownArtists)
+
+	o.rememberArtist("  Queen  ")
+	if got := len(o.knownArtists); got != initialLen+1 {
+		t.Errorf("after whitespace trim: length = %d, want %d", got, initialLen+1)
+	}
+	if !contains(o.knownArtists, "Queen") {
+		t.Errorf("Queen (trimmed) not found in knownArtists: %v", o.knownArtists)
+	}
+
+	// Empty/whitespace-only names should be skipped
+	o.rememberArtist("   ")
+	if got := len(o.knownArtists); got != initialLen+1 {
+		t.Errorf("after empty string: length = %d, want %d (no growth)", got, initialLen+1)
+	}
+}
+
+// TestSaveAndAutocompleteSamePerson verifies the core use case: save an
+// artist name on one entry, then see it offered as an autocomplete
+// suggestion on a later entry in the same session.
+func TestSaveAndAutocompleteSamePerson(t *testing.T) {
+	// Build the doctor overlay with two entries and empty knownArtists.
+	items := []doctorItem{
+		{
+			entry: cache.Entry{
+				Identifier: "id-0",
+				Source:     "https://youtube.com/watch?v=aaa000",
+				Title:      "Song A",
+				Artist:     "Old Artist A",
+			},
+			finding: cachedoctor.Finding{
+				Identifier:     "id-0",
+				CurrentTitle:   "Song A",
+				CurrentArtist:  "Old Artist A",
+				ProposedTitle:  "Song A",
+				ProposedArtist: "Radiohead",
+				Confidence:     "high",
+			},
+		},
+		{
+			entry: cache.Entry{
+				Identifier: "id-1",
+				Source:     "https://youtube.com/watch?v=bbb111",
+				Title:      "Song B",
+				Artist:     "Old Artist B",
+			},
+			finding: cachedoctor.Finding{
+				Identifier:     "id-1",
+				CurrentTitle:   "Song B",
+				CurrentArtist:  "Old Artist B",
+				ProposedTitle:  "Song B",
+				ProposedArtist: "Pink Floyd",
+				Confidence:     "high",
+			},
+		},
+	}
+	o := newCacheDoctorOverlay(items, []string{}, 80, 40)
+
+	// Simulate saving "Radiohead" on entry 0.
+	o.cursor = 0
+	o.loadCurrentEntry()
+	o.rememberArtist("Radiohead")
+	if len(o.knownArtists) != 1 || o.knownArtists[0] != "Radiohead" {
+		t.Fatalf("rememberArtist failed to add Radiohead: %v", o.knownArtists)
+	}
+
+	// Move to entry 1 and set up for autocomplete.
+	o.cursor = 1
+	o.loadCurrentEntry()
+	o.activeField = 1
+	o.editArtist = "rad"
+	o.artistCursor = len(o.editArtist)
+	o.artistTouched = true
+
+	// Query for "rad" should match "Radiohead" from the pool.
+	suggestions := o.artistSuggestions()
+	if !contains(suggestions, "Radiohead") {
+		t.Errorf("Radiohead not found in autocomplete suggestions for query 'rad': %v", suggestions)
+	}
+}
+
+// Helper to check if a slice contains a string.
+func contains(slice []string, s string) bool {
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
