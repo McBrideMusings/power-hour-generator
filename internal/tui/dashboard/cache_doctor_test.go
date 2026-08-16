@@ -32,7 +32,7 @@ func newTestDoctorOverlay(knownArtists []string, w, h int) cacheDoctorOverlay {
 		Reasons:        []string{"used track as title", "applied artist alias"},
 	}
 	items := []doctorItem{{entry: entry, finding: finding}}
-	o := newCacheDoctorOverlay(items, knownArtists, w, h)
+	o := newCacheDoctorOverlay(items, knownArtists, w, h, 0)
 	// Put the ARTIST field in edit mode with a query that fuzzy-matches
 	// every "Artist X" entry in knownArtists, so artistSuggestions() is
 	// non-empty and under our control via len(knownArtists).
@@ -271,7 +271,7 @@ func twoItemDoctorOverlay() cacheDoctorOverlay {
 			},
 		},
 	}
-	return newCacheDoctorOverlay(items, nil, 80, 40)
+	return newCacheDoctorOverlay(items, nil, 80, 40, 0)
 }
 
 // TestDoctorOverlayRequeryIgnoresStaleTarget covers the race: a requery is
@@ -286,7 +286,6 @@ func TestDoctorOverlayRequeryIgnoresStaleTarget(t *testing.T) {
 	queriedID := o.findings[0].finding.Identifier
 	o.requerying = true
 	o.requeryID = queriedID
-	o.requeryCursor = o.cursor // 0
 
 	// Cursor moves to entry 1 (and the visible edit buffers follow) before
 	// the async requery result arrives.
@@ -341,7 +340,6 @@ func TestDoctorOverlayRequeryDiscardsUnknownIdentifier(t *testing.T) {
 	o := twoItemDoctorOverlay()
 	o.requerying = true
 	o.requeryID = "id-gone"
-	o.requeryCursor = 0
 
 	entry0TitleBefore := o.findings[0].finding.ProposedTitle
 	entry0ArtistBefore := o.findings[0].finding.ProposedArtist
@@ -363,6 +361,109 @@ func TestDoctorOverlayRequeryDiscardsUnknownIdentifier(t *testing.T) {
 	}
 	if o.requeryStatus == "" {
 		t.Error("requeryStatus should explain the discard")
+	}
+}
+
+// TestDoctorRequeryEmptyIdentifierNotAppliedByCursor covers entries with no
+// stable Identifier: applyRequery must never fall back to applying the
+// result to whatever is under the cursor just because the snapshotted
+// identifier was empty (that was the bug behind #176). It must also clear
+// requerying so the overlay doesn't freeze (handleKey swallows all input
+// while requerying is true).
+func TestDoctorRequeryEmptyIdentifierNotAppliedByCursor(t *testing.T) {
+	items := []doctorItem{
+		{
+			entry: cache.Entry{Identifier: "", Source: "https://youtube.com/watch?v=ccc222"},
+			finding: cachedoctor.Finding{
+				Identifier:     "",
+				CurrentTitle:   "old title",
+				CurrentArtist:  "old artist",
+				ProposedTitle:  "Proposed Title",
+				ProposedArtist: "Proposed Artist",
+				Confidence:     "medium",
+			},
+		},
+	}
+	o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+	o.requerying = true
+	o.requeryID = ""
+	o.cursor = 0
+
+	normCfg := cache.NormalizationConfig{}
+	info := cache.RemoteIDInfo{Title: "Should Not Apply", Artist: "Should Not Apply"}
+	o.applyRequery("", info, normCfg)
+
+	if o.findings[0].finding.ProposedTitle != "Proposed Title" {
+		t.Errorf("finding mutated by empty-identifier requery: got title=%q", o.findings[0].finding.ProposedTitle)
+	}
+	if o.findings[0].finding.ProposedArtist != "Proposed Artist" {
+		t.Errorf("finding mutated by empty-identifier requery: got artist=%q", o.findings[0].finding.ProposedArtist)
+	}
+	if o.requerying {
+		t.Error("requerying should be cleared after a discarded applyRequery, or the overlay freezes")
+	}
+	if o.requeryStatus == "" {
+		t.Error("requeryStatus should explain the discard")
+	}
+}
+
+// TestDoctorRequeryFromPreviousOverlayInstanceIsIgnored covers the
+// close-and-reopen-mid-requery case: the doctor overlay is closed while a
+// requery is still in flight, reopened as a new instance, and the stale
+// result from the first instance arrives. It must be dropped entirely,
+// including when it coincidentally carries the same (or an equally empty)
+// identifier as something in the new overlay — the instance token, not the
+// identifier, is what disambiguates.
+func TestDoctorRequeryFromPreviousOverlayInstanceIsIgnored(t *testing.T) {
+	cases := []struct {
+		name       string
+		identifier string
+		requeryID  string
+	}{
+		{name: "non-empty identifier", identifier: "id-0", requeryID: "id-0"},
+		{name: "empty identifier coincidental match", identifier: "", requeryID: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			firstOverlay := twoItemDoctorOverlay()
+			firstOverlay.instance = 1
+			firstOverlay.requerying = true
+			firstOverlay.requeryID = tc.requeryID
+
+			// Close the first overlay, reopen a second instance (as
+			// openDoctorOverlay would, with an incremented instance number).
+			secondOverlay := twoItemDoctorOverlay()
+			secondOverlay.instance = 2
+			secondOverlay.requeryID = tc.requeryID
+
+			origTitle0 := secondOverlay.findings[0].finding.ProposedTitle
+			origArtist0 := secondOverlay.findings[0].finding.ProposedArtist
+
+			m := Model{
+				overlay:       overlayDoctor,
+				doctorOverlay: &secondOverlay,
+			}
+
+			msg := doctorRequeryDoneMsg{
+				identifier: tc.identifier,
+				info:       cache.RemoteIDInfo{Title: "Stale Title", Artist: "Stale Artist"},
+				instance:   firstOverlay.instance,
+			}
+
+			updated, _ := m.Update(msg)
+			um := updated.(Model)
+
+			if um.doctorOverlay.findings[0].finding.ProposedTitle != origTitle0 {
+				t.Errorf("finding mutated by stale-instance requery: got title=%q, want %q", um.doctorOverlay.findings[0].finding.ProposedTitle, origTitle0)
+			}
+			if um.doctorOverlay.findings[0].finding.ProposedArtist != origArtist0 {
+				t.Errorf("finding mutated by stale-instance requery: got artist=%q, want %q", um.doctorOverlay.findings[0].finding.ProposedArtist, origArtist0)
+			}
+			if um.doctorOverlay.requeryStatus != "" {
+				t.Errorf("requeryStatus should be untouched by a stale-instance message, got %q", um.doctorOverlay.requeryStatus)
+			}
+		})
 	}
 }
 
@@ -467,7 +568,7 @@ func TestSaveAndAutocompleteSamePerson(t *testing.T) {
 			},
 		},
 	}
-	o := newCacheDoctorOverlay(items, []string{}, 80, 40)
+	o := newCacheDoctorOverlay(items, []string{}, 80, 40, 0)
 
 	// Simulate saving "Radiohead" on entry 0.
 	o.cursor = 0

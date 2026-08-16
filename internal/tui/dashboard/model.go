@@ -104,9 +104,10 @@ type Model struct {
 	addCvIdx  int    // which collection view owns the active add slot
 
 	// Overlay state.
-	overlay       overlayKind
-	toolStatuses  []ToolStatus
-	doctorOverlay *cacheDoctorOverlay
+	overlay           overlayKind
+	toolStatuses      []ToolStatus
+	doctorOverlay     *cacheDoctorOverlay
+	doctorInstanceSeq int // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
 
 	job dashboardJobState
 
@@ -505,7 +506,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case doctorRequeryDoneMsg:
-		if m.doctorOverlay != nil && m.doctorOverlay.requeryID == msg.identifier {
+		if m.doctorOverlay != nil && m.doctorOverlay.instance == msg.instance && m.doctorOverlay.requeryID == msg.identifier {
 			if msg.err != nil {
 				m.doctorOverlay.requerying = false
 				m.doctorOverlay.requeryID = ""
@@ -2046,7 +2047,8 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 		m.statusMsg = "All entries look clean"
 		return m
 	}
-	overlay := newCacheDoctorOverlay(items, knownArtists, m.termWidth, m.termHeight)
+	m.doctorInstanceSeq++
+	overlay := newCacheDoctorOverlay(items, knownArtists, m.termWidth, m.termHeight, m.doctorInstanceSeq)
 	m.doctorOverlay = &overlay
 	m.overlay = overlayDoctor
 	return m
@@ -2056,6 +2058,7 @@ type doctorRequeryDoneMsg struct {
 	identifier string
 	info       cache.RemoteIDInfo
 	err        error
+	instance   int
 }
 
 func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
@@ -2075,19 +2078,23 @@ func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	identifier := item.finding.Identifier
+	if strings.TrimSpace(identifier) == "" {
+		m.statusMsg = "Cannot requery: entry has no stable identifier"
+		return m, nil
+	}
 	m.doctorOverlay.requerying = true
 	m.doctorOverlay.requeryID = identifier
-	m.doctorOverlay.requeryCursor = m.doctorOverlay.cursor
+	instance := m.doctorOverlay.instance
 	pp := m.pp
 	return m, func() tea.Msg {
 		ctx := context.Background()
 		logger := log.New(io.Discard, "", 0)
 		svc, err := cache.NewService(ctx, pp, logger, nil)
 		if err != nil {
-			return doctorRequeryDoneMsg{identifier: identifier, err: err}
+			return doctorRequeryDoneMsg{identifier: identifier, err: err, instance: instance}
 		}
 		info, err := svc.QueryRemoteID(ctx, source)
-		return doctorRequeryDoneMsg{identifier: identifier, info: info, err: err}
+		return doctorRequeryDoneMsg{identifier: identifier, info: info, err: err, instance: instance}
 	}
 }
 
