@@ -3,6 +3,7 @@ package dashboard
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1438,4 +1439,137 @@ func TestReloadCSVCollectionWithExternallyAddedColumnReloadsHeaders(t *testing.T
 			t.Fatalf("after reload, mood value = %q, want 'upbeat'", reloadedColl.Rows[0].CustomFields["mood"])
 		}
 	}
+}
+
+// TestReloadEmptiedPlanParity covers #178: an emptied CSV plan (header row,
+// no data rows) must reload the same way an emptied YAML plan (rows: [])
+// does -- zero rows, refreshed headers, no "Reload error:" status.
+func TestReloadEmptiedPlanParity(t *testing.T) {
+	buildModel := func(t *testing.T, root, planPath string, coll project.Collection, rows []csvplan.CollectionRow) Model {
+		t.Helper()
+		pp, err := paths.Resolve(root)
+		if err != nil {
+			t.Fatalf("resolve paths: %v", err)
+		}
+		return Model{
+			cfg: config.Config{
+				Collections: map[string]config.CollectionConfig{
+					"songs": coll.Config,
+				},
+				Cache: config.Default().Cache,
+			},
+			pp:              pp,
+			collections:     map[string]project.Collection{"songs": coll},
+			collectionNames: []string{"songs"},
+			activeView:      1,
+			collectionViews: []collectionView{{
+				name:     "songs",
+				planPath: planPath,
+				rows:     rows,
+				columns:  discoverColumns(rows, coll.Headers),
+			}},
+		}
+	}
+
+	t.Run("csv", func(t *testing.T) {
+		root := t.TempDir()
+		planPath := filepath.Join(root, "songs.csv")
+		initialCSV := "title,artist,link,start_time,duration,mood\nFirst Song,Artist A,https://example.com/watch?v=1,0:15,60,upbeat"
+		if err := os.WriteFile(planPath, []byte(initialCSV), 0o644); err != nil {
+			t.Fatalf("write csv plan: %v", err)
+		}
+
+		rows, err := csvplan.LoadCollection(planPath, csvplan.CollectionOptions{})
+		if err != nil {
+			t.Fatalf("load collection: %v", err)
+		}
+
+		coll := project.Collection{
+			Name:       "songs",
+			Plan:       planPath,
+			OutputDir:  "songs",
+			Config:     config.CollectionConfig{OutputDir: "songs"},
+			Rows:       rows,
+			Headers:    []string{"title", "artist", "link", "start_time", "duration", "mood"},
+			Delimiter:  ',',
+			PlanFormat: "csv",
+		}
+
+		m := buildModel(t, root, planPath, coll, rows)
+
+		// Externally empty the plan down to a header row with a changed
+		// column set (mood dropped, energy added).
+		emptiedCSV := "title,artist,link,start_time,duration,energy\n"
+		if err := os.WriteFile(planPath, []byte(emptiedCSV), 0o644); err != nil {
+			t.Fatalf("rewrite csv plan: %v", err)
+		}
+
+		m = reloadCollection(m, 0)
+
+		if strings.Contains(m.statusMsg, "Reload error:") {
+			t.Fatalf("statusMsg = %q, want no reload error", m.statusMsg)
+		}
+		reloaded := m.collections["songs"]
+		if len(reloaded.Rows) != 0 {
+			t.Fatalf("after reload, rows = %d, want 0", len(reloaded.Rows))
+		}
+		wantHeaders := []string{"title", "artist", "link", "start_time", "duration", "energy"}
+		if !reflect.DeepEqual(reloaded.Headers, wantHeaders) {
+			t.Fatalf("after reload, Headers = %v, want %v", reloaded.Headers, wantHeaders)
+		}
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		root := t.TempDir()
+		planPath := filepath.Join(root, "songs.yaml")
+		initialYAML := "columns: [title, artist, link, start_time, duration, mood]\n" +
+			"rows:\n" +
+			"  - title: First Song\n" +
+			"    artist: Artist A\n" +
+			"    link: https://example.com/watch?v=1\n" +
+			"    start_time: \"0:15\"\n" +
+			"    duration: 60\n" +
+			"    mood: upbeat\n"
+		if err := os.WriteFile(planPath, []byte(initialYAML), 0o644); err != nil {
+			t.Fatalf("write yaml plan: %v", err)
+		}
+
+		result, err := csvplan.LoadCollectionYAML(planPath, csvplan.CollectionOptions{})
+		if err != nil {
+			t.Fatalf("load collection yaml: %v", err)
+		}
+
+		coll := project.Collection{
+			Name:       "songs",
+			Plan:       planPath,
+			OutputDir:  "songs",
+			Config:     config.CollectionConfig{OutputDir: "songs"},
+			Rows:       result.Rows,
+			Headers:    csvplan.MergeHeaders(result.Columns, result.Rows),
+			PlanFormat: "yaml",
+		}
+
+		m := buildModel(t, root, planPath, coll, result.Rows)
+
+		// Externally empty the plan with a changed column set (mood
+		// dropped, energy added), matching the CSV case.
+		emptiedYAML := "columns: [title, artist, link, start_time, duration, energy]\nrows: []\n"
+		if err := os.WriteFile(planPath, []byte(emptiedYAML), 0o644); err != nil {
+			t.Fatalf("rewrite yaml plan: %v", err)
+		}
+
+		m = reloadCollection(m, 0)
+
+		if strings.Contains(m.statusMsg, "Reload error:") {
+			t.Fatalf("statusMsg = %q, want no reload error", m.statusMsg)
+		}
+		reloaded := m.collections["songs"]
+		if len(reloaded.Rows) != 0 {
+			t.Fatalf("after reload, rows = %d, want 0", len(reloaded.Rows))
+		}
+		wantHeaders := []string{"title", "artist", "link", "start_time", "duration", "energy"}
+		if !reflect.DeepEqual(reloaded.Headers, wantHeaders) {
+			t.Fatalf("after reload, Headers = %v, want %v", reloaded.Headers, wantHeaders)
+		}
+	})
 }
