@@ -2,6 +2,8 @@
 
 The `internal/tui/` package provides the interactive progress display using [bubbletea](https://github.com/charmbracelet/bubbletea) (Elm architecture), [lipgloss](https://github.com/charmbracelet/lipgloss) (styling), and [bubbles](https://github.com/charmbracelet/bubbles) (components).
 
+This page covers only that progress-display layer — the spinner and live table shown while a command like `fetch` or `render` runs. The full-screen interactive dashboard launched by `powerhour tui` is a separate sub-package with its own views, modes, and write-back logic; see [TUI Dashboard](/architecture/dashboard).
+
 ## Components
 
 ### StatusWriter
