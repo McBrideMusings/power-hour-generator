@@ -344,7 +344,9 @@ func (v collectionView) view() string {
 
 		rawStatus := v.rowStatus[row.Index]
 		status := compactRowStatus(rawStatus, v.tick)
-		gutter := fmt.Sprintf("%s%s %-*s", cursor, idx, statusWidth, tui.TruncateWithEllipsis(status, statusWidth))
+		truncatedStatus := tui.TruncateWithEllipsis(status, statusWidth)
+		paddedStatus := lipgloss.NewStyle().Width(statusWidth).Render(truncatedStatus)
+		gutter := fmt.Sprintf("%s%s %s", cursor, idx, paddedStatus)
 		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])
