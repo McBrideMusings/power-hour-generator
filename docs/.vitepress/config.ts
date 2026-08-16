@@ -39,6 +39,7 @@ export default defineConfig({
             { text: 'CSV Loading', link: '/architecture/csv-loading' },
             { text: 'Tool Management', link: '/architecture/tools' },
             { text: 'TUI System', link: '/architecture/tui' },
+            { text: 'TUI Dashboard', link: '/architecture/dashboard' },
           ],
         },
       ],
