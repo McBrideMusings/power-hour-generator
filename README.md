@@ -47,7 +47,7 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour concat --project <dir> [--output <path>] [--dry-run]` – concatenate rendered segments into a final video following the timeline sequence. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
 - `powerhour convert --project <dir> [--output <path>] [--dry-run]` – convert a CSV/TSV plan file to YAML format with permissive column detection.
 - `powerhour add --project <dir> --collection <name> [--file <path>] [text]` – add a single URL/path row or append YAML, CSV, or TSV rows into an existing collection. Without `text` or `--file`, reads the input block from stdin.
-- `powerhour cache add <url> <file-path> [--title "..."] [--artist "..."] [--dry-run] [--no-probe]` – register a manually-downloaded video into the project cache. Useful for age-restricted or geo-blocked content that yt-dlp cannot fetch automatically. Attempts yt-dlp metadata query first; falls back to URL parsing or interactive prompts when metadata is unavailable.
+- `powerhour cache add <file-or-id> [--url <url>] [--title "..."] [--artist "..."] [--dry-run] [--no-probe]` – register a local video file or download by YouTube ID into the project cache. The positional argument can be a local file path, a yt-dlp-style filename, or a bare YouTube ID. URLs are auto-detected or supplied via `--url`. Useful for age-restricted or geo-blocked content that yt-dlp cannot fetch automatically.
 
 The global `--json` flag applies to every command for machine-readable output when supported.
 
