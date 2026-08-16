@@ -1350,3 +1350,92 @@ rows:
 		t.Fatalf("after reloadCollection, Headers = %v, want 'mood' included", m.collections["songs"].Headers)
 	}
 }
+
+func TestReloadCSVCollectionWithExternallyAddedColumnReloadsHeaders(t *testing.T) {
+	t.Helper()
+
+	root := t.TempDir()
+	pp, err := paths.Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+
+	// Create initial CSV file with headers
+	planPath := filepath.Join(root, "songs.csv")
+	initialCSV := "title,artist,link,start_time,duration\nFirst Song,Artist A,https://example.com/watch?v=1,0:15,60"
+	if err := os.WriteFile(planPath, []byte(initialCSV), 0o644); err != nil {
+		t.Fatalf("write csv plan: %v", err)
+	}
+
+	// Load the collection
+	rows, err := csvplan.LoadCollection(planPath, csvplan.CollectionOptions{})
+	if err != nil {
+		t.Fatalf("load collection: %v", err)
+	}
+
+	// Build the collection
+	coll := project.Collection{
+		Name:       "songs",
+		Plan:       planPath,
+		OutputDir:  "songs",
+		Config:     config.CollectionConfig{OutputDir: "songs"},
+		Rows:       rows,
+		Headers:    []string{"title", "artist", "link", "start_time", "duration"},
+		Delimiter:  ',',
+		PlanFormat: "csv",
+	}
+
+	// Build a model with the collection
+	m := Model{
+		cfg: config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": coll.Config,
+			},
+			Cache: config.Default().Cache,
+		},
+		pp:              pp,
+		collections:     map[string]project.Collection{"songs": coll},
+		collectionNames: []string{"songs"},
+		activeView:      1,
+		collectionViews: []collectionView{{
+			name:     "songs",
+			planPath: planPath,
+			rows:     rows,
+			columns:  discoverColumns(rows, coll.Headers),
+		}},
+	}
+
+	// Now externally add a new column to the CSV file on disk (simulating user editing outside the app)
+	updatedCSV := "title,artist,link,start_time,duration,mood\nFirst Song,Artist A,https://example.com/watch?v=1,0:15,60,upbeat"
+	if err := os.WriteFile(planPath, []byte(updatedCSV), 0o644); err != nil {
+		t.Fatalf("update csv plan: %v", err)
+	}
+
+	// Call reloadCollection to simulate user re-entering the TUI
+	m = reloadCollection(m, 0)
+
+	// Verify the new column 'mood' appears in Headers
+	reloadedColl := m.collections["songs"]
+	found := false
+	for _, h := range reloadedColl.Headers {
+		if h == "mood" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("after reload, Headers = %v, want 'mood' included", reloadedColl.Headers)
+	}
+
+	// Verify delimiter is preserved
+	if reloadedColl.Delimiter != ',' {
+		t.Fatalf("after reload, Delimiter = %v, want ','", reloadedColl.Delimiter)
+	}
+
+	// Verify data-discovered fields are still merged in (mood should be in the row)
+	if len(reloadedColl.Rows) > 0 {
+		if reloadedColl.Rows[0].CustomFields["mood"] != "upbeat" {
+			t.Fatalf("after reload, mood value = %q, want 'upbeat'", reloadedColl.Rows[0].CustomFields["mood"])
+		}
+	}
+}
