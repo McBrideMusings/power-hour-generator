@@ -50,8 +50,8 @@ func TestGutterGutterFormatConsistency(t *testing.T) {
 		"cached",
 		"render",
 		"🎵",      // single emoji
-		"✓ ok",    // emoji with text
-		"日本語",  // wide characters
+		"✓ ok",   // emoji with text
+		"日本語",    // wide characters
 		"📺 test", // emoji and ASCII
 	}
 
@@ -235,6 +235,126 @@ func TestEditContextNoteRowIndex(t *testing.T) {
 		if !strings.Contains(got, tt.want) {
 			t.Errorf("editContextNote() with index %d missing %q in: %q", tt.rowIdx, tt.want, got)
 		}
+	}
+}
+
+// makeConfirmTestRows builds n collection rows with distinct titles, plus
+// matching states (all rowRendered) so computeRowStates-shaped bookkeeping
+// isn't needed for these render-path tests.
+func makeConfirmTestRows(n int) ([]csvplan.CollectionRow, []rowState) {
+	rows := make([]csvplan.CollectionRow, n)
+	states := make([]rowState, n)
+	for i := 0; i < n; i++ {
+		rows[i] = csvplan.CollectionRow{
+			Index: i,
+			CustomFields: map[string]string{
+				"title":  "Song " + string(rune('A'+i%26)),
+				"artist": "Artist",
+			},
+		}
+		states[i] = rowRendered
+	}
+	return rows, states
+}
+
+// TestConfirmDeletePromptRendersBeneathCursorRow verifies that pressing "x"
+// on a collection row (setting confirmDelete) renders the prompt as a row
+// immediately after the cursor row's line, not in the footer at the bottom.
+// This is a regression test for #100: a test that would fail if the prompt
+// went back to the unified footer, since in that case the last non-empty
+// line of the render would carry the prompt instead of the line right after
+// the cursor row.
+func TestConfirmDeletePromptRendersBeneathCursorRow(t *testing.T) {
+	rows, states := makeConfirmTestRows(10)
+	v := collectionView{
+		name:      "songs",
+		rows:      rows,
+		states:    states,
+		columns:   []collectionColumn{{field: "title", header: "TITLE"}, {field: "artist", header: "ARTIST"}},
+		cursor:    3,
+		rowStatus: make(map[int]string),
+		termWidth: 100,
+		// Tall enough that no scrolling is needed for 10 rows.
+		termHeight:    60,
+		confirmDelete: "Delete row 03 \"Song D\"? [y/n]",
+	}
+
+	rendered := v.view()
+	lines := strings.Split(rendered, "\n")
+
+	cursorLineIdx := -1
+	for i, line := range lines {
+		if strings.Contains(line, "▸") && strings.Contains(line, "03") {
+			cursorLineIdx = i
+			break
+		}
+	}
+	if cursorLineIdx == -1 {
+		t.Fatalf("could not locate cursor row line in rendered view:\n%s", rendered)
+	}
+
+	if cursorLineIdx+1 >= len(lines) {
+		t.Fatalf("no line follows the cursor row to hold the prompt:\n%s", rendered)
+	}
+	promptLine := lines[cursorLineIdx+1]
+	if !strings.Contains(promptLine, "Delete") || !strings.Contains(promptLine, "[y/n]") {
+		t.Errorf("line directly after cursor row does not contain the confirm prompt: %q\nfull render:\n%s", promptLine, rendered)
+	}
+
+	// The prompt must NOT be sitting in the footer (the last non-empty line).
+	lastLine := ""
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			lastLine = lines[i]
+			break
+		}
+	}
+	if strings.Contains(lastLine, "[y/n]") {
+		t.Errorf("confirm prompt appears to be in the footer (last line): %q", lastLine)
+	}
+}
+
+// TestConfirmDeletePromptRespectsHeightBudget verifies that inserting the
+// confirm-delete row is charged against the visible-row budget: visibleRowCount()
+// gives up one data row exactly when confirmDelete is set, so the total
+// rendered line count is unchanged versus the no-prompt render at the same
+// scroll position — no row is wasted, and none pushes the total past budget.
+// Without the accounting fix in visibleRowCount(), the inserted prompt would
+// add a line on top of the existing row count and this assertion would fail.
+func TestConfirmDeletePromptRespectsHeightBudget(t *testing.T) {
+	rows, states := makeConfirmTestRows(30)
+
+	base := collectionView{
+		name:       "songs",
+		rows:       rows,
+		states:     states,
+		columns:    []collectionColumn{{field: "title", header: "TITLE"}},
+		cursor:     5,
+		rowStatus:  make(map[int]string),
+		termWidth:  100,
+		termHeight: 24, // small terminal forces scrolling across 30 rows
+	}
+
+	without := base
+	without.confirmDelete = ""
+	withoutRendered := without.view()
+	withoutLines := strings.Count(withoutRendered, "\n")
+
+	with := base
+	with.confirmDelete = "Delete row 05 \"Song F\"? [y/n]"
+	withRendered := with.view()
+	withLines := strings.Count(withRendered, "\n")
+
+	if withLines != withoutLines {
+		t.Errorf("expected total line count to stay unchanged (confirm row charged against the same budget): without=%d with=%d", withoutLines, withLines)
+	}
+
+	// Sanity bound: total output must fit within the terminal height the
+	// budget was computed for (subheader + header + rows + indicators + help
+	// row all come out of termHeight-10, so the total should never exceed
+	// termHeight).
+	if withLines > base.termHeight {
+		t.Errorf("rendered line count %d exceeds termHeight %d with confirm prompt inserted:\n%s", withLines, base.termHeight, withRendered)
 	}
 }
 

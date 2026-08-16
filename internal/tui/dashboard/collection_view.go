@@ -216,6 +216,12 @@ func (v collectionView) visibleRowCount() int {
 	if v.addFocus {
 		h -= v.addSlotExtraLines()
 	}
+	// The confirm-delete prompt renders as an inserted row beneath the
+	// target row (not in the footer), so it consumes one line of budget
+	// just like the add-slot's extra lines do.
+	if v.confirmDelete != "" {
+		h--
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -385,6 +391,13 @@ func (v collectionView) view() string {
 			b.WriteString(strings.Join(parts[1:], "  "))
 		}
 		b.WriteByte('\n')
+
+		// Confirm-delete prompt: inserted directly beneath the row it targets,
+		// for visual proximity to the destructive action (not in the footer).
+		if v.confirmDelete != "" && i == v.cursor {
+			b.WriteString(helpRowText(v.confirmDelete, confirmStyle, v.termWidth))
+			b.WriteByte('\n')
+		}
 	}
 
 	if endRow < len(v.rows) {
@@ -392,10 +405,11 @@ func (v collectionView) view() string {
 		b.WriteByte('\n')
 	}
 
-	// Unified inline help row. All contextual messages (confirm-delete, edit
-	// mode, transient notes like "removed row", the focused add slot, and the
-	// default "press a to add a clip") render through the same footer element
-	// in a fixed priority order. Only one help row is ever visible.
+	// Unified inline help row. Contextual messages (edit mode, transient
+	// notes like "removed row", the focused add slot, and the default
+	// "press a to add a clip") render through the same footer element in a
+	// fixed priority order. Confirm-delete is the one exception: it renders
+	// as its own inserted row beneath the target row above, not here.
 	b.WriteString(v.renderHelpRow())
 	b.WriteByte('\n')
 
@@ -425,21 +439,21 @@ func editContextNote(v collectionView, row csvplan.CollectionRow) string {
 // and replaces every lower-priority default. The order matches what the
 // user is currently doing:
 //
-//  1. confirm-delete prompt (Y/N)
-//  2. inline-edit context (field being edited, keys)
-//  3. transient note / status on the cursor row ("removed row", "probing", …)
-//  4. focused add-slot (input + keys hint + suggestions)
-//  5. default action hint ("press a to add a clip")
+//  1. inline-edit context (field being edited, keys)
+//  2. transient note / status on the cursor row ("removed row", "probing", …)
+//  3. focused add-slot (input + keys hint + suggestions)
+//  4. default action hint ("press a to add a clip")
+//
+// The confirm-delete prompt is NOT part of this ladder: it renders as an
+// inserted row directly beneath the target row (see view()), not in the
+// footer, so it stays visually attached to the row it is about to destroy.
+// cacheView and timelineView still show their confirm-delete prompt here in
+// the footer — this carve-out is collection-view only.
 //
 // Only the add-slot branch can produce multiple lines (input + suggestions +
 // dynamic hint); all others render exactly one line via helpRowText.
 func (v collectionView) renderHelpRow() string {
-	// 1. Confirm-delete.
-	if v.confirmDelete != "" {
-		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
-	}
-
-	// 2. Inline-edit context. If the edit row also carries a transient note,
+	// 1. Inline-edit context. If the edit row also carries a transient note,
 	// the note wins (so "saved" / "probing" are visible during the edit lull
 	// between keystrokes).
 	if v.editing && v.cursor >= 0 && v.cursor < len(v.rows) {
@@ -455,7 +469,7 @@ func (v collectionView) renderHelpRow() string {
 		return helpRowText(editContextNote(v, row), faint, v.termWidth)
 	}
 
-	// 3. Transient note on the cursor row.
+	// 2. Transient note on the cursor row.
 	if v.cursor >= 0 && v.cursor < len(v.rows) {
 		row := v.rows[v.cursor]
 		rawStatus := v.rowStatus[row.Index]
@@ -468,12 +482,12 @@ func (v collectionView) renderHelpRow() string {
 		}
 	}
 
-	// 4. Focused add slot.
+	// 3. Focused add slot.
 	if v.addFocus {
 		return v.renderAddSlot()
 	}
 
-	// 5. Default.
+	// 4. Default.
 	return helpRowText("press a to add a clip", faint, v.termWidth)
 }
 
