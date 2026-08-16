@@ -38,6 +38,9 @@ func ImportCollectionText(raw string, opts CollectionOptions) ([]CollectionRow, 
 	}
 
 	rows, err := LoadCollectionData([]byte(trimmed), opts)
+	if err == nil && len(rows) == 0 {
+		return nil, format, fmt.Errorf("no data rows found")
+	}
 	return rows, format, err
 }
 

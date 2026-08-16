@@ -134,10 +134,6 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 		return nil, errors.New("missing header row")
 	}
 
-	if len(rows) == 0 {
-		return nil, errors.New("no data rows found")
-	}
-
 	if len(errs) > 0 {
 		return rows, errs
 	}

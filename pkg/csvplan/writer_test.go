@@ -135,6 +135,40 @@ func TestLoadCollectionAllowsDotSeparatedStartTime(t *testing.T) {
 	}
 }
 
+func TestLoadCollectionHeaderOnlyReturnsZeroRows(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "songs.csv")
+	content := "link,title,start_time,duration\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	rows, err := LoadCollection(path, CollectionOptions{DefaultDuration: 60})
+	if err != nil {
+		t.Fatalf("LoadCollection: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows, got %d", len(rows))
+	}
+}
+
+func TestLoadCollectionHeaderOnlyMissingRequiredHeaderStillErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "songs.csv")
+	content := "title,duration\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := LoadCollection(path, CollectionOptions{DefaultDuration: 60})
+	if err == nil {
+		t.Fatalf("expected error for header-only CSV missing required header, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing required header") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestWriteYAML_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "songs.yaml")
