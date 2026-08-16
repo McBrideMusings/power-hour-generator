@@ -1067,3 +1067,207 @@ func testTimelineModel(t *testing.T) Model {
 		},
 	}
 }
+
+func TestAddRowToEmptyYAMLCollectionMergesNewFields(t *testing.T) {
+	t.Helper()
+
+	root := t.TempDir()
+	pp, err := paths.Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+
+	// Create an empty YAML collection with declared columns
+	planPath := filepath.Join(root, "songs.yaml")
+	yamlContent := `columns: [link, start_time, duration]
+rows: []
+`
+	if err := os.WriteFile(planPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("write yaml plan: %v", err)
+	}
+
+	// Load the empty YAML collection
+	result, err := csvplan.LoadCollectionYAML(planPath, csvplan.CollectionOptions{})
+	if err != nil {
+		t.Fatalf("load yaml: %v", err)
+	}
+
+	// Build the collection with empty rows
+	coll := project.Collection{
+		Name:       "songs",
+		Plan:       planPath,
+		OutputDir:  "songs",
+		Config:     config.CollectionConfig{OutputDir: "songs"},
+		Rows:       result.Rows,
+		Headers:    result.Columns,
+		Defaults:   result.Defaults,
+		Delimiter:  ',',
+		PlanFormat: "yaml",
+	}
+
+	// Create a model with the empty collection
+	m := Model{
+		cfg: config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": coll.Config,
+			},
+			Cache: config.Default().Cache,
+		},
+		pp:              pp,
+		collections:     map[string]project.Collection{"songs": coll},
+		collectionNames: []string{"songs"},
+		activeView:      1,
+		collectionViews: []collectionView{{
+			name:     "songs",
+			planPath: planPath,
+			rows:     result.Rows,
+			columns:  discoverColumns(result.Rows, result.Columns),
+		}},
+	}
+
+	// Add a row with an undeclared field (mood)
+	newRow := csvplan.CollectionRow{
+		Index:           1,
+		Link:            "https://example.com/watch?v=1",
+		StartRaw:        "0:15",
+		Start:           15 * time.Second,
+		DurationSeconds: 60,
+		CustomFields: map[string]string{
+			"link":       "https://example.com/watch?v=1",
+			"start_time": "0:15",
+			"duration":   "60",
+			"mood":       "upbeat", // undeclared field
+		},
+	}
+
+	_, _ = m.addCollectionRow(0, newRow, addRowOutcome{})
+
+	// After add+write+reload, the collection headers should include 'mood'
+	reloadedColl := m.collections["songs"]
+	found := false
+	for _, h := range reloadedColl.Headers {
+		if h == "mood" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("after add+write+reload, Headers = %v, want 'mood' included", reloadedColl.Headers)
+	}
+
+	// Verify write/reload round trip: reload the YAML file fresh and check columns
+	reloaded, err := csvplan.LoadCollectionYAML(planPath, csvplan.CollectionOptions{})
+	if err != nil {
+		t.Fatalf("reload yaml: %v", err)
+	}
+	found = false
+	for _, col := range reloaded.Columns {
+		if col == "mood" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("after reload from disk, Columns = %v, want 'mood' included", reloaded.Columns)
+	}
+	if len(reloaded.Rows) != 1 {
+		t.Fatalf("after reload, Rows len = %d, want 1", len(reloaded.Rows))
+	}
+	if reloaded.Rows[0].CustomFields["mood"] != "upbeat" {
+		t.Fatalf("after reload, mood value = %q, want 'upbeat'", reloaded.Rows[0].CustomFields["mood"])
+	}
+}
+
+func TestReloadYAMLCollectionWithUnmergedColumnsMergesRowFields(t *testing.T) {
+	t.Helper()
+
+	root := t.TempDir()
+	pp, err := paths.Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+
+	// Create a YAML plan where columns omit a field present on a row
+	// (simulating a manual edit or data drift)
+	planPath := filepath.Join(root, "songs.yaml")
+	yamlContent := `columns: [link, start_time, duration]
+rows:
+  - link: "https://example.com/watch?v=1"
+    start_time: "0:15"
+    duration: "60"
+    mood: "upbeat"
+`
+	if err := os.WriteFile(planPath, []byte(yamlContent), 0o644); err != nil {
+		t.Fatalf("write yaml plan: %v", err)
+	}
+
+	// Load this collection (mood is in rows but not in columns)
+	result, err := csvplan.LoadCollectionYAML(planPath, csvplan.CollectionOptions{})
+	if err != nil {
+		t.Fatalf("load yaml: %v", err)
+	}
+
+	// Build the collection
+	coll := project.Collection{
+		Name:       "songs",
+		Plan:       planPath,
+		OutputDir:  "songs",
+		Config:     config.CollectionConfig{OutputDir: "songs"},
+		Rows:       result.Rows,
+		Headers:    result.Columns,
+		Defaults:   result.Defaults,
+		Delimiter:  ',',
+		PlanFormat: "yaml",
+	}
+
+	// Create a model
+	m := Model{
+		cfg: config.Config{
+			Collections: map[string]config.CollectionConfig{
+				"songs": coll.Config,
+			},
+			Cache: config.Default().Cache,
+		},
+		pp:              pp,
+		collections:     map[string]project.Collection{"songs": coll},
+		collectionNames: []string{"songs"},
+		activeView:      1,
+		collectionViews: []collectionView{{
+			name:     "songs",
+			planPath: planPath,
+			rows:     result.Rows,
+			columns:  discoverColumns(result.Rows, result.Columns),
+		}},
+	}
+
+	// Verify that initially, the collection's Headers do NOT include 'mood'
+	// (this is the state before the fix)
+	if len(m.collections["songs"].Headers) != 3 {
+		t.Fatalf("initial Headers len = %d, want 3 (link, start_time, duration)", len(m.collections["songs"].Headers))
+	}
+	moodFound := false
+	for _, h := range m.collections["songs"].Headers {
+		if h == "mood" {
+			moodFound = true
+		}
+	}
+	if moodFound {
+		t.Fatal("initial Headers should not include mood, but it does")
+	}
+
+	// Reload the collection (this is where reloadCollection is called)
+	m = reloadCollection(m, 0)
+
+	// After fix, the collection headers should now include 'mood'
+	// (because reloadCollection should merge row fields into Headers)
+	found := false
+	for _, h := range m.collections["songs"].Headers {
+		if h == "mood" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("after reloadCollection, Headers = %v, want 'mood' included", m.collections["songs"].Headers)
+	}
+}
