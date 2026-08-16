@@ -488,13 +488,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case doctorRequeryDoneMsg:
-		if m.doctorOverlay != nil {
+		if m.doctorOverlay != nil && m.doctorOverlay.requeryID == msg.identifier {
 			if msg.err != nil {
 				m.doctorOverlay.requerying = false
+				m.doctorOverlay.requeryID = ""
 				m.statusMsg = fmt.Sprintf("Requery failed: %v", msg.err)
 			} else {
 				normCfg := cache.LoadNormalizationConfig()
-				m.doctorOverlay.applyRequery(msg.info, normCfg)
+				m.doctorOverlay.applyRequery(msg.identifier, msg.info, normCfg)
 			}
 		}
 		return m, nil
@@ -2035,8 +2036,9 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 }
 
 type doctorRequeryDoneMsg struct {
-	info cache.RemoteIDInfo
-	err  error
+	identifier string
+	info       cache.RemoteIDInfo
+	err        error
 }
 
 func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
@@ -2055,17 +2057,20 @@ func (m Model) startDoctorRequery() (tea.Model, tea.Cmd) {
 		m.statusMsg = "No URL to requery"
 		return m, nil
 	}
+	identifier := item.finding.Identifier
 	m.doctorOverlay.requerying = true
+	m.doctorOverlay.requeryID = identifier
+	m.doctorOverlay.requeryCursor = m.doctorOverlay.cursor
 	pp := m.pp
 	return m, func() tea.Msg {
 		ctx := context.Background()
 		logger := log.New(io.Discard, "", 0)
 		svc, err := cache.NewService(ctx, pp, logger, nil)
 		if err != nil {
-			return doctorRequeryDoneMsg{err: err}
+			return doctorRequeryDoneMsg{identifier: identifier, err: err}
 		}
 		info, err := svc.QueryRemoteID(ctx, source)
-		return doctorRequeryDoneMsg{info: info, err: err}
+		return doctorRequeryDoneMsg{identifier: identifier, info: info, err: err}
 	}
 }
 
