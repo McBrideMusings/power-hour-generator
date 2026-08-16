@@ -40,20 +40,25 @@ type cacheDoctorOverlay struct {
 	// Requery state.
 	requerying    bool
 	requeryID     string // Identifier of the entry that was queried (snapshotted at dispatch)
-	requeryCursor int    // cursor position at dispatch, used as a tiebreaker when requeryID is empty
 	requeryStatus string // transient message after requery completes
 	tick          int
+
+	// instance distinguishes this overlay from any previous overlay instance
+	// (e.g. closed and reopened while a requery from the old one is still in
+	// flight). Set once at construction and never mutated.
+	instance int
 
 	termWidth  int
 	termHeight int
 }
 
-func newCacheDoctorOverlay(items []doctorItem, knownArtists []string, w, h int) cacheDoctorOverlay {
+func newCacheDoctorOverlay(items []doctorItem, knownArtists []string, w, h, instance int) cacheDoctorOverlay {
 	o := cacheDoctorOverlay{
 		findings:     items,
 		knownArtists: knownArtists,
 		termWidth:    w,
 		termHeight:   h,
+		instance:     instance,
 	}
 	o.loadCurrentEntry()
 	return o
@@ -195,16 +200,14 @@ func (o *cacheDoctorOverlay) applyRequery(identifier string, info cache.RemoteID
 }
 
 // resolveRequeryTarget finds the findings index the given identifier
-// (snapshotted at requery dispatch) should apply to. When identifier is
-// non-empty, it matches by identifier anywhere in findings. When identifier
-// is empty (entries with no stable Identifier), the requery is only applied
-// if the cursor has not moved since dispatch — otherwise it is discarded, to
-// avoid matching the first empty-identifier entry found.
+// (snapshotted at requery dispatch) should apply to, by matching identifier
+// anywhere in findings. An empty identifier has no stable entry to route to
+// and is never applied by cursor position — the caller is expected not to
+// have dispatched such a requery in the first place (see
+// Model.startDoctorRequery), but this is defence-in-depth against any other
+// caller of applyRequery.
 func (o *cacheDoctorOverlay) resolveRequeryTarget(identifier string) int {
 	if identifier == "" {
-		if o.cursor == o.requeryCursor && o.cursor >= 0 && o.cursor < len(o.findings) {
-			return o.cursor
-		}
 		return -1
 	}
 	for i := range o.findings {
