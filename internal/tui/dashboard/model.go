@@ -444,15 +444,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cvIdx := msg.collectionIdx
 		if cvIdx >= 0 && cvIdx < len(m.collectionViews) {
 			v := m.collectionViews[cvIdx]
+			// Captured before writeCollection runs below: writeCollection
+			// merges data-present fields into coll.Headers (MergeHeaders), so
+			// fetching coll after that call would make collectionHasField
+			// true for fields the collection never declared.
+			origColl := m.collections[m.collectionNames[cvIdx]]
 			// Find the target row by matching the link URL, not by index.
 			// This is safe against add/delete races that shift row positions.
 			rowFound := false
 			rowIndex := 0
+			sliceIdx := 0
 			for ri := range v.rows {
 				if strings.TrimSpace(v.rows[ri].Link) == msg.link {
 					rowIndex = v.rows[ri].Index
+					sliceIdx = ri
 					if msg.err == nil {
-						coll := m.collections[m.collectionNames[cvIdx]]
+						coll := origColl
 						if msg.title != "" && collectionHasField(coll, "title") {
 							v.rows[ri].CustomFields["title"] = msg.title
 						}
@@ -480,6 +487,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						note = "metadata updated"
 					}
 					m = m.setCollectionRowNote(cvIdx, rowIndex, note)
+				}
+				// Probe completion mirrors the add-time bridge: if title or
+				// artist is still empty, flow into inline edit on the first
+				// such field. Never stomp a mode the user is already in.
+				if m.mode == modeNormal {
+					if fieldIdx, ok := firstEmptyImportantField(m.collectionViews[cvIdx], sliceIdx); ok {
+						if collectionHasField(origColl, m.collectionViews[cvIdx].columns[fieldIdx].field) {
+							m = m.enterInlineEditOn(cvIdx, sliceIdx, fieldIdx)
+						}
+					}
 				}
 			} else if msg.err != nil {
 				m.statusMsg = fmt.Sprintf("Probe failed: %v", msg.err)
