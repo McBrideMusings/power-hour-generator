@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/tui"
 )
@@ -81,10 +82,10 @@ func renderHeader(m Model) string {
 }
 
 // renderSegmentsWithBudget renders each segment's styled text in order,
-// stopping once the running rune budget (termWidth) is exhausted. The
-// segment that would overflow the remaining budget is truncated with the
-// shared ellipsis helper instead of being dropped outright; segments after
-// it are omitted entirely. A non-positive width renders every segment
+// stopping once the running visual-width budget (termWidth) is exhausted.
+// The segment that would overflow the remaining budget is truncated with
+// the shared ellipsis helper instead of being dropped outright; segments
+// after it are omitted entirely. A non-positive width renders every segment
 // untruncated (used directly by tests and any width==0 call site).
 func renderSegmentsWithBudget(segments []headerSegment, width int) string {
 	var b strings.Builder
@@ -98,7 +99,7 @@ func renderSegmentsWithBudget(segments []headerSegment, width int) string {
 
 	remaining := width
 	for _, seg := range segments {
-		length := len([]rune(seg.text))
+		length := runewidth.StringWidth(seg.text)
 		if length <= remaining {
 			b.WriteString(seg.style.Render(seg.text))
 			remaining -= length
