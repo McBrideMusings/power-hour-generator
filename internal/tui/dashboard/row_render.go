@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"powerhour/internal/tui"
 )
 
 var cursorCharStyle = lipgloss.NewStyle().Reverse(true)
@@ -99,20 +101,8 @@ func renderEditCell(value string, cursor int, width int) string {
 // straddle the cut is dropped rather than split, which can leave the result
 // one column narrower than width — the caller pads to make up the gap.
 func truncateRunesToWidth(value string, width int) []rune {
-	if runewidth.StringWidth(value) <= width {
-		return []rune(value)
-	}
-
-	budget := width - 1 // reserve one column for the ellipsis
-	var content []rune
-	w := 0
-	for _, r := range value {
-		rw := runewidth.RuneWidth(r)
-		if w+rw > budget {
-			break
-		}
-		content = append(content, r)
-		w += rw
-	}
-	return append(content, '…')
+	return []rune(tui.TruncateToWidth(value, width, tui.TruncateOptions{
+		Ellipsis:          "…",
+		EllipsisWhenTight: true,
+	}))
 }
