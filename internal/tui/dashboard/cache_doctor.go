@@ -74,6 +74,21 @@ func (o *cacheDoctorOverlay) loadCurrentEntry() {
 	o.requeryStatus = ""
 }
 
+// rememberArtist appends the artist name to the knownArtists pool if not
+// already present (case-insensitive check). Trims whitespace and skips empty names.
+func (o *cacheDoctorOverlay) rememberArtist(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	for _, existing := range o.knownArtists {
+		if strings.EqualFold(existing, name) {
+			return
+		}
+	}
+	o.knownArtists = append(o.knownArtists, name)
+}
+
 func (o *cacheDoctorOverlay) activeText() string {
 	if o.activeField == 0 {
 		return o.editTitle

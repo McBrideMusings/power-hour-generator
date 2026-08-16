@@ -2121,6 +2121,7 @@ func (m Model) applyCurrentDoctorEntry() Model {
 		return m
 	}
 	o.applied++
+	o.rememberArtist(artist)
 	m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
 	m = reloadState(m)
 
