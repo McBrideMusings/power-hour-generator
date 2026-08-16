@@ -1357,6 +1357,10 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		m.deleteDesc = fmt.Sprintf("row %d %q", row.Index, title)
 		m.mode = modeConfirmDelete
 		v.confirmDelete = fmt.Sprintf("Delete %s? [y/n]", m.deleteDesc)
+		// The prompt consumes a line of the visible-row budget, which can
+		// shrink the window enough to scroll the cursor row (and therefore
+		// the prompt) out of view; re-anchor now that confirmDelete is set.
+		v.autoScroll()
 		m.collectionViews[cvIdx] = v
 		return m, nil
 
@@ -2183,8 +2187,10 @@ func (m Model) View() string {
 		case modeInput:
 			b.WriteString(m.input.view())
 		case modeConfirmDelete:
-			// Prompt is rendered inline beneath the target row by each view;
-			// keep the footer area empty so nothing appears at the bottom.
+			// Collection view renders the prompt inline beneath the target
+			// row (see collectionView.view), so its footer stays empty here.
+			// Cache and timeline views still render the prompt via their own
+			// renderHelpRow, which already handles this case.
 			b.WriteString("")
 		case modeInlineEdit:
 			b.WriteString("")
