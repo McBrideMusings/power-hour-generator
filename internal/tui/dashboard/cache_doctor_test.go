@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"powerhour/internal/cache"
 	"powerhour/internal/cachedoctor"
 )
@@ -146,5 +148,97 @@ func TestDoctorOverlayMarksOmissionsInline(t *testing.T) {
 	}
 	if got, max := countLines(out), 19-5; got > max {
 		t.Errorf("got %d lines, want <= %d", got, max)
+	}
+}
+
+// TestDoctorOverlayForwardDelete tests the Delete key handler for removing
+// the character to the right of the cursor. It verifies that multi-byte runes
+// are deleted whole and that the cursor position is preserved.
+func TestDoctorOverlayForwardDelete(t *testing.T) {
+	tests := []struct {
+		name           string
+		activeField    int
+		initialText    string
+		initialCursor  int
+		expectedText   string
+		expectedCursor int
+	}{
+		{
+			name:           "artist field: delete mid-string ASCII char",
+			activeField:    1,
+			initialText:    "Sample Artist",
+			initialCursor:  6, // cursor after "Sample" before space
+			expectedText:   "SampleArtist",
+			expectedCursor: 6,
+		},
+		{
+			name:           "title field: delete multi-byte rune",
+			activeField:    0,
+			initialText:    "Café Song",
+			initialCursor:  3, // cursor at start of 'é'
+			expectedText:   "Caf Song",
+			expectedCursor: 3,
+		},
+		{
+			name:           "title field: cursor at end of text (no-op)",
+			activeField:    0,
+			initialText:    "Test Title",
+			initialCursor:  len("Test Title"),
+			expectedText:   "Test Title",
+			expectedCursor: len("Test Title"),
+		},
+		{
+			name:           "artist field: delete at start of text",
+			activeField:    1,
+			initialText:    "Artist Name",
+			initialCursor:  0,
+			expectedText:   "rtist Name",
+			expectedCursor: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			o := newTestDoctorOverlay([]string{"Artist A"}, 80, 40)
+			o.activeField = tc.activeField
+
+			if tc.activeField == 0 {
+				o.editTitle = tc.initialText
+				o.titleCursor = tc.initialCursor
+				o.titleTouched = false
+			} else {
+				o.editArtist = tc.initialText
+				o.artistCursor = tc.initialCursor
+				o.artistTouched = false
+			}
+
+			// Simulate Delete key press
+			o.handleKey(tea.KeyMsg{Type: tea.KeyDelete})
+
+			// Verify the result
+			var gotText string
+			var gotCursor int
+
+			if tc.activeField == 0 {
+				gotText = o.editTitle
+				gotCursor = o.titleCursor
+				if !o.titleTouched && tc.initialCursor < len(tc.initialText) {
+					t.Errorf("titleTouched should be set when deletion occurs")
+				}
+			} else {
+				gotText = o.editArtist
+				gotCursor = o.artistCursor
+				if !o.artistTouched && tc.initialCursor < len(tc.initialText) {
+					t.Errorf("artistTouched should be set when deletion occurs")
+				}
+			}
+
+			if gotText != tc.expectedText {
+				t.Errorf("text mismatch: got %q, want %q", gotText, tc.expectedText)
+			}
+			if gotCursor != tc.expectedCursor {
+				t.Errorf("cursor mismatch: got %d, want %d", gotCursor, tc.expectedCursor)
+			}
+		})
 	}
 }
