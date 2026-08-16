@@ -3,6 +3,13 @@
 ## Running Tests
 
 ```bash
+# Run all tests via the admin runner
+admin test
+```
+
+Or use Go commands directly for more control:
+
+```bash
 # Run all tests
 go test ./...
 
