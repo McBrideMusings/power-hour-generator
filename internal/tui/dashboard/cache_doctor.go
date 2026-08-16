@@ -308,6 +308,14 @@ func fuzzyMatch(query, target string) bool {
 }
 
 // view renders the doctor content for the content area (not full-screen).
+//
+// Content is built as prioritised sections rather than one flat string cut
+// at the end. The never-droppable sections (edit fields, confidence
+// reasons, requery status, and — via the shared termHeight-5 budget — the
+// footer rendered separately by Model.View()) are measured first; whatever
+// budget remains is spent on the optional context fields (dropped first)
+// and the artist suggestion list (capped second). Any reduction is marked
+// inline at the point it occurred so nothing is silently dropped.
 func (o *cacheDoctorOverlay) view() string {
 	if len(o.findings) == 0 {
 		return faint.Render("No entries need attention.")
@@ -317,9 +325,9 @@ func (o *cacheDoctorOverlay) view() string {
 	entry := item.entry
 	finding := item.finding
 
-	var b strings.Builder
+	// pre: header through the ARTIST "New:" line — never droppable.
+	var pre []string
 
-	// Header line.
 	confStyle := confidenceStyle(finding.Confidence)
 	header := fmt.Sprintf("CACHE DOCTOR (%d of %d)", o.cursor+1, len(o.findings))
 	confBadge := confStyle.Render(confidenceLabel(finding.Confidence))
@@ -327,23 +335,18 @@ func (o *cacheDoctorOverlay) view() string {
 	if o.applied > 0 {
 		appliedStr = "  " + countGreen.Render(fmt.Sprintf("%d saved", o.applied))
 	}
-	b.WriteString(sectionLabel.Render(header) + "  " + confBadge + appliedStr)
-	b.WriteByte('\n')
+	pre = append(pre, sectionLabel.Render(header)+"  "+confBadge+appliedStr)
 
-	// Source info.
 	source := entry.Source
 	if source == "" && len(entry.Links) > 0 {
 		source = entry.Links[0]
 	}
 	if source != "" {
-		b.WriteString(faint.Render("SOURCE  ") + truncate(source, o.termWidth-12))
-		b.WriteByte('\n')
+		pre = append(pre, faint.Render("SOURCE  ")+truncate(source, o.termWidth-12))
 	}
-	b.WriteString(faint.Render("FILE    ") + truncate(entry.CachedPath, o.termWidth-12))
-	b.WriteByte('\n')
-	b.WriteByte('\n')
+	pre = append(pre, faint.Render("FILE    ")+truncate(entry.CachedPath, o.termWidth-12))
+	pre = append(pre, "")
 
-	// Title field.
 	titleLabel := "TITLE"
 	if o.activeField == 0 {
 		titleLabel = editStyle.Render(titleLabel)
@@ -351,16 +354,15 @@ func (o *cacheDoctorOverlay) view() string {
 		titleLabel = bold.Render(titleLabel)
 	}
 	currentTitle := displayBlank(finding.CurrentTitle)
-	fmt.Fprintf(&b, " %s\n", titleLabel)
-	fmt.Fprintf(&b, "   Current:  %s\n", faint.Render(currentTitle))
+	pre = append(pre, " "+titleLabel)
+	pre = append(pre, "   Current:  "+faint.Render(currentTitle))
 	if o.activeField == 0 {
-		fmt.Fprintf(&b, "   New:      %s\n", renderEditField(o.editTitle, o.titleCursor))
+		pre = append(pre, "   New:      "+renderEditField(o.editTitle, o.titleCursor))
 	} else {
-		fmt.Fprintf(&b, "   New:      %s\n", o.editTitle)
+		pre = append(pre, "   New:      "+o.editTitle)
 	}
-	b.WriteByte('\n')
+	pre = append(pre, "")
 
-	// Artist field.
 	artistLabel := "ARTIST"
 	if o.activeField == 1 {
 		artistLabel = editStyle.Render(artistLabel)
@@ -368,69 +370,180 @@ func (o *cacheDoctorOverlay) view() string {
 		artistLabel = bold.Render(artistLabel)
 	}
 	currentArtist := displayBlank(finding.CurrentArtist)
-	fmt.Fprintf(&b, " %s\n", artistLabel)
-	fmt.Fprintf(&b, "   Current:  %s\n", faint.Render(currentArtist))
+	pre = append(pre, " "+artistLabel)
+	pre = append(pre, "   Current:  "+faint.Render(currentArtist))
 	if o.activeField == 1 {
-		fmt.Fprintf(&b, "   New:      %s\n", renderEditField(o.editArtist, o.artistCursor))
-		if suggestions := o.artistSuggestions(); len(suggestions) > 0 {
-			for i, s := range suggestions {
-				prefix := "   "
-				if i == 0 {
-					prefix = " → "
-					s += faint.Render("  (Enter to accept)")
-				}
-				fmt.Fprintf(&b, "%s%s\n", faint.Render(prefix), faint.Render(s))
-			}
-		}
+		pre = append(pre, "   New:      "+renderEditField(o.editArtist, o.artistCursor))
 	} else {
-		fmt.Fprintf(&b, "   New:      %s\n", o.editArtist)
+		pre = append(pre, "   New:      "+o.editArtist)
 	}
-	b.WriteByte('\n')
+	artistNewIdx := len(pre) - 1
 
-	// Context section.
-	hasContext := entry.Uploader != "" || entry.Channel != "" || entry.Track != "" || entry.Album != ""
-	if hasContext {
-		b.WriteString(bold.Render(" CONTEXT"))
-		b.WriteByte('\n')
-		if entry.Uploader != "" {
-			fmt.Fprintf(&b, "   Uploader:  %s\n", entry.Uploader)
-		}
-		if entry.Channel != "" {
-			fmt.Fprintf(&b, "   Channel:   %s\n", entry.Channel)
-		}
-		if entry.Track != "" {
-			fmt.Fprintf(&b, "   Track:     %s\n", entry.Track)
-		}
-		if entry.Album != "" {
-			fmt.Fprintf(&b, "   Album:     %s\n", entry.Album)
-		}
-		b.WriteByte('\n')
-	}
-
-	// Reasons.
+	// Required tail: reasons + requery status. Always present when non-empty.
+	var reasonsRequery []string
 	if humanReasons := humanizeReasons(finding.Reasons); humanReasons != "" {
-		b.WriteString(faint.Render(" " + humanReasons))
-		b.WriteByte('\n')
+		reasonsRequery = append(reasonsRequery, faint.Render(" "+humanReasons))
 	}
-
-	// Requery spinner or status.
 	if o.requerying {
-		b.WriteString(countYellow.Render(busySpinner(o.tick) + " Fetching metadata from yt-dlp..."))
-		b.WriteByte('\n')
+		reasonsRequery = append(reasonsRequery, countYellow.Render(busySpinner(o.tick)+" Fetching metadata from yt-dlp..."))
 	} else if o.requeryStatus != "" {
-		b.WriteString(faint.Render(" " + o.requeryStatus))
-		b.WriteByte('\n')
+		reasonsRequery = append(reasonsRequery, faint.Render(" "+o.requeryStatus))
 	}
 
-	output := b.String()
-	if o.termHeight > 0 {
-		maxLines := o.termHeight - 5
-		if maxLines > 0 && strings.Count(output, "\n") > maxLines {
-			parts := strings.SplitN(output, "\n", maxLines+1)
-			output = strings.Join(parts[:maxLines], "\n") + "\n"
+	// Optional groups, in drop order: context first, suggestions second.
+	contextFull := o.contextSectionLines(entry)
+	suggestionFull := o.suggestionDisplayLines()
+
+	capped := o.termHeight > 0
+	maxLines := 0
+	if capped {
+		maxLines = o.termHeight - 5
+		if maxLines < 0 {
+			maxLines = 0
 		}
 	}
-	return output
+
+	// requiredCount = pre + the always-present blank separator + reasons/requery tail.
+	requiredCount := len(pre) + 1 + len(reasonsRequery)
+	budget := 0
+	if capped {
+		budget = maxLines - requiredCount
+	}
+
+	// Allocate to context (dropped first).
+	var contextOut []string
+	if len(contextFull) > 0 {
+		switch {
+		case !capped || budget >= len(contextFull):
+			contextOut = contextFull
+			if capped {
+				budget -= len(contextFull)
+			}
+		case budget >= 1:
+			n := countContextFields(entry)
+			contextOut = []string{faint.Render(fmt.Sprintf(" CONTEXT hidden (%d field%s) — resize to view", n, pluralSuffix(n)))}
+			budget--
+		default:
+			n := countContextFields(entry)
+			pre[artistNewIdx] += faint.Render(fmt.Sprintf("  CONTEXT hidden (%d field%s)", n, pluralSuffix(n)))
+		}
+	}
+
+	// Allocate to suggestions (capped second, only after context is spent).
+	var suggestOut []string
+	total := len(suggestionFull)
+	if total > 0 {
+		switch {
+		case !capped || budget >= total:
+			suggestOut = suggestionFull
+			if capped {
+				budget -= total
+			}
+		case budget > 0:
+			shown := budget
+			suggestOut = append([]string{}, suggestionFull[:shown]...)
+			suggestOut[len(suggestOut)-1] += faint.Render(fmt.Sprintf("  … %d more", total-shown))
+			budget = 0
+		default:
+			pre[artistNewIdx] += faint.Render(fmt.Sprintf("  … %d more", total))
+		}
+	}
+
+	all := make([]string, 0, len(pre)+len(suggestOut)+1+len(contextOut)+len(reasonsRequery))
+	all = append(all, pre...)
+	all = append(all, suggestOut...)
+	all = append(all, "")
+	all = append(all, contextOut...)
+	all = append(all, reasonsRequery...)
+
+	if capped {
+		return clampToLines(all, maxLines)
+	}
+	return clampToLines(all, -1)
+}
+
+// contextSectionLines returns the CONTEXT block (header, populated fields,
+// trailing blank separator) or nil when the entry has no context fields.
+func (o *cacheDoctorOverlay) contextSectionLines(entry cache.Entry) []string {
+	if entry.Uploader == "" && entry.Channel == "" && entry.Track == "" && entry.Album == "" {
+		return nil
+	}
+	var lines []string
+	lines = append(lines, bold.Render(" CONTEXT"))
+	if entry.Uploader != "" {
+		lines = append(lines, fmt.Sprintf("   Uploader:  %s", entry.Uploader))
+	}
+	if entry.Channel != "" {
+		lines = append(lines, fmt.Sprintf("   Channel:   %s", entry.Channel))
+	}
+	if entry.Track != "" {
+		lines = append(lines, fmt.Sprintf("   Track:     %s", entry.Track))
+	}
+	if entry.Album != "" {
+		lines = append(lines, fmt.Sprintf("   Album:     %s", entry.Album))
+	}
+	lines = append(lines, "")
+	return lines
+}
+
+func countContextFields(entry cache.Entry) int {
+	n := 0
+	if entry.Uploader != "" {
+		n++
+	}
+	if entry.Channel != "" {
+		n++
+	}
+	if entry.Track != "" {
+		n++
+	}
+	if entry.Album != "" {
+		n++
+	}
+	return n
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// suggestionDisplayLines renders the artist autocomplete suggestion list
+// as pre-styled lines, matching the layout previously inlined in view().
+func (o *cacheDoctorOverlay) suggestionDisplayLines() []string {
+	if o.activeField != 1 {
+		return nil
+	}
+	suggestions := o.artistSuggestions()
+	if len(suggestions) == 0 {
+		return nil
+	}
+	lines := make([]string, len(suggestions))
+	for i, s := range suggestions {
+		prefix := "   "
+		text := s
+		if i == 0 {
+			prefix = " → "
+			text += faint.Render("  (Enter to accept)")
+		}
+		lines[i] = faint.Render(prefix) + faint.Render(text)
+	}
+	return lines
+}
+
+// clampToLines joins lines with newlines, hard-clamping to max lines when
+// max >= 0. max < 0 means no cap. Guarantees the returned string's newline
+// count never exceeds max, regardless of how the caller allocated budget.
+func clampToLines(lines []string, max int) string {
+	if max >= 0 && len(lines) > max {
+		lines = lines[:max]
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // doctorFooter returns the footer text for the doctor overlay.
