@@ -94,7 +94,7 @@ downloads:
 
 `filename_template` controls how cached source files are named. See [Templates](/guide/templates) for available tokens.
 
-`global_cache` enables a shared cache at `~/.powerhour/cache/` so multiple projects can reuse the same downloaded media. Defaults to `true`. Set to `false` to keep downloads in the project-local `cache/` directory. Use `powerhour migrate` to move existing local cache files into the global cache.
+`global_cache` enables a shared cache at `~/.powerhour/cache/` so multiple projects can reuse the same downloaded media. Defaults to `true`. Set to `false` to keep downloads in the project-local `cache/` directory. Use `powerhour library import` to move existing local cache files into the library.
 
 ## Tool Requirements
 
