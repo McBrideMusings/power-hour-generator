@@ -57,21 +57,33 @@ func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResu
 	opts = normalizeYAMLOpts(opts)
 
 	var plan yamlPlan
-	if err := yaml.Unmarshal(data, &plan); err == nil && plan.Columns != nil {
-		for i, c := range plan.Columns {
-			plan.Columns[i] = normalizeHeader(c)
+	err := yaml.Unmarshal(data, &plan)
+
+	// Check if unmarshal succeeded
+	if err == nil {
+		// Structured format: columns key present
+		if plan.Columns != nil {
+			for i, c := range plan.Columns {
+				plan.Columns[i] = normalizeHeader(c)
+			}
+			defaults := normalizeYAMLDefaults(plan.Defaults)
+			rows, errs := parseYAMLRows(plan.Rows, defaults, opts)
+			result := YAMLResult{Columns: plan.Columns, Defaults: defaults, Rows: rows}
+			if len(errs) > 0 {
+				return result, errs
+			}
+			return result, nil
 		}
-		defaults := normalizeYAMLDefaults(plan.Defaults)
-		rows, errs := parseYAMLRows(plan.Rows, defaults, opts)
-		result := YAMLResult{Columns: plan.Columns, Defaults: defaults, Rows: rows}
-		if len(errs) > 0 {
-			return result, errs
+
+		// Mapping with rows but no columns key - this is an error
+		if plan.Rows != nil {
+			return YAMLResult{}, errors.New("YAML plan has rows but is missing required columns key")
 		}
-		return result, nil
 	}
 
-	rows, err := loadCollectionYAMLBareList(data, opts)
-	return YAMLResult{Rows: rows}, err
+	// Fall through to bare list parser for backward compat
+	rows, bareErr := loadCollectionYAMLBareList(data, opts)
+	return YAMLResult{Rows: rows}, bareErr
 }
 
 // loadCollectionYAMLBareList handles the legacy bare-list format (a YAML list
