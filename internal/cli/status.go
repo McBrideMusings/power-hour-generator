@@ -227,6 +227,7 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 	for _, collName := range sortedNames {
 		coll := collections[collName]
 		summary := collectionSummary{Name: collName, Total: len(coll.Rows)}
+		fades := project.EffectiveCollectionFades(cfg, coll)
 
 		for _, collRow := range coll.Rows {
 			r := collRow.ToRow()
@@ -281,6 +282,14 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 				outputDir = filepath.Join(pp.SegmentsDir, outputDir)
 			}
 			seg.OutputPath = filepath.Join(outputDir, render.SegmentBaseName(tmpl, seg)+".mp4")
+
+			// Apply any timeline sequence-entry fade override for this row,
+			// after the output path is computed — matches the ordering the
+			// dashboard uses, so segment filenames stay unaffected by fades.
+			if fadeVals, ok := fades[r.Index]; ok {
+				seg.Clip.FadeInSeconds = fadeVals[0]
+				seg.Clip.FadeOutSeconds = fadeVals[1]
+			}
 
 			// Render status
 			renderStatus := "missing"

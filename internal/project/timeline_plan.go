@@ -200,3 +200,33 @@ func ApplySequenceEntryFades(cfg config.Config, clips []CollectionClip) {
 		clips[idx].Clip.FadeOutSeconds = fadeOut
 	}
 }
+
+// EffectiveCollectionFades resolves the per-row fade-in/fade-out seconds that
+// the real render job would apply to each row of coll, including any
+// timeline sequence-entry overrides layered on top of the collection's own
+// fade config via ApplySequenceEntryFades. This is the single shared
+// implementation of that resolution — used by both `status` and the TUI
+// dashboard so the two surfaces agree on what a row's staleness hash should
+// include.
+func EffectiveCollectionFades(cfg config.Config, coll Collection) map[int][2]float64 {
+	collCfg := cfg.Collections[coll.Name]
+	baseIn, baseOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
+
+	clips := make([]CollectionClip, len(coll.Rows))
+	for i, row := range coll.Rows {
+		clip := Clip{
+			ClipType:       ClipType(coll.Name),
+			Row:            row.ToRow(),
+			FadeInSeconds:  baseIn,
+			FadeOutSeconds: baseOut,
+		}
+		clips[i] = CollectionClip{CollectionName: coll.Name, Clip: clip}
+	}
+	ApplySequenceEntryFades(cfg, clips)
+
+	fades := make(map[int][2]float64, len(clips))
+	for _, cc := range clips {
+		fades[cc.Clip.Row.Index] = [2]float64{cc.Clip.FadeInSeconds, cc.Clip.FadeOutSeconds}
+	}
+	return fades
+}
