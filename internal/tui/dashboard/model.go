@@ -3316,6 +3316,15 @@ func reloadCollection(m Model, cvIdx int) Model {
 		err = yamlErr
 	} else {
 		rows, err = csvplan.LoadCollection(coll.Plan, opts)
+		if err == nil {
+			readHeaders, delimiter, err2 := csvplan.ReadHeaders(coll.Plan)
+			if err2 != nil {
+				err = err2
+			} else {
+				coll.Headers = csvplan.MergeHeaders(readHeaders, rows)
+				coll.Delimiter = delimiter
+			}
+		}
 	}
 
 	if err != nil {
