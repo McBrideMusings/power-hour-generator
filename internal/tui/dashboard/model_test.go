@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1107,6 +1108,88 @@ func TestMetadataProbeEmptyResultSkipsInlineEditWhenFieldNotDeclared(t *testing.
 	m.collectionViews[0].columns = discoverColumns(m.collectionViews[0].rows, coll.Headers)
 
 	gotModel, _ := m.Update(metadataProbeMsg{collectionIdx: 0, link: blankLink, title: "", artist: "", err: nil})
+	got := gotModel.(Model)
+
+	if got.mode != modeNormal {
+		t.Fatalf("mode = %v, want modeNormal (title/artist not declared on this collection)", got.mode)
+	}
+	if got.collectionViews[0].editing {
+		t.Fatalf("collectionViews[0].editing = true, want false")
+	}
+}
+
+func TestMetadataProbeFailureFlowsIntoInlineEdit(t *testing.T) {
+	m := testCollectionModel(t)
+
+	blankLink := "https://example.com/watch?v=blank"
+	blankRow := csvplan.CollectionRow{
+		Index: 2,
+		Link:  blankLink,
+		CustomFields: map[string]string{
+			"title":      "",
+			"artist":     "",
+			"link":       blankLink,
+			"start_time": "",
+			"duration":   "",
+		},
+	}
+	m.collectionViews[0].rows = append(m.collectionViews[0].rows, blankRow)
+	coll := m.collections["songs"]
+	coll.Rows = append([]csvplan.CollectionRow(nil), m.collectionViews[0].rows...)
+	m.collections["songs"] = coll
+
+	// Send probe message with error (network failure, yt-dlp error, etc.)
+	gotModel, _ := m.Update(metadataProbeMsg{collectionIdx: 0, link: blankLink, title: "", artist: "", err: fmt.Errorf("network error")})
+	got := gotModel.(Model)
+
+	if got.mode != modeInlineEdit {
+		t.Fatalf("mode = %v, want modeInlineEdit", got.mode)
+	}
+	if !got.collectionViews[0].editing {
+		t.Fatalf("collectionViews[0].editing = false, want true")
+	}
+	if got.collectionViews[0].cursor != 1 {
+		t.Fatalf("cursor = %d, want 1 (the blank row)", got.collectionViews[0].cursor)
+	}
+	titleIdx := -1
+	for i, col := range got.collectionViews[0].columns {
+		if col.field == "title" {
+			titleIdx = i
+			break
+		}
+	}
+	if titleIdx == -1 {
+		t.Fatalf("no title column found")
+	}
+	if got.editFieldIdx != titleIdx {
+		t.Fatalf("editFieldIdx = %d, want %d (title column)", got.editFieldIdx, titleIdx)
+	}
+}
+
+func TestMetadataProbeFailureSkipsInlineEditWhenFieldNotDeclared(t *testing.T) {
+	m := testCollectionModel(t)
+
+	blankLink := "https://example.com/watch?v=blank"
+	blankRow := csvplan.CollectionRow{
+		Index: 2,
+		Link:  blankLink,
+		CustomFields: map[string]string{
+			"link":       blankLink,
+			"start_time": "",
+			"duration":   "",
+		},
+	}
+	m.collectionViews[0].rows = append(m.collectionViews[0].rows, blankRow)
+
+	coll := m.collections["songs"]
+	coll.Headers = []string{"link", "start_time", "duration"}
+	coll.Rows = append([]csvplan.CollectionRow(nil), m.collectionViews[0].rows...)
+	m.collections["songs"] = coll
+	m.collectionViews[0].columns = discoverColumns(m.collectionViews[0].rows, coll.Headers)
+
+	// Send probe message with error, even though title/artist would be empty.
+	// Since they're not declared on this collection, inline edit should not happen.
+	gotModel, _ := m.Update(metadataProbeMsg{collectionIdx: 0, link: blankLink, title: "", artist: "", err: fmt.Errorf("network error")})
 	got := gotModel.(Model)
 
 	if got.mode != modeNormal {
