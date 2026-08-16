@@ -18,4 +18,3 @@ tmp/
 .superpowers/
 docs/superpowers/
 *.local.*
-.claude/skills/verify/
