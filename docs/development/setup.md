@@ -35,7 +35,18 @@ export PATH="$HOME/go/bin:$PATH"
 Add this to your shell config (`~/.zshrc`, `~/.bashrc`, etc.) to make it permanent.
 :::
 
-## Commands
+## Common Commands
+
+| Category | Command | Description |
+|----------|---------|-------------|
+| **Build** | `admin build` | Build CLI binary via admin runner |
+| **Test** | `admin test` | Run full test suite via admin runner |
+| **Lint** | `admin vet` | Static analysis via admin runner |
+| **Format** | `admin fmt` | Format all code via admin runner |
+| **Docs** | `cd docs && npm run docs:dev` | Start docs dev server (port 5193) |
+| **Docs** | `cd docs && npm run docs:build` | Build docs for production |
+
+**Raw Go equivalents** (for granular control):
 
 | Category | Command | Description |
 |----------|---------|-------------|
@@ -45,8 +56,6 @@ Add this to your shell config (`~/.zshrc`, `~/.bashrc`, etc.) to make it permane
 | **Test** | `go test ./internal/render/...` | Run a single package's tests |
 | **Lint** | `go vet ./...` | Static analysis |
 | **Format** | `gofmt -w $(find cmd internal pkg -name '*.go')` | Format all Go files |
-| **Docs** | `cd docs && npm run docs:dev` | Start docs dev server (port 5193) |
-| **Docs** | `cd docs && npm run docs:build` | Build docs for production |
 
 ## Project Structure
 
