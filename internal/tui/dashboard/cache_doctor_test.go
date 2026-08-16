@@ -242,3 +242,126 @@ func TestDoctorOverlayForwardDelete(t *testing.T) {
 		})
 	}
 }
+
+// twoItemDoctorOverlay builds a doctor overlay with two entries carrying
+// distinct stable Identifiers, for tests that need to move the cursor
+// between entries mid-requery.
+func twoItemDoctorOverlay() cacheDoctorOverlay {
+	items := []doctorItem{
+		{
+			entry: cache.Entry{Identifier: "id-0", Source: "https://youtube.com/watch?v=aaa000"},
+			finding: cachedoctor.Finding{
+				Identifier:     "id-0",
+				CurrentTitle:   "old title 0",
+				CurrentArtist:  "old artist 0",
+				ProposedTitle:  "Proposed Title 0",
+				ProposedArtist: "Proposed Artist 0",
+				Confidence:     "medium",
+			},
+		},
+		{
+			entry: cache.Entry{Identifier: "id-1", Source: "https://youtube.com/watch?v=bbb111"},
+			finding: cachedoctor.Finding{
+				Identifier:     "id-1",
+				CurrentTitle:   "old title 1",
+				CurrentArtist:  "old artist 1",
+				ProposedTitle:  "Proposed Title 1",
+				ProposedArtist: "Proposed Artist 1",
+				Confidence:     "medium",
+			},
+		},
+	}
+	return newCacheDoctorOverlay(items, nil, 80, 40)
+}
+
+// TestDoctorOverlayRequeryIgnoresStaleTarget covers the race: a requery is
+// dispatched against entry 0, the cursor moves to entry 1 before the result
+// lands, and applyRequery must write the result into entry 0 (by
+// identifier) rather than clobbering whatever is now under the cursor
+// (entry 1) or the edit buffers currently on screen.
+func TestDoctorOverlayRequeryIgnoresStaleTarget(t *testing.T) {
+	o := twoItemDoctorOverlay()
+
+	// Snapshot entry 0's identifier as startDoctorRequery would.
+	queriedID := o.findings[0].finding.Identifier
+	o.requerying = true
+	o.requeryID = queriedID
+	o.requeryCursor = o.cursor // 0
+
+	// Cursor moves to entry 1 (and the visible edit buffers follow) before
+	// the async requery result arrives.
+	o.cursor = 1
+	o.loadCurrentEntry()
+	entry1TitleBefore := o.editTitle
+	entry1ArtistBefore := o.editArtist
+
+	normCfg := cache.NormalizationConfig{}
+	info := cache.RemoteIDInfo{Title: "Fresh Title", Artist: "Fresh Artist"}
+	o.applyRequery(queriedID, info, normCfg)
+
+	// Entry 0 (queried) received the update.
+	if o.findings[0].finding.ProposedTitle != "Fresh Title" {
+		t.Errorf("entry 0 ProposedTitle = %q, want %q", o.findings[0].finding.ProposedTitle, "Fresh Title")
+	}
+	if o.findings[0].finding.ProposedArtist != "Fresh Artist" {
+		t.Errorf("entry 0 ProposedArtist = %q, want %q", o.findings[0].finding.ProposedArtist, "Fresh Artist")
+	}
+
+	// Entry 1 (now under the cursor) is untouched.
+	if o.findings[1].finding.ProposedTitle != "Proposed Title 1" {
+		t.Errorf("entry 1 ProposedTitle mutated: got %q", o.findings[1].finding.ProposedTitle)
+	}
+	if o.findings[1].finding.ProposedArtist != "Proposed Artist 1" {
+		t.Errorf("entry 1 ProposedArtist mutated: got %q", o.findings[1].finding.ProposedArtist)
+	}
+
+	// The visible edit buffers (for entry 1) are unchanged by entry 0's result.
+	if o.editTitle != entry1TitleBefore {
+		t.Errorf("editTitle changed: got %q, want unchanged %q", o.editTitle, entry1TitleBefore)
+	}
+	if o.editArtist != entry1ArtistBefore {
+		t.Errorf("editArtist changed: got %q, want unchanged %q", o.editArtist, entry1ArtistBefore)
+	}
+
+	// requerying/requeryID cleared on every exit path.
+	if o.requerying {
+		t.Error("requerying should be cleared after applyRequery")
+	}
+	if o.requeryID != "" {
+		t.Errorf("requeryID should be cleared, got %q", o.requeryID)
+	}
+}
+
+// TestDoctorOverlayRequeryDiscardsUnknownIdentifier covers the case where
+// the queried entry has vanished from findings entirely (e.g. removed)
+// before the result arrives: the result must be discarded, not applied to
+// whatever is under the cursor, and requerying must still clear so the
+// overlay doesn't freeze (handleKey swallows all input while requerying).
+func TestDoctorOverlayRequeryDiscardsUnknownIdentifier(t *testing.T) {
+	o := twoItemDoctorOverlay()
+	o.requerying = true
+	o.requeryID = "id-gone"
+	o.requeryCursor = 0
+
+	entry0TitleBefore := o.findings[0].finding.ProposedTitle
+	entry0ArtistBefore := o.findings[0].finding.ProposedArtist
+	entry1TitleBefore := o.findings[1].finding.ProposedTitle
+	entry1ArtistBefore := o.findings[1].finding.ProposedArtist
+
+	normCfg := cache.NormalizationConfig{}
+	info := cache.RemoteIDInfo{Title: "Should Not Apply", Artist: "Should Not Apply"}
+	o.applyRequery("id-gone", info, normCfg)
+
+	if o.findings[0].finding.ProposedTitle != entry0TitleBefore || o.findings[0].finding.ProposedArtist != entry0ArtistBefore {
+		t.Errorf("entry 0 mutated by discarded requery: got title=%q artist=%q", o.findings[0].finding.ProposedTitle, o.findings[0].finding.ProposedArtist)
+	}
+	if o.findings[1].finding.ProposedTitle != entry1TitleBefore || o.findings[1].finding.ProposedArtist != entry1ArtistBefore {
+		t.Errorf("entry 1 mutated by discarded requery: got title=%q artist=%q", o.findings[1].finding.ProposedTitle, o.findings[1].finding.ProposedArtist)
+	}
+	if o.requerying {
+		t.Error("requerying should be cleared after a discarded applyRequery")
+	}
+	if o.requeryStatus == "" {
+		t.Error("requeryStatus should explain the discard")
+	}
+}

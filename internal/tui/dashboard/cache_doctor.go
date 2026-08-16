@@ -39,6 +39,8 @@ type cacheDoctorOverlay struct {
 
 	// Requery state.
 	requerying    bool
+	requeryID     string // Identifier of the entry that was queried (snapshotted at dispatch)
+	requeryCursor int    // cursor position at dispatch, used as a tiebreaker when requeryID is empty
 	requeryStatus string // transient message after requery completes
 	tick          int
 
@@ -106,12 +108,26 @@ func (o *cacheDoctorOverlay) setActiveCursor(cur int) {
 	}
 }
 
-func (o *cacheDoctorOverlay) applyRequery(info cache.RemoteIDInfo, normCfg cache.NormalizationConfig) {
-	if o.cursor < 0 || o.cursor >= len(o.findings) {
+// applyRequery applies a completed yt-dlp requery result to the entry it was
+// queried against, identified by identifier (the cache index's stable key,
+// snapshotted at dispatch time in startDoctorRequery). If the entry under
+// the cursor is no longer the one that was queried, the result is routed to
+// wherever that identifier now lives in findings (without touching the
+// currently-displayed edit buffers), or discarded entirely if the entry is
+// gone. This guards against the cursor moving while an async requery is in
+// flight and the result landing on the wrong entry.
+func (o *cacheDoctorOverlay) applyRequery(identifier string, info cache.RemoteIDInfo, normCfg cache.NormalizationConfig) {
+	defer func() {
 		o.requerying = false
+		o.requeryID = ""
+	}()
+
+	targetIdx := o.resolveRequeryTarget(identifier)
+	if targetIdx < 0 {
+		o.requeryStatus = "requery discarded (entry changed)"
 		return
 	}
-	item := &o.findings[o.cursor]
+	item := &o.findings[targetIdx]
 
 	item.entry.Uploader = firstNonEmpty(info.Uploader, item.entry.Uploader)
 	item.entry.Channel = firstNonEmpty(info.Channel, item.entry.Channel)
@@ -137,6 +153,16 @@ func (o *cacheDoctorOverlay) applyRequery(info cache.RemoteIDInfo, normCfg cache
 	item.finding.Reasons = result.Reasons
 
 	changed := result.Title != oldTitle || result.Artist != oldArtist
+
+	if targetIdx != o.cursor {
+		// The queried entry is no longer displayed; update its data only,
+		// leave the currently-displayed edit buffers untouched.
+		if changed {
+			o.requeryStatus = "updated a different entry from yt-dlp"
+		}
+		return
+	}
+
 	if !o.titleTouched {
 		o.editTitle = result.Title
 		o.titleCursor = len(o.editTitle)
@@ -151,7 +177,27 @@ func (o *cacheDoctorOverlay) applyRequery(info cache.RemoteIDInfo, normCfg cache
 	} else {
 		o.requeryStatus = "yt-dlp returned same metadata"
 	}
-	o.requerying = false
+}
+
+// resolveRequeryTarget finds the findings index the given identifier
+// (snapshotted at requery dispatch) should apply to. When identifier is
+// non-empty, it matches by identifier anywhere in findings. When identifier
+// is empty (entries with no stable Identifier), the requery is only applied
+// if the cursor has not moved since dispatch — otherwise it is discarded, to
+// avoid matching the first empty-identifier entry found.
+func (o *cacheDoctorOverlay) resolveRequeryTarget(identifier string) int {
+	if identifier == "" {
+		if o.cursor == o.requeryCursor && o.cursor >= 0 && o.cursor < len(o.findings) {
+			return o.cursor
+		}
+		return -1
+	}
+	for i := range o.findings {
+		if o.findings[i].finding.Identifier == identifier {
+			return i
+		}
+	}
+	return -1
 }
 
 // handleKey processes input for the doctor overlay.
