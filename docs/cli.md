@@ -244,9 +244,11 @@ Exports the project configuration, all collection rows, and optionally the resol
 Register a video into the project cache.
 
 ```bash
+powerhour cache <file-or-id> [flags]
 powerhour cache add <file-or-id> [flags]
-go run ./cmd/powerhour cache add <file-or-id> [flags]
 ```
+
+Both spellings work. The `cache` parent command carries the add handler directly, so the flat form (used in the examples below and in `--help`) and the explicit `cache add` subcommand are equivalent.
 
 | Flag | Description |
 |------|-------------|
