@@ -13,6 +13,11 @@ import (
 const (
 	updateCheckFile = "update_check.json"
 	updateCheckTTL  = 24 * time.Hour
+	// updateCheckFailedTTL is the backoff applied to a failed check. It is
+	// shorter than the success TTL so a persistently-failing check (e.g.
+	// ffmpeg not installed via Homebrew) is retried on a schedule rather
+	// than being permanently stale and re-run on every invocation.
+	updateCheckFailedTTL = 1 * time.Hour
 )
 
 // UpdateCheckCache stores the results of periodic update checks.
@@ -29,6 +34,22 @@ type UpdateCheckEntry struct {
 	NotifiedVersion string    `json:"notified_version,omitempty"`
 	CheckFailed     bool      `json:"check_failed,omitempty"`
 	InstallMethod   string    `json:"install_method,omitempty"`
+}
+
+// ttl returns the freshness window for this entry: the short backoff when
+// the last check failed, otherwise the normal success TTL.
+func (e UpdateCheckEntry) ttl() time.Duration {
+	if e.CheckFailed {
+		return updateCheckFailedTTL
+	}
+	return updateCheckTTL
+}
+
+// fresh reports whether this entry is still within its freshness window as
+// of now. A failed entry is fresh (and therefore cached, no re-check) until
+// its backoff elapses, not forever and not never.
+func (e UpdateCheckEntry) fresh(now time.Time) bool {
+	return now.Sub(e.CheckedAt) < e.ttl()
 }
 
 // UpdateNotice represents an available update for a tool.
@@ -99,8 +120,9 @@ func saveUpdateCheckCache(cache UpdateCheckCache) {
 
 // CheckForUpdates checks whether newer versions of detected tools are
 // available. It uses a 24-hour cache to avoid hitting the network on every
-// run. When the cache is stale or a previous check failed, it performs a
-// fresh check. All errors are swallowed — this never blocks the CLI.
+// run; a failed check uses a shorter backoff (updateCheckFailedTTL) so a
+// persistently-failing check retries on a schedule instead of on every
+// invocation. All errors are swallowed — this never blocks the CLI.
 func CheckForUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
 	cache := loadUpdateCheckCache()
 	var notices []UpdateNotice
@@ -112,7 +134,7 @@ func CheckForUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
 		}
 
 		entry, ok := cache.Entries[st.Tool]
-		fresh := ok && !entry.CheckFailed && time.Since(entry.CheckedAt) < updateCheckTTL
+		fresh := ok && entry.fresh(time.Now())
 
 		if fresh {
 			if entry.LatestVersion != "" &&
