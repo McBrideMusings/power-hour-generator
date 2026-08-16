@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mattn/go-runewidth"
 )
 
 const (
@@ -399,32 +398,5 @@ func TruncateWithEllipsis(value string, max int) string {
 		return ""
 	}
 	value = strings.TrimSpace(value)
-	if runewidth.StringWidth(value) <= max {
-		return value
-	}
-	if max <= 3 {
-		var b strings.Builder
-		width := 0
-		for _, r := range value {
-			rw := runewidth.RuneWidth(r)
-			if width+rw > max {
-				break
-			}
-			b.WriteRune(r)
-			width += rw
-		}
-		return b.String()
-	}
-	budget := max - 3
-	var b strings.Builder
-	width := 0
-	for _, r := range value {
-		rw := runewidth.RuneWidth(r)
-		if width+rw > budget {
-			break
-		}
-		b.WriteRune(r)
-		width += rw
-	}
-	return b.String() + "..."
+	return TruncateToWidth(value, max, TruncateOptions{Ellipsis: "..."})
 }
