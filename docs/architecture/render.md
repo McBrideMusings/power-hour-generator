@@ -62,6 +62,8 @@ After segments are rendered, `concat.go` handles assembling them into a final ou
 
 The re-encode path passes `-ar` (sample rate) and `-ac` (channels) alongside codec and bitrate flags to ffmpeg.
 
+See also: [burning the index overlay badge at concat time instead of per-segment render](../specs/concat-time-index.md) was considered and deferred.
+
 ## Smart Re-rendering
 
 The render pipeline supports incremental builds through the [smart re-rendering](./smart-rerender.md) system. It hashes all render inputs per segment and compares against stored state to skip unchanged segments. See the dedicated page for details.
