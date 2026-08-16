@@ -93,6 +93,25 @@ func TestImportCollectionTextRejectsInvalidBatch(t *testing.T) {
 	}
 }
 
+func TestImportCollectionTextRejectsHeaderOnlyCSV(t *testing.T) {
+	input := "title,link,start_time,duration\n"
+	rows, format, err := ImportCollectionText(input, CollectionOptions{
+		LinkHeader:      "link",
+		StartHeader:     "start_time",
+		DurationHeader:  "duration",
+		DefaultDuration: 60,
+	})
+	if format != ImportFormatCSV {
+		t.Fatalf("format = %q, want csv", format)
+	}
+	if rows != nil {
+		t.Fatalf("rows = %v, want nil", rows)
+	}
+	if err == nil {
+		t.Fatal("expected error for header-only pasted CSV, got nil")
+	}
+}
+
 func TestMergeHeadersAppendsNewFields(t *testing.T) {
 	merged := MergeHeaders([]string{"title", "link"}, []CollectionRow{
 		{CustomFields: map[string]string{"artist": "Artist", "title": "Song", "mood": "loud"}},
