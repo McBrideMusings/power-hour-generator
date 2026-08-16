@@ -3288,7 +3288,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	if coll.PlanFormat == "yaml" {
 		result, yamlErr := csvplan.LoadCollectionYAML(coll.Plan, opts)
 		rows = result.Rows
-		coll.Headers = result.Columns
+		coll.Headers = csvplan.MergeHeaders(result.Columns, rows)
 		coll.Defaults = result.Defaults
 		err = yamlErr
 	} else {
