@@ -861,6 +861,25 @@ func TestRenderFooterTimelineIncludesEditShortcuts(t *testing.T) {
 	}
 }
 
+func TestRenderFooterCacheDescribesHandledKeys(t *testing.T) {
+	m := testTimelineModel(t)
+	m.activeView = len(m.collectionNames) + 1
+
+	footer := renderFooter(m)
+	if !strings.Contains(footer, "e edit") {
+		t.Fatalf("footer = %q, want e edit", footer)
+	}
+	if !strings.Contains(footer, "D doctor") {
+		t.Fatalf("footer = %q, want D doctor", footer)
+	}
+	if strings.Contains(footer, "d doctor") {
+		t.Fatalf("footer = %q, should not advertise unbound d doctor", footer)
+	}
+	if strings.Contains(footer, "D all") {
+		t.Fatalf("footer = %q, should not describe D as all", footer)
+	}
+}
+
 func TestRenderHelpOverlayTimelineIncludesEditShortcuts(t *testing.T) {
 	help := renderHelpOverlay(0, 120, 40)
 	if !strings.Contains(help, "Open selected output or project config") {
