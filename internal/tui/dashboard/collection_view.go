@@ -403,12 +403,17 @@ func (v collectionView) view() string {
 }
 
 func editContextNote(v collectionView, row csvplan.CollectionRow) string {
-	header := fmt.Sprintf("Edit row %02d", row.Index)
-	if v.editFieldIdx >= 0 && v.editFieldIdx < len(v.columns) {
-		header += " · " + v.columns[v.editFieldIdx].field
-	}
+	// Build the help text with exit keys first so they survive truncation on narrow terminals.
+	// Order: exit keys · navigation · context (row/field).
+	parts := []string{"Enter save", "Esc cancel", "Tab next field"}
 
-	parts := []string{header, "Enter save", "Esc cancel", "Tab next field"}
+	// Append context about what row/field is being edited.
+	context := fmt.Sprintf("Edit row %02d", row.Index)
+	if v.editFieldIdx >= 0 && v.editFieldIdx < len(v.columns) {
+		context += " · " + v.columns[v.editFieldIdx].field
+	}
+	parts = append(parts, context)
+
 	if hint := strings.TrimSpace(v.editHint); hint != "" {
 		parts = append(parts, hint)
 	}
