@@ -1,8 +1,55 @@
 package tools
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
 
 func ptr[T any](v T) *T { return &v }
+
+// TestSaveGlobalConfigPermissions asserts that SaveGlobalConfig writes
+// ~/.powerhour/config.yaml owner-only (0o600) under an owner-only dir
+// (0o700), even when the dir and file already exist with looser
+// permissions from a prior install.
+func TestSaveGlobalConfigPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix file permissions do not apply on windows")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	dir := filepath.Join(home, ".powerhour")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("pre-create dir: %v", err)
+	}
+	path := filepath.Join(dir, globalConfigFile)
+	if err := os.WriteFile(path, []byte("downloads:\n  proxy: \"\"\n"), 0o644); err != nil {
+		t.Fatalf("pre-create file: %v", err)
+	}
+
+	if err := SaveGlobalConfig(GlobalConfig{}); err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
+
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat dir: %v", err)
+	}
+	if perm := dirInfo.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("expected dir perm 0700, got %#o", perm)
+	}
+
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat file: %v", err)
+	}
+	if perm := fileInfo.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("expected file perm 0600, got %#o", perm)
+	}
+}
 
 // TestResolveEncodingPrecedence asserts, field by field, that the merge
 // order is: project overrides > global defaults > built-in fallback, and

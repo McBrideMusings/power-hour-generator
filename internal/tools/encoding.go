@@ -289,14 +289,24 @@ func SaveGlobalConfig(cfg GlobalConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("prepare global config dir: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("restrict global config dir permissions: %w", err)
 	}
 	data, err := yaml.Marshal(&cfg)
 	if err != nil {
 		return fmt.Errorf("marshal global config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("restrict global config permissions: %w", err)
+	}
+	return nil
 }
 
 // LoadEncodingDefaults loads encoding defaults from the global config. Returns zero-value if missing.

@@ -53,6 +53,26 @@ func TestWriteProxyBannerError(t *testing.T) {
 	}
 }
 
+func TestWriteProxyBannerRedactsCredentials(t *testing.T) {
+	origLookup := lookupProxyLocation
+	defer func() { lookupProxyLocation = origLookup }()
+
+	lookupProxyLocation = func(_ context.Context, _ string) (proxyLocation, error) {
+		return proxyLocation{}, errors.New("lookup disabled for test")
+	}
+
+	var buf bytes.Buffer
+	writeProxyBanner(context.Background(), &buf, "socks5://user:supersecret@proxy.example:9050")
+
+	output := buf.String()
+	if !strings.Contains(output, "proxy.example:9050") {
+		t.Fatalf("expected redacted output to keep host:port, got %q", output)
+	}
+	if strings.Contains(output, "supersecret") {
+		t.Fatalf("expected password to be redacted, got %q", output)
+	}
+}
+
 func TestWriteProxyBannerNoProxy(t *testing.T) {
 	var buf bytes.Buffer
 	writeProxyBanner(context.Background(), &buf, "")
