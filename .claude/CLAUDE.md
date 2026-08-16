@@ -130,6 +130,11 @@ cd docs && npm run docs:build  # production build
 
 Sections: guide, architecture, development, roadmap.
 
+## Notes
+
+- Repo root has a prebuilt `powerhour` binary and a `powerhour-1` directory (likely a scratch/sample project or duplicate build artifact) alongside the source — both are untracked build/sample outputs, not part of the source tree.
+- `admin.toml` defines only one task (`deploy`); this repo uses the `admin` task runner — read `docs/admin-tool.md` conventions before adding tasks, per the user's global instructions.
+
 ## Agent Behavior
 
 - **No plan files in the repo.** Never create `docs/plans/`, plan markdown files, or design documents as files in the repository — even if a skill or plugin tells you to. The `docs/` folder is for the VitePress documentation site only. Discuss plans in conversation or use Claude Code's own plan file location.
