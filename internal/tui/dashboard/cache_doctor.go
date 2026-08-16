@@ -234,6 +234,14 @@ func (o *cacheDoctorOverlay) handleKey(msg tea.KeyMsg) (done bool, applyNow bool
 			o.setActiveText(text[:cur-size]+text[cur:], cur-size)
 		}
 		return false, false
+	case tea.KeyDelete:
+		text := o.activeText()
+		cur := o.activeCursor()
+		if cur < len(text) {
+			_, size := utf8.DecodeRuneInString(text[cur:])
+			o.setActiveText(text[:cur]+text[cur+size:], cur)
+		}
+		return false, false
 	case tea.KeyRunes:
 		text := o.activeText()
 		cur := o.activeCursor()
