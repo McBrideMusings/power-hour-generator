@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/mattn/go-runewidth"
+
 	"powerhour/internal/tools"
 	"powerhour/internal/tui"
 )
@@ -81,7 +83,7 @@ func truncateCollectionValue(value string, max int) string {
 	if value == "" || max <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(value) <= max {
+	if runewidth.StringWidth(value) <= max {
 		return value
 	}
 	if !looksLikeFilesystemPath(value) || isURL(value) {
@@ -95,12 +97,12 @@ func truncateCollectionValue(value string, max int) string {
 
 	dir := value[:lastSep+1]
 	base := value[lastSep+1:]
-	if utf8.RuneCountInString(base) >= max {
+	if runewidth.StringWidth(base) >= max {
 		return tui.TruncateWithEllipsis(base, max)
 	}
 
-	remaining := max - utf8.RuneCountInString(base)
-	if utf8.RuneCountInString(dir) <= remaining {
+	remaining := max - runewidth.StringWidth(base)
+	if runewidth.StringWidth(dir) <= remaining {
 		return dir + base
 	}
 	if remaining <= 3 {
@@ -118,11 +120,35 @@ func looksLikeFilesystemPath(s string) bool {
 	return strings.HasPrefix(s, ".") || strings.HasPrefix(s, "~")
 }
 
+// widthSuffix returns the trailing runes of s whose combined visual width is
+// <= max, cutting only at rune boundaries.
+func widthSuffix(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	width := 0
+	start := len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if width+rw > max {
+			break
+		}
+		width += rw
+		start = i
+	}
+	return string(runes[start:])
+}
+
+// trailingPathSuffix returns as much of the trailing path components of dir
+// (a directory string ending in a separator) as fits within max columns of
+// visual width, building the result one full path component at a time so it
+// never cuts a component (or a rune) in half.
 func trailingPathSuffix(dir string, max int) string {
 	if max <= 0 || dir == "" {
 		return ""
 	}
-	if len(dir) <= max {
+	if runewidth.StringWidth(dir) <= max {
 		return dir
 	}
 
@@ -130,22 +156,21 @@ func trailingPathSuffix(dir string, max int) string {
 		return r == '/' || r == '\\'
 	})
 	if len(parts) == 0 {
-		if max > len(dir) {
-			return dir
-		}
-		return dir[len(dir)-max:]
+		return widthSuffix(dir, max)
 	}
 
-	suffix := string(dir[len(dir)-1])
+	sepRune, _ := utf8.DecodeLastRuneInString(dir)
+	sep := string(sepRune)
+	suffix := sep
 	for i := len(parts) - 1; i >= 0; i-- {
-		candidate := string(dir[len(dir)-1]) + parts[i] + suffix
-		if len(candidate) > max {
+		candidate := sep + parts[i] + suffix
+		if runewidth.StringWidth(candidate) > max {
 			break
 		}
 		suffix = candidate
 	}
-	if len(suffix) > max {
-		return suffix[len(suffix)-max:]
+	if runewidth.StringWidth(suffix) > max {
+		return widthSuffix(suffix, max)
 	}
 	return suffix
 }

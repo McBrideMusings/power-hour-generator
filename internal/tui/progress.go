@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 )
 
 const (
@@ -389,18 +390,41 @@ func NonEmptyOrDash(value string) string {
 	return value
 }
 
-// TruncateWithEllipsis truncates a string and adds "..." if it exceeds max runes.
+// TruncateWithEllipsis truncates a string and adds "..." if it exceeds max
+// visual (terminal column) width. Wide runes (emoji, CJK) occupy 2 columns,
+// so the cutoff is computed by accumulating per-rune width rather than
+// slicing by rune index — matching how lipgloss's style.Width() pads cells.
 func TruncateWithEllipsis(value string, max int) string {
 	if max <= 0 {
 		return ""
 	}
 	value = strings.TrimSpace(value)
-	runes := []rune(value)
-	if len(runes) <= max {
+	if runewidth.StringWidth(value) <= max {
 		return value
 	}
 	if max <= 3 {
-		return string(runes[:max])
+		var b strings.Builder
+		width := 0
+		for _, r := range value {
+			rw := runewidth.RuneWidth(r)
+			if width+rw > max {
+				break
+			}
+			b.WriteRune(r)
+			width += rw
+		}
+		return b.String()
 	}
-	return string(runes[:max-3]) + "..."
+	budget := max - 3
+	var b strings.Builder
+	width := 0
+	for _, r := range value {
+		rw := runewidth.RuneWidth(r)
+		if width+rw > budget {
+			break
+		}
+		b.WriteRune(r)
+		width += rw
+	}
+	return b.String() + "..."
 }
