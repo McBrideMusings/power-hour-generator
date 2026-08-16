@@ -20,7 +20,7 @@ Override with `POWERHOUR_TOOLS_DIR` environment variable.
 
 - Tool name, version, source (cache or system)
 - Binary paths
-- SHA-256 checksum of the main binary
+- SHA-256 checksum of the main binary — recorded for both cache-sourced and system-located binaries, so the checksum trust fast path works for a system tool (e.g. VLC) the same way it does for a cache-managed one (e.g. yt-dlp)
 - Installation timestamp
 
 ## Detection (`Detect`)
@@ -28,10 +28,10 @@ Override with `POWERHOUR_TOOLS_DIR` environment variable.
 `Detect()` iterates all known tools and determines their status:
 
 1. **Manifest validation** — checks if recorded paths still exist on disk
-2. **Checksum trust** — if the binary's SHA-256 matches the manifest, trusts the recorded version without running `--version` (avoids a 6-7s shell-out for `yt-dlp` on some versions)
-3. **Version fallback** — if checksum doesn't match, runs the version command
-4. **Cache scan** — looks for cached binaries if manifest is invalid
-5. **System PATH** — falls back to system-installed tools
+2. **Checksum trust** — if the binary's SHA-256 matches the manifest, trusts the recorded version without running `--version` (avoids a 6-7s shell-out for `yt-dlp` on some versions, and a ~2s shell-out for VLC)
+3. **Version fallback** — if checksum doesn't match (or the manifest entry predates this checksum, in which case it's backfilled on this run), runs the version command
+4. **Cache scan** — looks for cached binaries if manifest is invalid; records a checksum on the resulting manifest entry
+5. **System PATH** — falls back to system-installed tools; also records a checksum on the resulting manifest entry so a subsequent run can take the checksum-trust fast path instead of re-running `--version`
 
 ### Minimum Version Resolution
 
