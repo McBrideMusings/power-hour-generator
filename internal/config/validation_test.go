@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -239,12 +240,34 @@ func TestValidateStrict_CacheConfig_Valid(t *testing.T) {
 		FieldMap: map[string][]string{
 			"title":  {"title", "track"},
 			"artist": {"artist", "uploader"},
+			"link":   {"source", "links"},
 		},
 	}
 
 	results := cfg.validateCacheConfig()
 	if len(results) != 0 {
 		t.Fatalf("expected no results, got %v", results)
+	}
+}
+
+func TestValidateStrict_CacheConfig_UnknownFieldMapKey(t *testing.T) {
+	cfg := Default()
+	cfg.Collections["songs"] = CollectionConfig{
+		Plan: "songs.yaml",
+		FieldMap: map[string][]string{
+			"titel": {"title", "track"},
+		},
+	}
+
+	results := cfg.validateCacheConfig()
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d: %v", len(results), results)
+	}
+	if results[0].Level != "warning" {
+		t.Fatalf("expected warning level, got %q", results[0].Level)
+	}
+	if !strings.Contains(results[0].Message, `"titel"`) {
+		t.Fatalf("expected message to name the unknown key %q, got %q", "titel", results[0].Message)
 	}
 }
 
