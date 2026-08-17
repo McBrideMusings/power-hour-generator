@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"powerhour/internal/config"
 )
 
 func TestResolveInitDir(t *testing.T) {
@@ -141,5 +143,40 @@ func TestRenderDefaultConfigYAMLUsesRequestedPlanFormat(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderDefaultConfigYAMLLibraryKeysCommented(t *testing.T) {
+	rendered := renderDefaultConfigYAML("yaml")
+
+	// Verify library keys are commented, not a bare empty mapping
+	if !strings.Contains(rendered, "# mode: shared") {
+		t.Fatalf("rendered config missing library mode comment")
+	}
+	if !strings.Contains(rendered, "# path:") {
+		t.Fatalf("rendered config missing library path comment")
+	}
+	if strings.Contains(rendered, "library: {}") {
+		t.Fatalf("rendered config should not contain bare library: {}")
+	}
+
+	// Write to temp file and load via config.Load to verify parsing works
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "powerhour.yaml")
+	if err := os.WriteFile(configPath, []byte(rendered), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	// Verify defaults: commented keys result in zero values, which resolve to defaults
+	if !cfg.LibraryShared() {
+		t.Fatalf("LibraryShared() should be true (default), got false")
+	}
+	if cfg.LibraryPath() != "" {
+		t.Fatalf("LibraryPath() should be empty (default), got %q", cfg.LibraryPath())
 	}
 }
