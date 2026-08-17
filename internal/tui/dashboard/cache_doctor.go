@@ -11,6 +11,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/cachedoctor"
+	"powerhour/internal/tui"
 )
 
 type doctorItem struct {
@@ -216,6 +217,26 @@ func (o *cacheDoctorOverlay) resolveRequeryTarget(identifier string) int {
 		}
 	}
 	return -1
+}
+
+// requeryTargetLabel returns a display string identifying the entry the
+// in-flight requery (o.requeryID) is probing, preferring its title and
+// falling back to its source URL/identifier. Resolves by identifier — not
+// by cursor position — since the cursor can move while a requery is in
+// flight (see resolveRequeryTarget). Returns "" when there is no resolvable
+// target (e.g. the entry was removed from findings before the result
+// landed).
+func (o *cacheDoctorOverlay) requeryTargetLabel() string {
+	idx := o.resolveRequeryTarget(o.requeryID)
+	if idx < 0 {
+		return ""
+	}
+	item := o.findings[idx]
+	source := item.entry.Source
+	if source == "" && len(item.entry.Links) > 0 {
+		source = item.entry.Links[0]
+	}
+	return firstNonEmpty(item.entry.Title, item.finding.CurrentTitle, source, item.finding.Identifier)
 }
 
 // handleKey processes input for the doctor overlay.
@@ -621,7 +642,17 @@ func clampToLines(lines []string, max int) string {
 // doctorFooter returns the footer text for the doctor overlay.
 func (o *cacheDoctorOverlay) doctorFooter() string {
 	if o.requerying {
-		return footerStyle.Render("Waiting for yt-dlp...")
+		const plain = "Waiting for yt-dlp..."
+		label := o.requeryTargetLabel()
+		if label == "" {
+			return footerStyle.Render(plain)
+		}
+		const prefix = "Waiting for yt-dlp: "
+		budget := o.termWidth - len(prefix)
+		if budget <= 0 {
+			return footerStyle.Render(plain)
+		}
+		return footerStyle.Render(prefix + tui.TruncateToWidth(label, budget, tui.TruncateOptions{Ellipsis: "..."}))
 	}
 	if len(o.findings) == 0 {
 		return footerStyle.Render("Esc close")
