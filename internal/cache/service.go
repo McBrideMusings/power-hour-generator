@@ -106,7 +106,6 @@ func (e *LocalSourceMissingError) Error() string {
 
 type filenameParts struct {
 	Remote string
-	Local  string
 }
 
 var nowFunc = time.Now
@@ -455,7 +454,7 @@ func (s *Service) buildFilenameParts(row csvplan.Row, src sourceInfo, key string
 	shortHash := truncateHash(key, 10)
 	fallback := fmt.Sprintf("%03d_%s", row.Index, shortHash)
 
-	remoteValues, localValues := filenameTemplateValues(row, src, key, shortHash)
+	remoteValues, _ := filenameTemplateValues(row, src, key, shortHash)
 
 	if id := SanitizeSegment(src.ID); id != "" {
 		remoteValues["ID"] = id
@@ -467,14 +466,8 @@ func (s *Service) buildFilenameParts(row csvplan.Row, src sourceInfo, key string
 		remote = fallback
 	}
 
-	local := cleanupFilename(applyFilenameTemplate(template, localValues))
-	if local == "" {
-		local = fallback
-	}
-
 	return filenameParts{
 		Remote: remote,
-		Local:  local,
 	}
 }
 
