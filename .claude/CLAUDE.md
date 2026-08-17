@@ -169,7 +169,11 @@ Sections: guide, architecture, development, roadmap.
 
 **No PRs.** This is a solo project. Do not create pull requests. Merge branches directly to main.
 
-**Session workflow**:
+**Session workflow** — for the session that owns the repo checkout:
 1. Pick an issue from the current milestone
 2. Create a branch, implement, test
 3. Merge to main, push, close the issue
+
+**Step 3 belongs to whoever owns the checkout, and in a git worktree that is never you.** If you are working in a worktree under `~/.worktrees/`, you are a swarm worker: commit to your branch and stop. Run no `git push`, no `git merge`, no `gh issue close`, and no `git -C <other-checkout>` reaching back into the primary checkout to do any of them. A linked worktree shares the primary checkout's object store, so the orchestrator already has your commits and lands them itself after re-verifying against a base that moved while you worked.
+
+This is not a style preference. On 2026-08-17 two workers read step 3 as addressed to them: one merged its branch into `main` and pushed to `origin/main`, another fast-forwarded `origin/main` onto its own commit and left the matching test commit behind, and both closed their own issues. Step 3 predates worktree-based work (added in `fb2af01`, when every session was a solo interactive one) and was never a rule about swarm workers.
