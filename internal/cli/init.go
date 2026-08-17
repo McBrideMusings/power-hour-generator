@@ -132,7 +132,9 @@ cache:
         # Fields user-typed queries search against in the collection add-clip
         # slot.
         search_fields: [title, artist]
-library: {}
+library:
+    # mode: shared    # shared (default) or local
+    # path: ""        # custom library root override
 segments_base_dir: segments
 tui:
     # Auto re-render a row in the dashboard right after an inline edit
