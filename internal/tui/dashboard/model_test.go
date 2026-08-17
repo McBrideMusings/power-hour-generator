@@ -1656,3 +1656,54 @@ func TestReloadEmptiedPlanParity(t *testing.T) {
 		}
 	})
 }
+
+func TestRevealCommandForGOOS(t *testing.T) {
+	tests := []struct {
+		name    string
+		goos    string
+		path    string
+		wantCmd string
+		wantArg string
+	}{
+		{
+			name:    "darwin opens with open command",
+			goos:    "darwin",
+			path:    "/Users/test/project",
+			wantCmd: "open",
+			wantArg: "/Users/test/project",
+		},
+		{
+			name:    "windows opens with explorer command",
+			goos:    "windows",
+			path:    "C:\\Users\\test\\project",
+			wantCmd: "explorer",
+			wantArg: "C:\\Users\\test\\project",
+		},
+		{
+			name:    "linux opens with xdg-open command",
+			goos:    "linux",
+			path:    "/home/test/project",
+			wantCmd: "xdg-open",
+			wantArg: "/home/test/project",
+		},
+		{
+			name:    "default (freebsd) opens with xdg-open command",
+			goos:    "freebsd",
+			path:    "/home/test/project",
+			wantCmd: "xdg-open",
+			wantArg: "/home/test/project",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotCmd, gotArgs := revealCommandForGOOS(tt.goos, tt.path)
+			if gotCmd != tt.wantCmd {
+				t.Errorf("command: got %q, want %q", gotCmd, tt.wantCmd)
+			}
+			if len(gotArgs) != 1 || gotArgs[0] != tt.wantArg {
+				t.Errorf("args: got %v, want [%q]", gotArgs, tt.wantArg)
+			}
+		})
+	}
+}
