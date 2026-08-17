@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -110,6 +111,110 @@ func TestInitPlanTemplate(t *testing.T) {
 			}
 			if gotBody != tt.wantBody {
 				t.Fatalf("body = %q, want %q", gotBody, tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestDefaultPlanSchemaColumns(t *testing.T) {
+	// Helper to extract columns from YAML: "columns: [col1, col2, ...]"
+	extractYAMLColumns := func(yaml string) []string {
+		lines := strings.Split(yaml, "\n")
+		if len(lines) == 0 {
+			return nil
+		}
+		line := lines[0]
+		if !strings.Contains(line, "columns: [") {
+			return nil
+		}
+		// Extract "[col1, col2, ...]" part
+		start := strings.Index(line, "[")
+		end := strings.Index(line, "]")
+		if start < 0 || end < 0 || start >= end {
+			return nil
+		}
+		content := line[start+1 : end]
+		// Split on ", " and trim spaces
+		parts := strings.Split(content, ", ")
+		result := make([]string, len(parts))
+		for i, p := range parts {
+			result[i] = strings.TrimSpace(p)
+		}
+		return result
+	}
+
+	// Helper to extract columns from CSV/TSV
+	extractDelimitedColumns := func(csv string, delimiter string) []string {
+		firstLine := strings.Split(strings.TrimSpace(csv), "\n")[0]
+		var delim rune
+		if delimiter == "csv" {
+			delim = ','
+		} else {
+			delim = '\t'
+		}
+		parts := strings.Split(firstLine, string(delim))
+		result := make([]string, len(parts))
+		for i, p := range parts {
+			result[i] = strings.TrimSpace(p)
+		}
+		return result
+	}
+
+	tests := []struct {
+		name        string
+		template    string
+		kind        string // "yaml", "csv", or "tsv"
+		wantColumns []string
+	}{
+		{
+			name:        "songs-yaml",
+			template:    songsPlanYAML,
+			kind:        "yaml",
+			wantColumns: []string{"title", "artist", "name", "start_time", "duration", "link"},
+		},
+		{
+			name:        "songs-csv",
+			template:    songsPlanCSV,
+			kind:        "csv",
+			wantColumns: []string{"title", "artist", "name", "start_time", "duration", "link"},
+		},
+		{
+			name:        "songs-tsv",
+			template:    songsPlanTSV,
+			kind:        "tsv",
+			wantColumns: []string{"title", "artist", "name", "start_time", "duration", "link"},
+		},
+		{
+			name:        "interstitials-yaml",
+			template:    interstitialsPlanYAML,
+			kind:        "yaml",
+			wantColumns: []string{"link", "start_time", "duration"},
+		},
+		{
+			name:        "interstitials-csv",
+			template:    interstitialsPlanCSV,
+			kind:        "csv",
+			wantColumns: []string{"link", "start_time", "duration"},
+		},
+		{
+			name:        "interstitials-tsv",
+			template:    interstitialsPlanTSV,
+			kind:        "tsv",
+			wantColumns: []string{"link", "start_time", "duration"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			if tt.kind == "yaml" {
+				got = extractYAMLColumns(tt.template)
+			} else {
+				got = extractDelimitedColumns(tt.template, tt.kind)
+			}
+
+			if !slices.Equal(got, tt.wantColumns) {
+				t.Errorf("columns mismatch\ngot:  %v\nwant: %v", got, tt.wantColumns)
 			}
 		})
 	}
