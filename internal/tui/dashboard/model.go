@@ -2276,8 +2276,10 @@ var openExternalPath = func(path string) error {
 	return execCommand(name, args...).Start()
 }
 
-func revealCommand(path string) (string, []string) {
-	switch runtime.GOOS {
+// revealCommandForGOOS returns the platform-specific command and args to open a path.
+// Split out so tests can exercise every GOOS branch.
+func revealCommandForGOOS(goos, path string) (string, []string) {
+	switch goos {
 	case "darwin":
 		return "open", []string{path}
 	case "windows":
@@ -2285,6 +2287,10 @@ func revealCommand(path string) (string, []string) {
 	default:
 		return "xdg-open", []string{path}
 	}
+}
+
+func revealCommand(path string) (string, []string) {
+	return revealCommandForGOOS(runtime.GOOS, path)
 }
 
 func (m Model) drainJobEvents() Model {
