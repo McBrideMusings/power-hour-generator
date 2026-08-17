@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -34,6 +35,18 @@ func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) 
 	results = append(results, c.validateTimeline(projectRoot)...)
 	return results
 }
+
+// knownFieldMapKeys is the set of field_map keys actually consumed by the
+// cache lookup (internal/tui/dashboard/song_lookup.go). Derived from
+// DefaultCollectionFieldMap so the two lists cannot drift — a key added to
+// the default map automatically becomes a legal field_map key here too.
+var knownFieldMapKeys = func() map[string]bool {
+	out := make(map[string]bool)
+	for key := range DefaultCollectionFieldMap() {
+		out[key] = true
+	}
+	return out
+}()
 
 var knownCacheFields = map[string]bool{
 	"title":       true,
@@ -137,11 +150,29 @@ func (c Config) validateCacheConfig() []ValidationResult {
 	validateFields("cache.ytdlp.search_fields", c.Cache.Ytdlp.SearchFields)
 	for name, coll := range c.Collections {
 		for key, fields := range coll.FieldMap {
+			normalizedKey := strings.TrimSpace(strings.ToLower(key))
+			if normalizedKey == "" || !knownFieldMapKeys[normalizedKey] {
+				results = append(results, ValidationResult{
+					Level:   "warning",
+					Message: fmt.Sprintf("collection %q: field_map key %q is not used (known keys: %s)", name, key, strings.Join(sortedKeys(knownFieldMapKeys), ", ")),
+				})
+			}
 			validateFields(fmt.Sprintf("collections.%s.field_map.%s", name, key), fields)
 		}
 	}
 
 	return results
+}
+
+// sortedKeys returns the keys of a bool-valued map in sorted order, for
+// building deterministic message strings out of set-typed data.
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (c Config) validatePlanPaths(projectRoot string) []ValidationResult {
