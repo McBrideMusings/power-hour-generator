@@ -46,9 +46,9 @@ func LoadCollectionYAMLData(data []byte, opts CollectionOptions) ([]CollectionRo
 
 // yamlPlan is the structured YAML plan format with explicit column schema.
 type yamlPlan struct {
-	Columns  []string                 `yaml:"columns"`
-	Defaults map[string]interface{}   `yaml:"defaults"`
-	Rows     []map[string]interface{} `yaml:"rows"`
+	Columns  []string         `yaml:"columns"`
+	Defaults map[string]any   `yaml:"defaults"`
+	Rows     []map[string]any `yaml:"rows"`
 }
 
 // loadCollectionYAMLStructured handles the structured format (columns + rows
@@ -91,7 +91,7 @@ func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResu
 func loadCollectionYAMLBareList(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
 	opts = normalizeYAMLOpts(opts)
 
-	var rawRows []map[string]interface{}
+	var rawRows []map[string]any
 	if err := yaml.Unmarshal(data, &rawRows); err != nil {
 		return nil, fmt.Errorf("parse YAML: %w", err)
 	}
@@ -138,7 +138,7 @@ func normalizeYAMLOpts(opts CollectionOptions) CollectionOptions {
 	return opts
 }
 
-func normalizeYAMLDefaults(raw map[string]interface{}) map[string]string {
+func normalizeYAMLDefaults(raw map[string]any) map[string]string {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -156,7 +156,7 @@ func normalizeYAMLDefaults(raw map[string]interface{}) map[string]string {
 	return defaults
 }
 
-func parseYAMLRows(rawRows []map[string]interface{}, defaults map[string]string, opts CollectionOptions) ([]CollectionRow, ValidationErrors) {
+func parseYAMLRows(rawRows []map[string]any, defaults map[string]string, opts CollectionOptions) ([]CollectionRow, ValidationErrors) {
 	var (
 		rows []CollectionRow
 		errs ValidationErrors
@@ -170,7 +170,7 @@ func parseYAMLRows(rawRows []map[string]interface{}, defaults map[string]string,
 	return rows, errs
 }
 
-func parseYAMLRow(raw map[string]interface{}, defaults map[string]string, index int, opts CollectionOptions) (CollectionRow, []ValidationError) {
+func parseYAMLRow(raw map[string]any, defaults map[string]string, index int, opts CollectionOptions) (CollectionRow, []ValidationError) {
 	var errs []ValidationError
 
 	// Start from schema defaults, then apply row-specific values over them.
@@ -261,7 +261,7 @@ func parseYAMLRow(raw map[string]interface{}, defaults map[string]string, index 
 // yamlScalarToString converts a YAML scalar value to its string representation.
 // yaml.v3 follows YAML 1.2, so "1:40" is already a string; ints/floats are
 // returned as their decimal string forms.
-func yamlScalarToString(v interface{}) string {
+func yamlScalarToString(v any) string {
 	if v == nil {
 		return ""
 	}
