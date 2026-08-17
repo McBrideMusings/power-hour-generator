@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/cache"
 	"powerhour/internal/cachedoctor"
@@ -601,4 +602,94 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+func TestDoctorFooterRequeryNamesTargetEntry(t *testing.T) {
+	tests := []struct {
+		name       string
+		entry      cache.Entry
+		finding    cachedoctor.Finding
+		wantSubstr string
+	}{
+		{
+			name: "prefers entry title",
+			entry: cache.Entry{
+				Identifier: "id-0",
+				Source:     "https://youtube.com/watch?v=aaa000",
+				Title:      "My Favorite Song",
+			},
+			finding:    cachedoctor.Finding{Identifier: "id-0"},
+			wantSubstr: "My Favorite Song",
+		},
+		{
+			name: "falls back to source URL when title empty",
+			entry: cache.Entry{
+				Identifier: "id-0",
+				Source:     "https://youtube.com/watch?v=aaa000",
+			},
+			finding:    cachedoctor.Finding{Identifier: "id-0"},
+			wantSubstr: "https://youtube.com/watch?v=aaa000",
+		},
+		{
+			name:       "falls back to identifier when title and source empty",
+			entry:      cache.Entry{Identifier: "id-0"},
+			finding:    cachedoctor.Finding{Identifier: "id-0"},
+			wantSubstr: "id-0",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			items := []doctorItem{{entry: tc.entry, finding: tc.finding}}
+			o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+			o.requerying = true
+			o.requeryID = "id-0"
+
+			footer := o.doctorFooter()
+			if !strings.Contains(footer, tc.wantSubstr) {
+				t.Errorf("doctorFooter() = %q, want substring %q", footer, tc.wantSubstr)
+			}
+			if !strings.Contains(footer, "Waiting for yt-dlp") {
+				t.Errorf("doctorFooter() = %q, want to still say waiting for yt-dlp", footer)
+			}
+		})
+	}
+}
+
+func TestDoctorFooterRequeryTruncatesLongLabel(t *testing.T) {
+	longTitle := strings.Repeat("Very Long Song Title ", 10)
+	items := []doctorItem{{
+		entry:   cache.Entry{Identifier: "id-0", Title: longTitle},
+		finding: cachedoctor.Finding{Identifier: "id-0"},
+	}}
+	o := newCacheDoctorOverlay(items, nil, 40, 40, 0)
+	o.requerying = true
+	o.requeryID = "id-0"
+
+	footer := o.doctorFooter()
+	if strings.Contains(footer, longTitle) {
+		t.Errorf("doctorFooter() did not truncate long title: %q", footer)
+	}
+	visible := runewidth.StringWidth(stripANSI(footer))
+	if visible > o.termWidth {
+		t.Errorf("doctorFooter() visible width %d exceeds termWidth %d: %q", visible, o.termWidth, footer)
+	}
+}
+
+func TestDoctorFooterRequeryUnresolvableTargetFallsBackToPlainMessage(t *testing.T) {
+	items := []doctorItem{{
+		entry:   cache.Entry{Identifier: "id-0", Title: "Song A"},
+		finding: cachedoctor.Finding{Identifier: "id-0"},
+	}}
+	o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+	o.requerying = true
+	o.requeryID = "id-gone" // no longer present in findings
+
+	footer := o.doctorFooter()
+	if !strings.Contains(footer, "Waiting for yt-dlp...") {
+		t.Errorf("doctorFooter() = %q, want plain waiting message for unresolvable target", footer)
+	}
+	if strings.Contains(footer, "Song A") {
+		t.Errorf("doctorFooter() = %q, should not name an unrelated entry", footer)
+	}
 }
