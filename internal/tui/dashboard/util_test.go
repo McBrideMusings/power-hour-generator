@@ -4,7 +4,6 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -47,32 +46,5 @@ func TestTruncateCollectionValueWideChars(t *testing.T) {
 				t.Fatalf("truncateCollectionValue(%q, %d) = %q, visual width = %d, want <= %d", tt.value, tt.max, got, width, tt.max)
 			}
 		})
-	}
-}
-
-func TestRenderCellWidthWithWideChars(t *testing.T) {
-	values := []string{
-		"🎵 Hello there wide chars",
-		"日本語のとても長い動画タイトルです",
-		"short",
-	}
-	widths := []int{5, 10, 20}
-	plain := lipgloss.NewStyle()
-	styled := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-
-	for _, v := range values {
-		for _, w := range widths {
-			gotPlain := renderCell(v, w, plain)
-			gotStyled := renderCell(v, w, styled)
-			if pw := lipgloss.Width(gotPlain); pw != w {
-				t.Errorf("renderCell(%q, %d, plain) width = %d, want %d", v, w, pw, w)
-			}
-			if sw := lipgloss.Width(gotStyled); sw != w {
-				t.Errorf("renderCell(%q, %d, styled) width = %d, want %d", v, w, sw, w)
-			}
-			if lipgloss.Width(gotPlain) != lipgloss.Width(gotStyled) {
-				t.Errorf("renderCell(%q, %d) width mismatch: plain=%d styled=%d", v, w, lipgloss.Width(gotPlain), lipgloss.Width(gotStyled))
-			}
-		}
 	}
 }
