@@ -77,9 +77,9 @@ func WriteCSV(path string, headers []string, rows []CollectionRow, delimiter run
 func WriteYAML(path string, columns []string, defaults map[string]string, rows []CollectionRow) error {
 	columns = mergeYAMLHeaders(columns, defaults, rows)
 
-	entries := make([]map[string]interface{}, 0, len(rows))
+	entries := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		entry := make(map[string]interface{}, len(row.CustomFields))
+		entry := make(map[string]any, len(row.CustomFields))
 		for k, v := range row.CustomFields {
 			if v == "" {
 				continue
@@ -93,9 +93,9 @@ func WriteYAML(path string, columns []string, defaults map[string]string, rows [
 	}
 
 	plan := struct {
-		Columns  []string                 `yaml:"columns"`
-		Defaults map[string]string        `yaml:"defaults,omitempty"`
-		Rows     []map[string]interface{} `yaml:"rows"`
+		Columns  []string          `yaml:"columns"`
+		Defaults map[string]string `yaml:"defaults,omitempty"`
+		Rows     []map[string]any  `yaml:"rows"`
 	}{
 		Columns:  columns,
 		Defaults: defaults,
