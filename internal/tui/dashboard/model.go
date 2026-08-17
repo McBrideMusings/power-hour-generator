@@ -127,7 +127,7 @@ type dashboardJobState struct {
 	events chan dashboardJobEvent
 }
 
-type dashboardJobEvent interface{}
+type dashboardJobEvent any
 
 type jobRowStatusEvent struct {
 	collectionIdx int
@@ -2757,8 +2757,8 @@ func cleanYouTubeURL(raw string) string {
 
 	// Handle youtu.be short links — strip query params entirely.
 	if strings.HasPrefix(raw, "https://youtu.be/") || strings.HasPrefix(raw, "http://youtu.be/") {
-		if idx := strings.Index(raw, "?"); idx >= 0 {
-			return raw[:idx]
+		if base, _, ok := strings.Cut(raw, "?"); ok {
+			return base
 		}
 		return raw
 	}
@@ -2767,16 +2767,14 @@ func cleanYouTubeURL(raw string) string {
 	if !strings.Contains(raw, "youtube.com/watch") {
 		return raw
 	}
-	qIdx := strings.Index(raw, "?")
-	if qIdx < 0 {
+	base, query, ok := strings.Cut(raw, "?")
+	if !ok {
 		return raw
 	}
-	base := raw[:qIdx]
-	query := raw[qIdx+1:]
 
 	// Parse v= parameter manually (avoid net/url import for this).
 	videoID := ""
-	for _, param := range strings.Split(query, "&") {
+	for param := range strings.SplitSeq(query, "&") {
 		if strings.HasPrefix(param, "v=") {
 			videoID = param[2:]
 			break
