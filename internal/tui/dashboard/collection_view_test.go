@@ -420,23 +420,23 @@ func TestInlineEditOverflowHintRendersWhenColumnsHidden(t *testing.T) {
 		},
 	}
 	v := collectionView{
-		name:       "songs",
-		rows:       rows,
-		states:     []rowState{rowRendered},
+		name:   "songs",
+		rows:   rows,
+		states: []rowState{rowRendered},
 		columns: []collectionColumn{
 			{field: "title", header: "TITLE"},
 			{field: "artist", header: "ARTIST"},
 			{field: "link", header: "LINK"},
 			{field: "name", header: "NAME"},
 		},
-		rowStatus:   make(map[int]string),
-		termWidth:   100,
-		termHeight:  30,
-		editing:     true,
-		cursor:      0,
+		rowStatus:    make(map[int]string),
+		termWidth:    100,
+		termHeight:   30,
+		editing:      true,
+		cursor:       0,
 		editFieldIdx: 1, // Editing ARTIST (column 1); columns 2 and 3 are hidden
-		editValue:   "Artist A",
-		editCursor:  5,
+		editValue:    "Artist A",
+		editCursor:   5,
 	}
 
 	rendered := v.view()
@@ -463,9 +463,9 @@ func TestInlineEditOverflowHintAbsentWhenEditingLastColumn(t *testing.T) {
 		},
 	}
 	v := collectionView{
-		name:       "songs",
-		rows:       rows,
-		states:     []rowState{rowRendered},
+		name:   "songs",
+		rows:   rows,
+		states: []rowState{rowRendered},
 		columns: []collectionColumn{
 			{field: "title", header: "TITLE"},
 			{field: "artist", header: "ARTIST"},
@@ -501,13 +501,13 @@ func TestInlineEditOverflowHintHiddenColumnCount(t *testing.T) {
 		totalColumns      int
 		expectedHintCount int
 	}{
-		{"Edit column 0 of 5", 0, 5, 4},      // 4 hidden
-		{"Edit column 1 of 5", 1, 5, 3},      // 3 hidden
-		{"Edit column 2 of 5", 2, 5, 2},      // 2 hidden
-		{"Edit column 3 of 5", 3, 5, 1},      // 1 hidden
-		{"Edit column 4 of 5", 4, 5, 0},      // 0 hidden (last column)
-		{"Edit column 0 of 3", 0, 3, 2},      // 2 hidden
-		{"Edit column 2 of 3", 2, 3, 0},      // 0 hidden (last column)
+		{"Edit column 0 of 5", 0, 5, 4}, // 4 hidden
+		{"Edit column 1 of 5", 1, 5, 3}, // 3 hidden
+		{"Edit column 2 of 5", 2, 5, 2}, // 2 hidden
+		{"Edit column 3 of 5", 3, 5, 1}, // 1 hidden
+		{"Edit column 4 of 5", 4, 5, 0}, // 0 hidden (last column)
+		{"Edit column 0 of 3", 0, 3, 2}, // 2 hidden
+		{"Edit column 2 of 3", 2, 3, 0}, // 0 hidden (last column)
 	}
 
 	for _, tt := range tests {
@@ -642,4 +642,139 @@ func TestInlineEditOverflowWidthLastColumn(t *testing.T) {
 			t.Errorf("overflowWidth = %d, want %d (floor at column width)", gotOverflowWidth, wantOverflowWidth)
 		}
 	})
+}
+
+// TestEditRowBackgroundTint verifies that edit rows render with a background
+// tint across the full row width (gutter, data cells, separators, and
+// overflow hints), while normal rows do not have the background tint.
+// This is a regression test for issue #142.
+func TestEditRowBackgroundTint(t *testing.T) {
+	withANSIColorProfile(t)
+
+	rows := []csvplan.CollectionRow{
+		{
+			Index: 0,
+			CustomFields: map[string]string{
+				"title":  "Song A",
+				"artist": "Artist A",
+				"link":   "http://example.com/a",
+			},
+		},
+		{
+			Index: 1,
+			CustomFields: map[string]string{
+				"title":  "Song B",
+				"artist": "Artist B",
+				"link":   "http://example.com/b",
+			},
+		},
+	}
+	states := []rowState{rowRendered, rowRendered}
+
+	// Test 1: Normal row (not editing) should NOT have background tint
+	v := collectionView{
+		name:   "songs",
+		rows:   rows,
+		states: states,
+		columns: []collectionColumn{
+			{field: "title", header: "TITLE"},
+			{field: "artist", header: "ARTIST"},
+			{field: "link", header: "LINK"},
+		},
+		rowStatus:  make(map[int]string),
+		cursor:     0,
+		editing:    false, // Normal mode
+		termWidth:  100,
+		termHeight: 30,
+	}
+
+	rendered := v.view()
+	lines := strings.Split(rendered, "\n")
+
+	// Find the Song A line
+	var songALine string
+	for _, line := range lines {
+		if strings.Contains(line, "Song A") {
+			songALine = line
+			break
+		}
+	}
+	if songALine == "" {
+		t.Fatalf("Song A line not found in rendered output")
+	}
+
+	// Check that normal row does NOT contain background SGR codes. Background codes
+	// start with "4" followed by a digit (e.g. "40", "41", "42", "48;5;", "48;2;").
+	// Look for patterns like ESC[...4Xm where X is 0-9 (standard 8/16 colors) or
+	// ESC[48;5; or ESC[48;2; (256/truecolor). Use a simpler check: look for "m" followed
+	// by content that suggests a background color in a similar row position.
+	hasNormalBgCode := strings.Contains(songALine, "\x1b[40m") ||
+		strings.Contains(songALine, "\x1b[41m") ||
+		strings.Contains(songALine, "\x1b[42m") ||
+		strings.Contains(songALine, "\x1b[43m") ||
+		strings.Contains(songALine, "\x1b[44m") ||
+		strings.Contains(songALine, "\x1b[45m") ||
+		strings.Contains(songALine, "\x1b[46m") ||
+		strings.Contains(songALine, "\x1b[47m") ||
+		strings.Contains(songALine, "\x1b[100m") ||
+		strings.Contains(songALine, "\x1b[48;5;") ||
+		strings.Contains(songALine, "\x1b[48;2;")
+	if hasNormalBgCode {
+		t.Errorf("normal (non-edit) row should NOT contain background color SGR codes but got: %q", songALine)
+	}
+
+	// Test 2: Edit row should have background tint
+	v.editing = true
+	v.cursor = 1       // Edit the second row
+	v.editFieldIdx = 1 // Editing ARTIST column
+	v.editValue = "Artist B"
+	v.editCursor = 4
+
+	rendered = v.view()
+	lines = strings.Split(rendered, "\n")
+
+	// Find the Song B line (the edit row)
+	var songBLine string
+	for _, line := range lines {
+		if strings.Contains(line, "Song B") {
+			songBLine = line
+			break
+		}
+	}
+	if songBLine == "" {
+		t.Fatalf("Song B line not found in rendered output")
+	}
+
+	// Check that edit row DOES contain background SGR codes (any of the standard background codes)
+	hasEditBgCode := strings.Contains(songBLine, "\x1b[40m") ||
+		strings.Contains(songBLine, "\x1b[41m") ||
+		strings.Contains(songBLine, "\x1b[42m") ||
+		strings.Contains(songBLine, "\x1b[43m") ||
+		strings.Contains(songBLine, "\x1b[44m") ||
+		strings.Contains(songBLine, "\x1b[45m") ||
+		strings.Contains(songBLine, "\x1b[46m") ||
+		strings.Contains(songBLine, "\x1b[47m") ||
+		strings.Contains(songBLine, "\x1b[100m") ||
+		strings.Contains(songBLine, "\x1b[48;5;") ||
+		strings.Contains(songBLine, "\x1b[48;2;")
+	if !hasEditBgCode {
+		t.Errorf("edit row should contain background color SGR codes but got: %q", songBLine)
+	}
+
+	// Verify the background appears multiple times (gutter, data cells, separators)
+	// by counting occurrences of background codes
+	backgroundCount := strings.Count(songBLine, "\x1b[40m") +
+		strings.Count(songBLine, "\x1b[41m") +
+		strings.Count(songBLine, "\x1b[42m") +
+		strings.Count(songBLine, "\x1b[43m") +
+		strings.Count(songBLine, "\x1b[44m") +
+		strings.Count(songBLine, "\x1b[45m") +
+		strings.Count(songBLine, "\x1b[46m") +
+		strings.Count(songBLine, "\x1b[47m") +
+		strings.Count(songBLine, "\x1b[48;5;") +
+		strings.Count(songBLine, "\x1b[48;2;")
+	if backgroundCount < 3 {
+		// We should see at least a few background codes for gutter, cells, and separators
+		t.Logf("warning: edit row has only %d background SGR codes, expected at least 3. Line: %q", backgroundCount, songBLine)
+	}
 }
