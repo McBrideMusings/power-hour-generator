@@ -300,6 +300,10 @@ func (v cacheView) view() string {
 
 		isEditRow := v.editing && i == v.cursor
 
+		if isEditRow {
+			gutter = editRowBgOnly.Width(gutterWidth).Render(gutter)
+		}
+
 		cells := make([]string, 0, dataColCount)
 		for j, val := range e.Values {
 			if isEditRow && j == v.editFieldIdx {
@@ -331,8 +335,24 @@ func (v cacheView) view() string {
 		cells = append(cells, renderCell(filepath.Base(e.CachedPath), widths[dataColCount-1], fileStyle))
 
 		b.WriteString(gutter)
-		b.WriteString(strings.Repeat(" ", gutterGapWidth))
-		b.WriteString(renderRow(cells...))
+		gap := strings.Repeat(" ", gutterGapWidth)
+		if isEditRow {
+			gap = editRowBgOnly.Render(gap)
+		}
+		b.WriteString(gap)
+		row := renderRow(cells...)
+		if isEditRow {
+			// Re-render the cells with background-tinted separators
+			joined := ""
+			for k, cell := range cells {
+				if k > 0 {
+					joined += editRowBgOnly.Render("  ")
+				}
+				joined += cell
+			}
+			row = joined
+		}
+		b.WriteString(row)
 		b.WriteByte('\n')
 	}
 

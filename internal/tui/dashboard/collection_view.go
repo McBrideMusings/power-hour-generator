@@ -354,6 +354,9 @@ func (v collectionView) view() string {
 		truncatedStatus := tui.TruncateWithEllipsis(status, statusWidth)
 		paddedStatus := lipgloss.NewStyle().Width(statusWidth).Render(truncatedStatus)
 		gutter := fmt.Sprintf("%s%s %s", cursor, idx, paddedStatus)
+		if isEditRow {
+			gutter = editRowBgOnly.Width(gutterWidth).Render(gutter)
+		}
 		parts := []string{gutter}
 		for j, col := range v.columns {
 			val := sanitize(row.CustomFields[col.field])
@@ -371,7 +374,8 @@ func (v collectionView) view() string {
 				hiddenColumns := len(v.columns) - v.editFieldIdx - 1
 				if hiddenColumns > 0 {
 					hint := fmt.Sprintf("+%d fields", hiddenColumns)
-					parts = append(parts, faint.Render(hint))
+					hintStyled := editRowBgOnly.Render(faint.Render(hint))
+					parts = append(parts, hintStyled)
 				}
 				break
 			}
@@ -391,8 +395,25 @@ func (v collectionView) view() string {
 		}
 		b.WriteString(parts[0])
 		if len(parts) > 1 {
-			b.WriteString(strings.Repeat(" ", gutterGapWidth))
-			b.WriteString(strings.Join(parts[1:], "  "))
+			gap := strings.Repeat(" ", gutterGapWidth)
+			if isEditRow {
+				gap = editRowBgOnly.Render(gap)
+			}
+			b.WriteString(gap)
+			cells := parts[1:]
+			if isEditRow {
+				// Join cells with background-tinted separators
+				joined := ""
+				for k, cell := range cells {
+					if k > 0 {
+						joined += editRowBgOnly.Render("  ")
+					}
+					joined += cell
+				}
+				b.WriteString(joined)
+			} else {
+				b.WriteString(strings.Join(cells, "  "))
+			}
 		}
 		b.WriteByte('\n')
 
