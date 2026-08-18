@@ -56,11 +56,12 @@ func parseTimecode(s string) (float64, error) {
 				totalSeconds += val
 			}
 		} else if len(parts) == 3 {
-			if i == 0 {
+			switch i {
+			case 0:
 				totalSeconds += val * 3600
-			} else if i == 1 {
+			case 1:
 				totalSeconds += val * 60
-			} else {
+			default:
 				totalSeconds += val
 			}
 		} else {

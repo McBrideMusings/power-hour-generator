@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,10 +100,7 @@ func printConvertDryRun(cmd *cobra.Command, rows []csvplan.CollectionRow) {
 		cmd.Printf("  %-12s= %s\n", k, truncate(v, 60))
 	}
 
-	limit := len(rows)
-	if limit > 3 {
-		limit = 3
-	}
+	limit := min(len(rows), 3)
 	cmd.Printf("\nSample rows (%d of %d):\n", limit, len(rows))
 	for _, row := range rows[:limit] {
 		cmd.Printf("  [%d] link=%s start=%s duration=%d\n",
@@ -115,9 +113,7 @@ func writeConvertYAML(path string, rows []csvplan.CollectionRow) error {
 	items := make([]map[string]string, 0, len(rows))
 	for _, row := range rows {
 		m := make(map[string]string, len(row.CustomFields))
-		for k, v := range row.CustomFields {
-			m[k] = v
-		}
+		maps.Copy(m, row.CustomFields)
 		// Ensure canonical fields are present.
 		if row.Link != "" {
 			m["link"] = row.Link

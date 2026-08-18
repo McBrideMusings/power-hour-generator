@@ -83,7 +83,7 @@ func runSample(cmd *cobra.Command, args []string) error {
 	pp = paths.ApplyConfig(pp, cfg)
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
