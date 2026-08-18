@@ -239,6 +239,21 @@ func (v collectionView) addSlotExtraLines() int {
 	return lines
 }
 
+// editOverflowExtent computes the horizontal position (xOffset) and
+// available width (overflowWidth) for an inline-edit cell on column
+// editIdx. The edit cell overflows past its own column into the columns
+// to its right, stretching to the terminal's right margin, so xOffset
+// must account for the gutter, the gutter gap, and every preceding
+// column's width plus its trailing gap.
+func editOverflowExtent(widths []int, editIdx, gutterWidth, gutterGapWidth, columnGapWidth, termWidth int) (xOffset, overflowWidth int) {
+	xOffset = gutterWidth + gutterGapWidth
+	for k := range editIdx {
+		xOffset += widths[k] + columnGapWidth
+	}
+	overflowWidth = max(widths[editIdx], termWidth-xOffset-2)
+	return xOffset, overflowWidth
+}
+
 func (v collectionView) view() string {
 	var b strings.Builder
 
@@ -349,11 +364,7 @@ func (v collectionView) view() string {
 			// this column and stretch to the terminal right margin, then stop
 			// rendering further columns (they fall within the overflow region).
 			if isEditRow && j == v.editFieldIdx {
-				xOffset := gutterWidth + gutterGapWidth
-				for k := range j {
-					xOffset += widths[k] + columnGapWidth
-				}
-				overflowWidth := max(w, v.termWidth-xOffset-2)
+				_, overflowWidth := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth)
 				parts = append(parts, renderEditCell(v.editValue, v.editCursor, overflowWidth))
 				break
 			}
