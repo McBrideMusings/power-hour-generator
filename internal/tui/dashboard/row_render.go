@@ -8,7 +8,7 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-var cursorCharStyle = lipgloss.NewStyle().Reverse(true)
+var cursorCharStyle = lipgloss.NewStyle().Reverse(true).Background(lipgloss.AdaptiveColor{Light: "#e4e4e4", Dark: "#262626"})
 
 // renderCell truncates plain text to width, pads it to width, then applies the
 // style. Uses lipgloss Width() for padding so Unicode values don't misalign columns.
