@@ -402,3 +402,91 @@ func TestEditContextNoteNoFieldSelected(t *testing.T) {
 	// Should not have a field reference (since editFieldIdx is -1)
 	// The function should not append " · <fieldname>" when editFieldIdx is out of range
 }
+
+// TestInlineEditOverflowWidthFirstColumn verifies that editing the FIRST
+// declared column places xOffset right after the gutter and its gap, with
+// no preceding-column width folded in, and that overflowWidth stretches to
+// the terminal's right margin (minus the trailing 2-column pad).
+func TestInlineEditOverflowWidthFirstColumn(t *testing.T) {
+	const gutterWidth = 10
+	const gutterGapWidth = 4
+	const columnGapWidth = 2
+	widths := []int{15, 20, 25}
+	termWidth := 100
+
+	gotXOffset, gotOverflowWidth := editOverflowExtent(widths, 0, gutterWidth, gutterGapWidth, columnGapWidth, termWidth)
+
+	wantXOffset := gutterWidth + gutterGapWidth // 14: no preceding columns
+	wantOverflowWidth := max(widths[0], termWidth-wantXOffset-2)
+
+	if gotXOffset != wantXOffset {
+		t.Errorf("xOffset = %d, want %d", gotXOffset, wantXOffset)
+	}
+	if gotOverflowWidth != wantOverflowWidth {
+		t.Errorf("overflowWidth = %d, want %d", gotOverflowWidth, wantOverflowWidth)
+	}
+}
+
+// TestInlineEditOverflowWidthMiddleColumn verifies that editing a MIDDLE
+// column's xOffset accounts for every preceding column's width plus its
+// trailing columnGapWidth gap, not just the immediately preceding one.
+func TestInlineEditOverflowWidthMiddleColumn(t *testing.T) {
+	const gutterWidth = 10
+	const gutterGapWidth = 4
+	const columnGapWidth = 2
+	widths := []int{15, 20, 25}
+	termWidth := 120
+
+	gotXOffset, gotOverflowWidth := editOverflowExtent(widths, 1, gutterWidth, gutterGapWidth, columnGapWidth, termWidth)
+
+	wantXOffset := gutterWidth + gutterGapWidth + widths[0] + columnGapWidth // accounts for column 0
+	wantOverflowWidth := max(widths[1], termWidth-wantXOffset-2)
+
+	if gotXOffset != wantXOffset {
+		t.Errorf("xOffset = %d, want %d", gotXOffset, wantXOffset)
+	}
+	if gotOverflowWidth != wantOverflowWidth {
+		t.Errorf("overflowWidth = %d, want %d", gotOverflowWidth, wantOverflowWidth)
+	}
+}
+
+// TestInlineEditOverflowWidthLastColumn verifies that editing the LAST
+// column accumulates every preceding column's width and gap, and that a
+// narrow terminal collapses overflowWidth back down to the column's own
+// width (the max() floor) rather than going negative.
+func TestInlineEditOverflowWidthLastColumn(t *testing.T) {
+	const gutterWidth = 10
+	const gutterGapWidth = 4
+	const columnGapWidth = 2
+	widths := []int{15, 20, 25}
+
+	t.Run("wide terminal stretches to margin", func(t *testing.T) {
+		termWidth := 140
+		gotXOffset, gotOverflowWidth := editOverflowExtent(widths, 2, gutterWidth, gutterGapWidth, columnGapWidth, termWidth)
+
+		wantXOffset := gutterWidth + gutterGapWidth + widths[0] + columnGapWidth + widths[1] + columnGapWidth // accounts for columns 0 and 1
+		wantOverflowWidth := max(widths[2], termWidth-wantXOffset-2)
+
+		if gotXOffset != wantXOffset {
+			t.Errorf("xOffset = %d, want %d", gotXOffset, wantXOffset)
+		}
+		if gotOverflowWidth != wantOverflowWidth {
+			t.Errorf("overflowWidth = %d, want %d", gotOverflowWidth, wantOverflowWidth)
+		}
+	})
+
+	t.Run("narrow terminal floors to column width", func(t *testing.T) {
+		termWidth := 30 // narrower than xOffset, so termWidth-xOffset-2 goes negative
+		gotXOffset, gotOverflowWidth := editOverflowExtent(widths, 2, gutterWidth, gutterGapWidth, columnGapWidth, termWidth)
+
+		wantXOffset := gutterWidth + gutterGapWidth + widths[0] + columnGapWidth + widths[1] + columnGapWidth
+		wantOverflowWidth := widths[2] // the max() floor wins
+
+		if gotXOffset != wantXOffset {
+			t.Errorf("xOffset = %d, want %d", gotXOffset, wantXOffset)
+		}
+		if gotOverflowWidth != wantOverflowWidth {
+			t.Errorf("overflowWidth = %d, want %d (floor at column width)", gotOverflowWidth, wantOverflowWidth)
+		}
+	})
+}
