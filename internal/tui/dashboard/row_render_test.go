@@ -77,15 +77,16 @@ func TestRenderEditCellCJKPadsToVisualWidth(t *testing.T) {
 	}
 }
 
-// TestRenderEditCellCJKTruncationCursorOnEllipsis covers the case where a
-// wide rune straddles the truncation cut, leaving a 1-column gap that
-// padding must absorb, and a byte cursor past the cut must land on the
-// ellipsis cell rather than the trailing pad.
+// TestRenderEditCellCJKTruncationCursorOnEllipsis covers a wide rune
+// straddling the sliding window's left edge: the window is requested to
+// start mid-rune, that rune is dropped rather than split, and the cursor
+// highlight must track the window's actual (post-drop) start column, not
+// the requested one, or it lands one cell off.
 func TestRenderEditCellCJKTruncationCursorOnEllipsis(t *testing.T) {
 	withANSIColorProfile(t)
 	value := "日本語ABCDEF" // 3 CJK (6 cols) + 6 ASCII (6 cols) = 12 cols total
 	width := 6
-	cursor := len("日本語") // byte offset just before 'A', past the truncation cut
+	cursor := len("日本語") // byte offset just before 'A'
 
 	got := renderEditCell(value, cursor, width)
 
@@ -93,10 +94,11 @@ func TestRenderEditCellCJKTruncationCursorOnEllipsis(t *testing.T) {
 		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
 	}
 
-	// budget = width-1 = 5 columns kept before the ellipsis: 日(2)+本(2) = 4
-	// columns fit, 語(2) would push to 6 > 5 so it's dropped, leaving a
-	// 1-column gap that the trailing pad space fills.
-	want := editStyle.Render("日本") + cursorCharStyle.Render("…") + editStyle.Render(" ")
+	// cursorCol = width("日本語") = 6. Requested startCol = 6 - width/2 = 3,
+	// which falls inside 本's occupied columns [2,4) — 本 is dropped rather
+	// than split, so the window actually starts at column 4 (語). The
+	// cursor (col 6, i.e. 語's end / A's start) lands on 'A'.
+	want := editStyle.Render("語") + cursorCharStyle.Render("A") + editStyle.Render("BC ")
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
@@ -329,8 +331,8 @@ func TestRenderEditCellWidth1(t *testing.T) {
 		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
 	}
 
-	// When "hello" is truncated to width 1, it becomes "…" and cursor at 0 lands on the ellipsis
-	want := cursorCharStyle.Render("…")
+	// width 1 with cursor at column 0: the window is just "h", cursor on it.
+	want := cursorCharStyle.Render("h")
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
@@ -349,9 +351,9 @@ func TestRenderEditCellWidth2(t *testing.T) {
 		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
 	}
 
-	// "hello" truncated to width 2 becomes "h…", cursor at 0 lands on 'h'
+	// width 2 with cursor at column 0: window is "he", cursor on 'h'.
 	want := cursorCharStyle.Render("h") +
-		editStyle.Render("…")
+		editStyle.Render("e")
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
@@ -438,20 +440,25 @@ func TestRenderEditCellValueLongerTruncation(t *testing.T) {
 		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
 	}
 
-	// "this is a long string" truncated to width 8 becomes "this is…"
-	// cursor at 0 lands on 't'
+	// cursor at column 0 keeps the window pinned to the start: "this is ",
+	// cursor on 't'.
 	want := cursorCharStyle.Render("t") +
-		editStyle.Render("his is…")
+		editStyle.Render("his is ")
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
 }
 
-// TestRenderEditCellCursorPastTruncation tests cursor beyond truncation cut
+// TestRenderEditCellCursorPastTruncation tests a cursor positioned past what
+// a fixed [0:width] window would show: the pre-fix behaviour rendered the
+// same clamped-to-edge cursor for any such position, with no signal of
+// where in the value it actually was. The sliding window instead scrolls to
+// center on the cursor, so the visible substring changes and shows the
+// characters actually around the cursor.
 func TestRenderEditCellCursorPastTruncation(t *testing.T) {
 	withANSIColorProfile(t)
 	value := "this is a long string"
-	cursor := len("this is a ") // byte offset past the truncation cut
+	cursor := len("this is a ") // byte offset just before 'l' of "long"
 	width := 8
 
 	got := renderEditCell(value, cursor, width)
@@ -460,11 +467,12 @@ func TestRenderEditCellCursorPastTruncation(t *testing.T) {
 		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
 	}
 
-	// Truncated value is "this is…", cursor at byte 10 (past the cut) lands on ellipsis
-	// cursorCol = runewidth.StringWidth("this is a") = 9 (past the content)
-	// Since truncated and cursorCol (9) > contentWidth-1 (7), cursorCol is clamped to 7 (the ellipsis)
-	want := editStyle.Render("this is") +
-		cursorCharStyle.Render("…")
+	// cursorCol = 10. startCol = 10 - width/2 = 6, window covers columns
+	// [6,14): "s a long". Cursor at col 10 relative to the window (col 4)
+	// lands on 'l', the start of "long" — not the value's head.
+	want := editStyle.Render("s a ") +
+		cursorCharStyle.Render("l") +
+		editStyle.Render("ong")
 	if got != want {
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
@@ -518,5 +526,68 @@ func TestRenderEditCellByteCursorVsVisualColumn(t *testing.T) {
 	want := editStyle.Render("🎬A") + cursorCharStyle.Render("B") + editStyle.Render("  ")
 	if got != want {
 		t.Fatalf("cursor position incorrect.\ngot %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellSlidingWindowTracksCursor is the #133/#139 regression
+// test. Pre-fix, renderEditCell always rendered value's fixed [0:width]
+// window: once the cursor moved past width, every further cursor position
+// rendered the identical clamped-to-edge output, giving no signal of where
+// in the value the cursor actually was. Walking the cursor from 0 to the
+// end of a value much longer than width must produce genuinely different
+// visible substrings, each containing the character at the cursor.
+func TestRenderEditCellSlidingWindowTracksCursor(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "abcdefghijklmnopqrstuvwxyz" // 26 cols, well past width
+	width := 10
+
+	type sample struct {
+		cursor      int
+		wantVisible string // substring the window must contain
+	}
+	samples := []sample{
+		{cursor: 0, wantVisible: "abcdefghij"},  // window pinned to the start
+		{cursor: 13, wantVisible: "ijklmnopqr"}, // window centered on the cursor
+		{cursor: 26, wantVisible: "qrstuvwxyz"}, // window pinned to the end (the tail)
+	}
+
+	var visibles []string
+	for _, s := range samples {
+		got := renderEditCell(value, s.cursor, width)
+		visible := stripANSI(got)
+		visibles = append(visibles, visible)
+		if visible != s.wantVisible {
+			t.Errorf("cursor=%d: visible window = %q, want %q", s.cursor, visible, s.wantVisible)
+		}
+	}
+
+	// The core sliding-window property: distinct cursor positions past
+	// width must show distinct content, not the same clamped-in-place
+	// window every time.
+	if visibles[0] == visibles[1] || visibles[1] == visibles[2] || visibles[0] == visibles[2] {
+		t.Fatalf("expected all three windows to differ, got %q, %q, %q", visibles[0], visibles[1], visibles[2])
+	}
+}
+
+// TestRenderEditCellSlidingWindowShowsTailAtEnd asserts that with the cursor
+// at end-of-value (the common case while typing at the end of a long field),
+// the visible window shows the value's tail — the characters immediately
+// before the cursor — not its head. A fixed [0:width] window would show the
+// head regardless of where the cursor is.
+func TestRenderEditCellSlidingWindowShowsTailAtEnd(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "the quick brown fox jumps over the lazy dog" // 44 cols
+	width := 12
+	cursor := len(value)
+
+	got := renderEditCell(value, cursor, width)
+	visible := stripANSI(got)
+
+	wantTail := value[len(value)-width:] // last `width` columns of value (ASCII: 1 byte = 1 col)
+	if visible != wantTail {
+		t.Fatalf("visible window = %q, want tail %q", visible, wantTail)
+	}
+	if strings.HasPrefix(visible, "the quick") {
+		t.Fatalf("visible window still shows the head of value: %q", visible)
 	}
 }
