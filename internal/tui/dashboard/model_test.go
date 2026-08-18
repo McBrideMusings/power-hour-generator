@@ -720,6 +720,52 @@ func TestAddClipEnterRefusesRawNonURLWithoutMatch(t *testing.T) {
 	}
 }
 
+func TestAddClipEnterAddsUnknownRawURLVerbatim(t *testing.T) {
+	m := testCollectionModel(t)
+	m.collectionViews[0].rows = nil
+	m.collections["songs"] = project.Collection{
+		Name:       m.collections["songs"].Name,
+		Plan:       m.collections["songs"].Plan,
+		OutputDir:  m.collections["songs"].OutputDir,
+		Config:     m.collections["songs"].Config,
+		Rows:       nil,
+		Headers:    m.collections["songs"].Headers,
+		Delimiter:  m.collections["songs"].Delimiter,
+		PlanFormat: m.collections["songs"].PlanFormat,
+	}
+	m.cacheIdx = &cache.Index{Entries: map[string]cache.Entry{}, Links: map[string]string{}}
+	m.cfg.Cache = config.Default().Cache
+	collCfg := m.cfg.Collections["songs"]
+	m.cfg.Collections["songs"] = collCfg
+	coll := m.collections["songs"]
+	m.collections["songs"] = coll
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	rawURL := "https://example.com/videos/unknown-clip?ref=xyz&utm=1"
+	m.addBuffer = rawURL
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = rawURL
+	m = m.refreshAddClipHint(0)
+
+	gotModel, cmd := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected a probe command for an unknown raw URL")
+	}
+	if len(got.collectionViews[0].rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(got.collectionViews[0].rows))
+	}
+	row := got.collectionViews[0].rows[0]
+	if row.Link != rawURL {
+		t.Fatalf("link = %q, want verbatim %q", row.Link, rawURL)
+	}
+	status := got.collectionViews[0].rowStatus[row.Index]
+	if status != "probing" {
+		t.Fatalf("row status = %q, want %q", status, "probing")
+	}
+}
+
 func TestAddClipBackspaceAndCaretEditBuffer(t *testing.T) {
 	m := testCollectionModel(t)
 	m.mode = modeAddClip
