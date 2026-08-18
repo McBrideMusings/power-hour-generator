@@ -10,12 +10,37 @@ import (
 	"github.com/muesli/termenv"
 )
 
+// withANSIColorProfile forces the shared default lipgloss renderer's color
+// profile to ANSI for the duration of one test, then restores whatever
+// profile was active before. editStyle and cursorCharStyle (row_render.go)
+// are built via lipgloss.NewStyle(), which binds them to that package-level
+// default renderer. Under `go test`, stdout isn't a TTY, so the renderer
+// auto-detects no-color and Style.Render degrades to the identity function
+// — every escape code disappears. That collapses got/want comparisons in
+// the cursor-position tests below to plain string concatenation regardless
+// of where the byte-cursor-to-visual-column split actually landed, letting
+// a byte-offset-vs-visual-column regression in renderEditCell/renderEditField
+// pass undetected. Forcing ANSI here makes editStyle/cursorCharStyle emit
+// real SGR codes for the test, so the comparison becomes genuinely
+// sensitive to where the split happens. Scoped per-test (rather than via
+// TestMain) so it doesn't leak into other test files in this package that
+// assert on plain, unstyled output.
+func withANSIColorProfile(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(prev)
+	})
+}
+
 // TestRenderEditCellEmojiPadsToVisualWidth exercises a wide emoji preceding
 // the cursor. Budgeting by rune count (the pre-fix behaviour) pads by
 // len(runes) rather than visual width, so a cell with a 2-column emoji
 // overflows its fixed width. It also checks that the reverse-video
 // highlight lands on the byte-offset cursor's actual character.
 func TestRenderEditCellEmojiPadsToVisualWidth(t *testing.T) {
+	withANSIColorProfile(t)
 	value := "🎬AB"
 	width := 6
 	cursor := len("🎬A") // byte offset just before 'B'
@@ -35,6 +60,7 @@ func TestRenderEditCellEmojiPadsToVisualWidth(t *testing.T) {
 // TestRenderEditCellCJKPadsToVisualWidth mirrors the emoji case with
 // full-width CJK characters (2 terminal columns, 3 UTF-8 bytes each).
 func TestRenderEditCellCJKPadsToVisualWidth(t *testing.T) {
+	withANSIColorProfile(t)
 	value := "日本AB"
 	width := 8
 	cursor := len("日本") // byte offset just before 'A'
@@ -56,6 +82,7 @@ func TestRenderEditCellCJKPadsToVisualWidth(t *testing.T) {
 // padding must absorb, and a byte cursor past the cut must land on the
 // ellipsis cell rather than the trailing pad.
 func TestRenderEditCellCJKTruncationCursorOnEllipsis(t *testing.T) {
+	withANSIColorProfile(t)
 	value := "日本語ABCDEF" // 3 CJK (6 cols) + 6 ASCII (6 cols) = 12 cols total
 	width := 6
 	cursor := len("日本語") // byte offset just before 'A', past the truncation cut
@@ -79,6 +106,7 @@ func TestRenderEditCellCJKTruncationCursorOnEllipsis(t *testing.T) {
 // unpadded boundary case: content visual width equals the cell width
 // exactly, so no pad and no truncation are needed.
 func TestRenderEditCellEmojiExactFitNoTruncation(t *testing.T) {
+	withANSIColorProfile(t)
 	value := "🎬🎬🎬" // 3 runes, 6 columns
 	width := 6
 	cursor := len("🎬🎬") // byte offset just before the third emoji
@@ -149,5 +177,346 @@ func TestRenderCellStyledMatchesPlainWidth(t *testing.T) {
 				t.Errorf("renderCell(%q, %d, styled) visible width = %d, want %d", v, w, styledWidth, w)
 			}
 		}
+	}
+}
+
+// TestRenderEditFieldEmpty tests renderEditField on an empty string
+func TestRenderEditFieldEmpty(t *testing.T) {
+	withANSIColorProfile(t)
+	value := ""
+	cursor := 0
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("") + cursorCharStyle.Render(" ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCursorAtStart tests cursor at position 0 in a non-empty string
+func TestRenderEditFieldCursorAtStart(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := 0
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("") +
+		cursorCharStyle.Render("h") +
+		editStyle.Render("ello")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCursorAtMiddle tests cursor in the middle of a string
+func TestRenderEditFieldCursorAtMiddle(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := 2 // position in "he[l]lo"
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("he") +
+		cursorCharStyle.Render("l") +
+		editStyle.Render("lo")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCursorAtEnd tests cursor at position equal to len(value)
+func TestRenderEditFieldCursorAtEnd(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := len(value)
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("hello") + cursorCharStyle.Render(" ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCursorPastEnd tests cursor beyond the string length
+func TestRenderEditFieldCursorPastEnd(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := len(value) + 10 // way past the end
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("hello") + cursorCharStyle.Render(" ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCursorNegative tests negative cursor (should clamp to 0)
+func TestRenderEditFieldCursorNegative(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := -5
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("") +
+		cursorCharStyle.Render("h") +
+		editStyle.Render("ello")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldUnicodeEmoji tests multi-byte emoji as a single rune
+func TestRenderEditFieldUnicodeEmoji(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "🎬 hello"
+	cursor := len("🎬") // byte offset just before the space
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("🎬") +
+		cursorCharStyle.Render(" ") +
+		editStyle.Render("hello")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditFieldCJK tests CJK characters (3 bytes each)
+func TestRenderEditFieldCJK(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "日本語"
+	cursor := len("日本") // byte offset just before 語
+
+	got := renderEditField(value, cursor)
+
+	want := editStyle.Render("日本") +
+		cursorCharStyle.Render("語") +
+		editStyle.Render("")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellWidth0 tests edge case: width = 0
+func TestRenderEditCellWidth0(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := 0
+	width := 0
+
+	got := renderEditCell(value, cursor, width)
+
+	if got != "" {
+		t.Fatalf("got %q, want empty string", got)
+	}
+}
+
+// TestRenderEditCellWidth1 tests edge case: width = 1
+func TestRenderEditCellWidth1(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := 0
+	width := 1
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// When "hello" is truncated to width 1, it becomes "…" and cursor at 0 lands on the ellipsis
+	want := cursorCharStyle.Render("…")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellWidth2 tests edge case: width = 2
+func TestRenderEditCellWidth2(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hello"
+	cursor := 0
+	width := 2
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// "hello" truncated to width 2 becomes "h…", cursor at 0 lands on 'h'
+	want := cursorCharStyle.Render("h") +
+		editStyle.Render("…")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellCursorAtStart0Width tests cursor at 0 in a value shorter than width
+func TestRenderEditCellCursorAtStart0Width(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hi"
+	cursor := 0
+	width := 6
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// "hi" + 4 spaces, cursor on 'h'
+	want := cursorCharStyle.Render("h") +
+		editStyle.Render("i    ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellCursorAtMiddle tests cursor in middle of value shorter than width
+func TestRenderEditCellCursorAtMiddle(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hi"
+	cursor := 1
+	width := 6
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// cursor on 'i'
+	want := editStyle.Render("h") +
+		cursorCharStyle.Render("i") +
+		editStyle.Render("    ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellCursorAtPadding tests cursor on trailing padding (end-of-string position)
+func TestRenderEditCellCursorAtPadding(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "hi"
+	cursor := len(value)
+	width := 6
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// cursor = 2 (len("hi"))
+	// cursorCol = runewidth.StringWidth("hi") = 2
+	// !truncated and cursorCol (2) not > width-1 (5), so stays at 2
+	// content = ['h', 'i', ' ', ' ', ' ', ' ']
+	// Loop finds cursor at col 2, which is the first padding space
+	// Total width should be exactly 6 characters after stripping ANSI codes
+	stripped := stripANSI(got)
+	if stripped != "hi    " {
+		t.Fatalf("visible text = %q, want %q (len=%d, want len=6)", stripped, "hi    ", len(stripped))
+	}
+}
+
+// TestRenderEditCellValueLongerTruncation tests value longer than width (truncation)
+func TestRenderEditCellValueLongerTruncation(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "this is a long string"
+	cursor := 0
+	width := 8
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// "this is a long string" truncated to width 8 becomes "this is…"
+	// cursor at 0 lands on 't'
+	want := cursorCharStyle.Render("t") +
+		editStyle.Render("his is…")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellCursorPastTruncation tests cursor beyond truncation cut
+func TestRenderEditCellCursorPastTruncation(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "this is a long string"
+	cursor := len("this is a ") // byte offset past the truncation cut
+	width := 8
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// Truncated value is "this is…", cursor at byte 10 (past the cut) lands on ellipsis
+	// cursorCol = runewidth.StringWidth("this is a") = 9 (past the content)
+	// Since truncated and cursorCol (9) > contentWidth-1 (7), cursorCol is clamped to 7 (the ellipsis)
+	want := editStyle.Render("this is") +
+		cursorCharStyle.Render("…")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellMultibyteUnicodeInMiddleOfValue tests multi-byte character with cursor positioned within it (or adjacent)
+func TestRenderEditCellMultibyteUnicodeInMiddleOfValue(t *testing.T) {
+	withANSIColorProfile(t)
+	value := "abc🎬def"
+	cursor := len("abc🎬") // byte offset just before 'd'
+	width := 10
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// abc🎬 (visual width 5) + d (1) + ef (2) = 8 total, padded to 10
+	want := editStyle.Render("abc🎬") +
+		cursorCharStyle.Render("d") +
+		editStyle.Render("ef  ")
+	if got != want {
+		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+// TestRenderEditCellByteCursorVsVisualColumn tests that byte cursor offset is
+// correctly converted to visual column. This is critical for multi-byte Unicode
+// where byte offset != visual column (e.g., emoji is 4 bytes but 2 visual columns).
+// If cursorCol is incorrectly computed as byte offset instead of visual columns,
+// the cursor lands on the wrong character.
+func TestRenderEditCellByteCursorVsVisualColumn(t *testing.T) {
+	withANSIColorProfile(t)
+	// Emoji (4 bytes, 2 visual columns) + 'A' (1 byte, 1 visual column)
+	// Cursor at byte offset 5 = after "🎬A"
+	// Visual column should be 3 (emoji=2, A=1), so cursor should be on 'B'
+	// But if byte offset is used as column, cursor would be on column 5
+	value := "🎬AB"
+	cursor := len("🎬A") // 4 + 1 = 5 bytes
+	width := 6
+
+	got := renderEditCell(value, cursor, width)
+
+	if w := lipgloss.Width(got); w != width {
+		t.Fatalf("rendered width = %d, want %d (out: %q)", w, width, got)
+	}
+
+	// When cursor is correctly on 'B' at visual column 3:
+	// editStyle.Render("🎬A") + cursorCharStyle.Render("B") + editStyle.Render("  ")
+	want := editStyle.Render("🎬A") + cursorCharStyle.Render("B") + editStyle.Render("  ")
+	if got != want {
+		t.Fatalf("cursor position incorrect.\ngot %q\nwant %q", got, want)
 	}
 }
