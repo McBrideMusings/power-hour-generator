@@ -6,8 +6,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
-
-	"powerhour/internal/tui"
 )
 
 var cursorCharStyle = lipgloss.NewStyle().Reverse(true)
@@ -43,6 +41,14 @@ func renderEditField(value string, cursor int) string {
 // cursor highlighting. cursor is a byte offset into value. width is a visual
 // column count (via go-runewidth), so wide runes (CJK, most emoji) are
 // budgeted at their real terminal width instead of one rune each.
+//
+// When value is wider than width, the visible window slides to keep the
+// cursor on screen: it centers on the cursor's visual column (clamped so it
+// never scrolls before the start or past the end of value), rather than
+// always showing value's first width columns with the cursor pinned to
+// whichever edge cell it overflowed into. That fixed-at-column-0 window was
+// #133/#139 — a cursor anywhere past width rendered identically, with no
+// signal of where in the value it actually sat or what surrounded it.
 func renderEditCell(value string, cursor int, width int) string {
 	if width <= 0 {
 		return ""
@@ -54,34 +60,47 @@ func renderEditCell(value string, cursor int, width int) string {
 		cursor = len(value)
 	}
 
-	truncated := runewidth.StringWidth(value) > width
-	content := truncateRunesToWidth(value, width)
+	// cursorCol is the visual column the byte cursor sits at in value, so a
+	// wide rune before the cursor pushes it right by its real width rather
+	// than by one rune.
+	cursorCol := runewidth.StringWidth(value[:cursor])
+	totalWidth := runewidth.StringWidth(value)
+
+	startCol := 0
+	if totalWidth > width {
+		startCol = cursorCol - width/2
+		if maxStart := totalWidth - width; startCol > maxStart {
+			startCol = maxStart
+		}
+		if startCol < 0 {
+			startCol = 0
+		}
+	}
+
+	content, actualStart := sliceRunesByColumn(value, startCol, width)
 	contentWidth := runewidth.StringWidth(string(content))
 	if pad := width - contentWidth; pad > 0 {
 		content = append(content, []rune(strings.Repeat(" ", pad))...)
 	}
 
-	// cursorCol is the visual column the byte cursor sits at in the
-	// (untruncated) value, so a wide rune before the cursor pushes it right
-	// by its real width rather than by one rune.
-	cursorCol := runewidth.StringWidth(value[:cursor])
-	if truncated {
-		// Past the truncation cut: land on the ellipsis cell, not the
-		// trailing pad that fills a dropped-wide-rune gap.
-		if cursorCol > contentWidth-1 {
-			cursorCol = contentWidth - 1
-		}
-	} else if cursorCol > width-1 {
-		// End-of-string on an untruncated value still falls through to a
-		// trailing pad cell (typing position after the last character).
-		cursorCol = width - 1
+	// windowCursorCol is the cursor's column relative to the window's actual
+	// start (which can land after the requested startCol when a wide rune
+	// straddling that boundary gets dropped rather than split), clamped to
+	// the last visible cell so a cursor at end-of-string or on a dropped
+	// wide rune still renders on screen instead of past the padded content.
+	windowCursorCol := cursorCol - actualStart
+	if windowCursorCol < 0 {
+		windowCursorCol = 0
+	}
+	if windowCursorCol > width-1 {
+		windowCursorCol = width - 1
 	}
 
 	idx := len(content) - 1
 	col := 0
 	for i, r := range content {
 		rw := runewidth.RuneWidth(r)
-		if cursorCol >= col && cursorCol < col+rw {
+		if windowCursorCol >= col && windowCursorCol < col+rw {
 			idx = i
 			break
 		}
@@ -96,13 +115,34 @@ func renderEditCell(value string, cursor int, width int) string {
 		editStyle.Render(string(content[idx+1:]))
 }
 
-// truncateRunesToWidth returns value's runes, truncated with a trailing '…'
-// so the result's visual width does not exceed width. A wide rune that would
-// straddle the cut is dropped rather than split, which can leave the result
-// one column narrower than width — the caller pads to make up the gap.
-func truncateRunesToWidth(value string, width int) []rune {
-	return []rune(tui.TruncateToWidth(value, width, tui.TruncateOptions{
-		Ellipsis:          "…",
-		EllipsisWhenTight: true,
-	}))
+// sliceRunesByColumn returns the runes of value whose visual columns fall
+// within [startCol, startCol+width) — the sliding viewport used by
+// renderEditCell — plus actualStart, the visual column the returned runes
+// actually begin at. actualStart matches startCol unless a wide rune
+// straddles that boundary; such a rune is dropped rather than split
+// (mirroring the drop-not-split rule at the trailing edge), which pushes the
+// real start one column later than requested. Callers must measure cursor
+// position against actualStart, not startCol, or the cursor highlight lands
+// one cell off whenever that drop happens.
+func sliceRunesByColumn(value string, startCol, width int) (runes []rune, actualStart int) {
+	endCol := startCol + width
+	actualStart = -1
+	col := 0
+	for _, r := range value {
+		rw := runewidth.RuneWidth(r)
+		if col >= startCol {
+			if col+rw > endCol {
+				break
+			}
+			if actualStart < 0 {
+				actualStart = col
+			}
+			runes = append(runes, r)
+		}
+		col += rw
+	}
+	if actualStart < 0 {
+		actualStart = startCol
+	}
+	return runes, actualStart
 }
