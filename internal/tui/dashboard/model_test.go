@@ -1996,3 +1996,61 @@ func TestProcessDeleteCacheEntryPreservesFilterModeShowAllFalse(t *testing.T) {
 		t.Fatal("showAll = true, want false (filter mode must be preserved across the delete-triggered reload)")
 	}
 }
+
+// TestUpdateGlobalKeyFiresRegardlessOfView proves the arrow-key view switch
+// in handleKey is handled by the global key block before any view-specific
+// delegation runs, independent of which view is currently active.
+func TestUpdateGlobalKeyFiresRegardlessOfView(t *testing.T) {
+	m := testCollectionModel(t)
+	m.viewNames = []string{"timeline", "songs", "cache", "tools"}
+
+	gotModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRight})
+	got := gotModel.(Model)
+
+	if got.activeView != 2 {
+		t.Fatalf("activeView = %d, want 2 (right arrow must advance the active view via the global key switch)", got.activeView)
+	}
+}
+
+// TestUpdateConfirmDeleteSwallowsCollectionKey proves that while the model
+// is in modeConfirmDelete, a key that would normally be handled by the
+// collection view's own key dispatch (here "e", which opens inline edit)
+// does not leak through to that dispatch. handleConfirmDeleteKey's default
+// branch resets the mode to modeNormal for any non-y/Y/enter key instead.
+func TestUpdateConfirmDeleteSwallowsCollectionKey(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeConfirmDelete
+
+	gotModel, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	got := gotModel.(Model)
+
+	if got.mode != modeNormal {
+		t.Fatalf("mode = %v, want modeNormal (%v) — \"e\" must not leak through modeConfirmDelete into the collection view's inline-edit dispatch (got modeInlineEdit = %v)", got.mode, modeNormal, modeInlineEdit)
+	}
+}
+
+// TestUpdateTextInputConsumesKeystroke proves that while the model is in
+// modeInput, a keystroke that would otherwise be a global key (here "q",
+// which quits when mode == modeNormal) is consumed by the text-input
+// handler instead of falling through to the global quit handler.
+func TestUpdateTextInputConsumesKeystroke(t *testing.T) {
+	m := Model{
+		mode:       modeInput,
+		input:      newTextInput("Add:"),
+		activeView: 1,
+		viewNames:  []string{"timeline", "songs", "cache", "tools"},
+	}
+
+	gotModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	got := gotModel.(Model)
+
+	if cmd != nil {
+		t.Fatal("cmd != nil, want nil — \"q\" must be consumed by the text-input handler, not fall through to the global quit handler (which returns tea.Quit)")
+	}
+	if got.input.value != "q" {
+		t.Fatalf("input.value = %q, want %q — the keystroke must be appended into the text buffer", got.input.value, "q")
+	}
+	if got.mode != modeInput {
+		t.Fatalf("mode = %v, want modeInput (%v) — the model must stay in text-input mode after a plain keystroke", got.mode, modeInput)
+	}
+}
