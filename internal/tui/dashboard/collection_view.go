@@ -366,6 +366,13 @@ func (v collectionView) view() string {
 			if isEditRow && j == v.editFieldIdx {
 				_, overflowWidth := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth)
 				parts = append(parts, renderEditCell(v.editValue, v.editCursor, overflowWidth))
+
+				// Append a faint hint if columns are hidden by the overflow region.
+				hiddenColumns := len(v.columns) - v.editFieldIdx - 1
+				if hiddenColumns > 0 {
+					hint := fmt.Sprintf("+%d fields", hiddenColumns)
+					parts = append(parts, faint.Render(hint))
+				}
 				break
 			}
 			// Inline edit: highlight other fields on the edit row (before the edit field).
