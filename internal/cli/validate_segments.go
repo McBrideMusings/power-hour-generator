@@ -40,7 +40,7 @@ func runValidateSegments(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 

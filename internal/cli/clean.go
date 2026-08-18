@@ -134,7 +134,7 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 	pp = paths.ApplyConfig(pp, cfg)
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
@@ -281,11 +281,12 @@ func globFiles(root, pattern string) ([]string, error) {
 		if info.IsDir() {
 			return nil
 		}
-		if pattern == "**/*.mp4" {
+		switch pattern {
+		case "**/*.mp4":
 			if matched, _ := filepath.Match("*.mp4", filepath.Base(path)); matched {
 				matches = append(matches, path)
 			}
-		} else if pattern == "*" {
+		case "*":
 			matches = append(matches, path)
 		}
 		return nil

@@ -99,7 +99,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	pp = paths.ApplyConfig(pp, cfg)
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
@@ -456,9 +456,10 @@ func printStatusResult(projectPath string, collections map[string]project.Collec
 			}
 
 			renderLabel := faint.Render(r.RenderStatus)
-			if r.RenderStatus == "rendered" {
+			switch r.RenderStatus {
+			case "rendered":
 				renderLabel = green.Render("rendered")
-			} else if r.RenderStatus == "stale" {
+			case "stale":
 				reason := ""
 				if r.RenderReason != "" {
 					reason = " (" + r.RenderReason + ")"

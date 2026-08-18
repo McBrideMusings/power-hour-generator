@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
@@ -69,7 +70,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
 	// Sources + Segments checks require collections
-	if cfg.Collections != nil && len(cfg.Collections) > 0 {
+	if len(cfg.Collections) > 0 {
 		resolver, err := project.NewCollectionResolver(cfg, pp)
 		if err == nil {
 			collections, loadErr := resolver.LoadCollections()
@@ -82,7 +83,7 @@ func runDoctor(cmd *cobra.Command, _ []string) error {
 
 	// Timeline check
 	if len(cfg.Timeline.Sequence) > 0 {
-		if cfg.Collections != nil && len(cfg.Collections) > 0 {
+		if len(cfg.Collections) > 0 {
 			resolver, err := project.NewCollectionResolver(cfg, pp)
 			if err == nil {
 				collections, loadErr := resolver.LoadCollections()
@@ -334,12 +335,5 @@ func writeDoctorResult(cmd *cobra.Command, projectRoot string, checks []healthCh
 }
 
 func joinComma(items []string) string {
-	if len(items) == 0 {
-		return ""
-	}
-	result := items[0]
-	for _, item := range items[1:] {
-		result += ", " + item
-	}
-	return result
+	return strings.Join(items, ", ")
 }

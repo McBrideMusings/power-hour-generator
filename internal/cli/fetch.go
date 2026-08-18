@@ -84,7 +84,7 @@ func runFetch(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("project directory does not exist: %s", pp.Root)
 	}
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
