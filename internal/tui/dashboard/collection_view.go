@@ -271,20 +271,14 @@ func (v collectionView) view() string {
 	widths := make([]int, len(v.columns))
 	flexCount := len(v.columns)
 
-	tableWidth := v.termWidth - 20
-	if tableWidth < baseWidth {
-		tableWidth = baseWidth
-	}
+	tableWidth := max(v.termWidth-20, baseWidth)
 
 	flexWidth := 10
 	if flexCount > 0 && tableWidth > baseWidth+flexCount*5 {
 		flexWidth = (tableWidth - baseWidth) / flexCount
 	}
 	for i, col := range v.columns {
-		widths[i] = flexWidth
-		if widths[i] < len(col.header) {
-			widths[i] = len(col.header)
-		}
+		widths[i] = max(flexWidth, len(col.header))
 	}
 
 	// Column headers. The row index/status gutter sits to the left of the data.
@@ -306,19 +300,11 @@ func (v collectionView) view() string {
 	if startRow > 0 {
 		visible--
 	}
-	endRow := startRow + visible
-	if endRow > len(v.rows) {
-		endRow = len(v.rows)
-	}
+	endRow := min(startRow+visible, len(v.rows))
 	if endRow < len(v.rows) {
 		visible--
-		if visible < 0 {
-			visible = 0
-		}
-		endRow = startRow + visible
-		if endRow > len(v.rows) {
-			endRow = len(v.rows)
-		}
+		visible = max(visible, 0)
+		endRow = min(startRow+visible, len(v.rows))
 	}
 
 	if startRow > 0 {
@@ -364,7 +350,7 @@ func (v collectionView) view() string {
 			// rendering further columns (they fall within the overflow region).
 			if isEditRow && j == v.editFieldIdx {
 				xOffset := gutterWidth + gutterGapWidth
-				for k := 0; k < j; k++ {
+				for k := range j {
 					xOffset += widths[k] + columnGapWidth
 				}
 				overflowWidth := max(w, v.termWidth-xOffset-2)
