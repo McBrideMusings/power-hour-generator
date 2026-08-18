@@ -27,7 +27,7 @@ func addCollectionFetchFlags(cmd *cobra.Command) {
 
 // runCollectionFetch handles fetching for collections-based configuration.
 func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.ProjectPaths, cfg config.Config, glogf func(string, ...any), status *tui.StatusWriter) error {
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 

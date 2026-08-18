@@ -23,7 +23,7 @@ func TestExportOutputStructure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestExportOutputStructure(t *testing.T) {
 		t.Errorf("project = %v, want /test/project", parsed["project"])
 	}
 
-	collections, ok := parsed["collections"].(map[string]interface{})
+	collections, ok := parsed["collections"].(map[string]any)
 	if !ok {
 		t.Fatal("expected collections map")
 	}
@@ -57,12 +57,12 @@ func TestExportWithTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}
 
-	timeline, ok := parsed["timeline"].([]interface{})
+	timeline, ok := parsed["timeline"].([]any)
 	if !ok {
 		t.Fatal("expected timeline array")
 	}
@@ -83,7 +83,7 @@ func TestExportOmitsEmptyTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		t.Fatal(err)
 	}

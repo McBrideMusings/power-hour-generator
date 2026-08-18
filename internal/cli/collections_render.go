@@ -39,7 +39,7 @@ func addCollectionRenderFlags(cmd *cobra.Command) {
 
 // runCollectionRender handles rendering for collections-based configuration.
 func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.ProjectPaths, cfg config.Config) error {
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 
@@ -599,7 +599,7 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 	return nil
 }
 
-func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, resolver *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
+func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, _ *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
 	clip := collClip.Clip
 
 	clip.Row.DurationSeconds = clip.DurationSeconds
@@ -835,7 +835,7 @@ func buildCollectionRenderProgressModel(projectRoot string, clips []project.Coll
 	return model
 }
 
-func collectionRenderResultFields(projectRoot string, cc project.CollectionClip, seg render.Segment, res render.Result) map[string]string {
+func collectionRenderResultFields(projectRoot string, _ project.CollectionClip, _ render.Segment, res render.Result) map[string]string {
 	fields := make(map[string]string)
 
 	if res.Err != nil {

@@ -60,7 +60,7 @@ func runValidateCollection(cmd *cobra.Command, _ []string) error {
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 
 	// Ensure collections are configured
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured in project")
 	}
 
@@ -198,7 +198,7 @@ func determineExpectedIdentifier(pp paths.ProjectPaths, row csvplan.Row) string 
 	return abs
 }
 
-func buildOutputPath(pp paths.ProjectPaths, collClip project.CollectionClip, row csvplan.Row) string {
+func buildOutputPath(_ paths.ProjectPaths, collClip project.CollectionClip, row csvplan.Row) string {
 	// Use collection output directory
 	outputDir := collClip.OutputDir
 
