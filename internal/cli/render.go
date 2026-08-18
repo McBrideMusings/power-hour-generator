@@ -46,10 +46,7 @@ func newRenderCmd() *cobra.Command {
 		RunE:  runRender,
 	}
 
-	defaultConcurrency := runtime.NumCPU()
-	if defaultConcurrency < 1 {
-		defaultConcurrency = 1
-	}
+	defaultConcurrency := max(runtime.NumCPU(), 1)
 
 	cmd.Flags().IntVar(&renderConcurrency, "concurrency", defaultConcurrency, "Concurrent ffmpeg processes")
 	cmd.Flags().BoolVar(&renderForce, "force", false, "Re-render even if segment output already exists")
@@ -85,7 +82,7 @@ func runRender(cmd *cobra.Command, _ []string) error {
 	pp = paths.ApplyLibrary(pp, cfg.LibraryShared(), cfg.LibraryPath())
 	glogf("config loaded (%d collections)", len(cfg.Collections))
 
-	if cfg.Collections == nil || len(cfg.Collections) == 0 {
+	if len(cfg.Collections) == 0 {
 		return fmt.Errorf("no collections configured")
 	}
 

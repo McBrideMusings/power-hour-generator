@@ -162,22 +162,20 @@ func looksLikeBatchImport(value string) bool {
 func cleanYouTubeURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if strings.HasPrefix(raw, "https://youtu.be/") || strings.HasPrefix(raw, "http://youtu.be/") {
-		if idx := strings.Index(raw, "?"); idx >= 0 {
-			return raw[:idx]
+		if before, _, ok := strings.Cut(raw, "?"); ok {
+			return before
 		}
 		return raw
 	}
 	if !strings.Contains(raw, "youtube.com/watch") {
 		return raw
 	}
-	qIdx := strings.Index(raw, "?")
-	if qIdx < 0 {
+	base, query, ok := strings.Cut(raw, "?")
+	if !ok {
 		return raw
 	}
-	base := raw[:qIdx]
-	query := raw[qIdx+1:]
 	videoID := ""
-	for _, param := range strings.Split(query, "&") {
+	for param := range strings.SplitSeq(query, "&") {
 		if strings.HasPrefix(param, "v=") {
 			videoID = param[2:]
 			break
