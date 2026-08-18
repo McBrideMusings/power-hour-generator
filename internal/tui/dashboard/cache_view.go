@@ -146,10 +146,7 @@ func (v *cacheView) toggle() {
 
 func (v cacheView) visibleRowCount() int {
 	// -10 reserves one line for the unified help row at the bottom.
-	h := v.termHeight - 10
-	if h < 1 {
-		h = 1
-	}
+	h := max(v.termHeight-10, 1)
 	return h
 }
 
@@ -226,10 +223,7 @@ func (v cacheView) view() string {
 	}
 	baseWidth := gutterWidth + totalGaps
 
-	tableWidth := v.termWidth - 20
-	if tableWidth < baseWidth {
-		tableWidth = baseWidth
-	}
+	tableWidth := max(v.termWidth-20, baseWidth)
 
 	flexWidth := 10
 	if dataColCount > 0 && tableWidth > baseWidth+dataColCount*5 {
@@ -242,10 +236,7 @@ func (v cacheView) view() string {
 	}
 	headers[dataColCount-1] = "FILE"
 	for i := range widths {
-		widths[i] = flexWidth
-		if widths[i] < len(headers[i]) {
-			widths[i] = len(headers[i])
-		}
+		widths[i] = max(flexWidth, len(headers[i]))
 	}
 
 	// Header row.
@@ -270,19 +261,11 @@ func (v cacheView) view() string {
 	if startRow > 0 {
 		visible--
 	}
-	endRow := startRow + visible
-	if endRow > len(entries) {
-		endRow = len(entries)
-	}
+	endRow := min(startRow+visible, len(entries))
 	if endRow < len(entries) {
 		visible--
-		if visible < 0 {
-			visible = 0
-		}
-		endRow = startRow + visible
-		if endRow > len(entries) {
-			endRow = len(entries)
-		}
+		visible = max(visible, 0)
+		endRow = min(startRow+visible, len(entries))
 	}
 
 	if startRow > 0 {

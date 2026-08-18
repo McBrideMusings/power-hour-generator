@@ -23,10 +23,7 @@ const helpRowPrefix = "  + "
 // footer is rendered. Callers decide what text and style to supply; the
 // helper owns positioning, prefix, and truncation.
 func helpRowText(text string, style lipgloss.Style, termWidth int) string {
-	width := termWidth - len(helpRowPrefix)
-	if width < 12 {
-		width = 12
-	}
+	width := max(termWidth-len(helpRowPrefix), 12)
 	truncated := tui.TruncateWithEllipsis(strings.TrimSpace(text), width)
 	if truncated == "" {
 		return ""

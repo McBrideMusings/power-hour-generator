@@ -244,7 +244,7 @@ func scoreSuggestion(query string, entry cache.Entry, lookup cacheLookup, sugges
 			score += 45
 		}
 		allTokens := true
-		for _, token := range strings.Fields(query) {
+		for token := range strings.FieldsSeq(query) {
 			if !strings.Contains(combined, token) {
 				allTokens = false
 				break
