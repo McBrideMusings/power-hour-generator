@@ -84,10 +84,7 @@ func findConcatOutput(projectRoot string) (string, bool, int64, time.Time) {
 // contentHeight returns total height available for the sequence and preview panels.
 // -13 reserves chrome plus one line for the unified help row at the bottom.
 func (v timelineView) contentHeight() int {
-	h := v.termHeight - 13
-	if h < 4 {
-		h = 4
-	}
+	h := max(v.termHeight-13, 4)
 	return h
 }
 
@@ -102,10 +99,7 @@ func (v timelineView) sequenceLinesNeeded() int {
 // seqPanelHeight returns height for the sequence entries panel.
 func (v timelineView) seqPanelHeight() int {
 	total := v.contentHeight()
-	h := total / 4
-	if h < 2 {
-		h = 2
-	}
+	h := max(total/4, 2)
 	if needed := v.sequenceLinesNeeded(); needed > h {
 		h = needed
 	}
@@ -138,11 +132,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		name := filepath.Base(v.concatPath)
 		size := formatFileSize(v.concatSize)
 		exportedAt := faint.Render("exported " + v.concatModTime.Local().Format("2006-01-02 15:04"))
-		b.WriteString(fmt.Sprintf("%s%s  %s  %s",
+		fmt.Fprintf(&b, "%s%s  %s  %s",
 			cursor,
 			countGreen.Render(name),
 			faint.Render(size),
-			exportedAt))
+			exportedAt)
 	} else {
 		b.WriteString(cursor + faint.Render("not yet exported — press c to concatenate"))
 	}
@@ -154,10 +148,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteByte('\n')
 
 	seqH := v.seqPanelHeight()
-	visibleSeq := seqH
-	if visibleSeq < 1 {
-		visibleSeq = 1
-	}
+	visibleSeq := max(seqH, 1)
 	startSeq := v.seqScrollTop
 
 	// Reserve a line for the up indicator if scrolled, and a line for the
@@ -166,19 +157,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	if startSeq > 0 {
 		visibleSeq--
 	}
-	endSeq := startSeq + visibleSeq
-	if endSeq > len(v.sequence) {
-		endSeq = len(v.sequence)
-	}
+	endSeq := min(startSeq+visibleSeq, len(v.sequence))
 	if endSeq < len(v.sequence) {
 		visibleSeq--
-		if visibleSeq < 0 {
-			visibleSeq = 0
-		}
-		endSeq = startSeq + visibleSeq
-		if endSeq > len(v.sequence) {
-			endSeq = len(v.sequence)
-		}
+		visibleSeq = max(visibleSeq, 0)
+		endSeq = min(startSeq+visibleSeq, len(v.sequence))
 	}
 
 	if startSeq > 0 {
@@ -246,10 +229,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteByte('\n')
 
 	resH := v.resPanelHeight()
-	visibleRes := resH
-	if visibleRes < 1 {
-		visibleRes = 1
-	}
+	visibleRes := max(resH, 1)
 	startRes := v.resScrollTop
 
 	// Reserve a line for the up indicator if scrolled, and a line for the
@@ -258,19 +238,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	if startRes > 0 {
 		visibleRes--
 	}
-	endRes := startRes + visibleRes
-	if endRes > len(v.resolved) {
-		endRes = len(v.resolved)
-	}
+	endRes := min(startRes+visibleRes, len(v.resolved))
 	if endRes < len(v.resolved) {
 		visibleRes--
-		if visibleRes < 0 {
-			visibleRes = 0
-		}
-		endRes = startRes + visibleRes
-		if endRes > len(v.resolved) {
-			endRes = len(v.resolved)
-		}
+		visibleRes = max(visibleRes, 0)
+		endRes = min(startRes+visibleRes, len(v.resolved))
 	}
 
 	if startRes > 0 {
@@ -299,7 +271,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		sourceLabel := faint.Render(source)
 		durLabel := faint.Render(formatDuration(dur))
 
-		b.WriteString(fmt.Sprintf("%s%s %s %s", cursor, dot, seqNum, label))
+		fmt.Fprintf(&b, "%s%s %s %s", cursor, dot, seqNum, label)
 
 		// Right-align source and duration.
 		rightPart := fmt.Sprintf("%s · %s", sourceLabel, durLabel)
