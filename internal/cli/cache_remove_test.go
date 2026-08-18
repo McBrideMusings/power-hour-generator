@@ -10,9 +10,13 @@ import (
 	"powerhour/internal/cache"
 )
 
-func setUpCacheRemoveProject(t *testing.T, idx *cache.Index) (dir, indexPath string) {
+func setUpCacheRemoveProject(t *testing.T, idx *cache.Index, optionalDir ...string) (dir, indexPath string) {
 	t.Helper()
-	dir = t.TempDir()
+	if len(optionalDir) > 0 {
+		dir = optionalDir[0]
+	} else {
+		dir = t.TempDir()
+	}
 	indexPath = filepath.Join(dir, ".powerhour", "index.json")
 	if err := cache.SaveToPath(indexPath, idx); err != nil {
 		t.Fatalf("SaveToPath: %v", err)
@@ -223,19 +227,7 @@ func TestCacheRemoveDeletesURLSourcedFile(t *testing.T) {
 			},
 		},
 	}
-	origDir := dir
-	indexPath := filepath.Join(origDir, ".powerhour", "index.json")
-	if err := cache.SaveToPath(indexPath, idx); err != nil {
-		t.Fatalf("SaveToPath: %v", err)
-	}
-	projectDir = origDir
-	cacheRemoveDryRun = false
-	cacheRemoveKeepFile = false
-	t.Cleanup(func() {
-		projectDir = ""
-		cacheRemoveDryRun = false
-		cacheRemoveKeepFile = false
-	})
+	setUpCacheRemoveProject(t, idx, dir)
 
 	cmd := newCacheRemoveCmd()
 	var out bytes.Buffer
@@ -272,18 +264,7 @@ func TestCacheRemoveKeepsLocalSourceFile(t *testing.T) {
 			},
 		},
 	}
-	indexPath := filepath.Join(dir, ".powerhour", "index.json")
-	if err := cache.SaveToPath(indexPath, idx); err != nil {
-		t.Fatalf("SaveToPath: %v", err)
-	}
-	projectDir = dir
-	cacheRemoveDryRun = false
-	cacheRemoveKeepFile = false
-	t.Cleanup(func() {
-		projectDir = ""
-		cacheRemoveDryRun = false
-		cacheRemoveKeepFile = false
-	})
+	_, indexPath := setUpCacheRemoveProject(t, idx, dir)
 
 	cmd := newCacheRemoveCmd()
 	var out bytes.Buffer
@@ -332,18 +313,7 @@ func TestCacheRemoveKeepFileFlagPreservesURLSourcedFile(t *testing.T) {
 			},
 		},
 	}
-	indexPath := filepath.Join(dir, ".powerhour", "index.json")
-	if err := cache.SaveToPath(indexPath, idx); err != nil {
-		t.Fatalf("SaveToPath: %v", err)
-	}
-	projectDir = dir
-	cacheRemoveDryRun = false
-	cacheRemoveKeepFile = false
-	t.Cleanup(func() {
-		projectDir = ""
-		cacheRemoveDryRun = false
-		cacheRemoveKeepFile = false
-	})
+	_, indexPath := setUpCacheRemoveProject(t, idx, dir)
 
 	cmd := newCacheRemoveCmd()
 	var out bytes.Buffer
@@ -389,18 +359,7 @@ func TestCacheRemoveDryRunPreservesFileAndIndex(t *testing.T) {
 			},
 		},
 	}
-	indexPath := filepath.Join(dir, ".powerhour", "index.json")
-	if err := cache.SaveToPath(indexPath, idx); err != nil {
-		t.Fatalf("SaveToPath: %v", err)
-	}
-	projectDir = dir
-	cacheRemoveDryRun = false
-	cacheRemoveKeepFile = false
-	t.Cleanup(func() {
-		projectDir = ""
-		cacheRemoveDryRun = false
-		cacheRemoveKeepFile = false
-	})
+	_, indexPath := setUpCacheRemoveProject(t, idx, dir)
 
 	cmd := newCacheRemoveCmd()
 	var out bytes.Buffer
