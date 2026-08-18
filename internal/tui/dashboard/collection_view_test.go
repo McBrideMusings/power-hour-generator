@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -401,6 +402,158 @@ func TestEditContextNoteNoFieldSelected(t *testing.T) {
 
 	// Should not have a field reference (since editFieldIdx is -1)
 	// The function should not append " · <fieldname>" when editFieldIdx is out of range
+}
+
+// TestInlineEditOverflowHintRendersWhenColumnsHidden verifies that when
+// editing a non-final column, a faint "+N fields" hint renders immediately
+// after the edit cell to signal that N columns are hidden by the overflow.
+func TestInlineEditOverflowHintRendersWhenColumnsHidden(t *testing.T) {
+	rows := []csvplan.CollectionRow{
+		{
+			Index: 0,
+			CustomFields: map[string]string{
+				"title":  "Song A",
+				"artist": "Artist A",
+				"link":   "http://example.com/a",
+				"name":   "Track A",
+			},
+		},
+	}
+	v := collectionView{
+		name:       "songs",
+		rows:       rows,
+		states:     []rowState{rowRendered},
+		columns: []collectionColumn{
+			{field: "title", header: "TITLE"},
+			{field: "artist", header: "ARTIST"},
+			{field: "link", header: "LINK"},
+			{field: "name", header: "NAME"},
+		},
+		rowStatus:   make(map[int]string),
+		termWidth:   100,
+		termHeight:  30,
+		editing:     true,
+		cursor:      0,
+		editFieldIdx: 1, // Editing ARTIST (column 1); columns 2 and 3 are hidden
+		editValue:   "Artist A",
+		editCursor:  5,
+	}
+
+	rendered := v.view()
+
+	// The hint "+2 fields" should appear in the rendered output since there are
+	// 2 columns (link and name) beyond the edited column.
+	if !strings.Contains(rendered, "+2 fields") {
+		t.Errorf("overflow hint not found in rendered edit row. Expected '+2 fields' but rendered:\n%s", rendered)
+	}
+}
+
+// TestInlineEditOverflowHintAbsentWhenEditingLastColumn verifies that when
+// editing the final column in the sequence, NO overflow hint appears (since
+// there are zero columns beyond it to hide).
+func TestInlineEditOverflowHintAbsentWhenEditingLastColumn(t *testing.T) {
+	rows := []csvplan.CollectionRow{
+		{
+			Index: 0,
+			CustomFields: map[string]string{
+				"title":  "Song B",
+				"artist": "Artist B",
+				"link":   "http://example.com/b",
+			},
+		},
+	}
+	v := collectionView{
+		name:       "songs",
+		rows:       rows,
+		states:     []rowState{rowRendered},
+		columns: []collectionColumn{
+			{field: "title", header: "TITLE"},
+			{field: "artist", header: "ARTIST"},
+			{field: "link", header: "LINK"},
+		},
+		rowStatus:    make(map[int]string),
+		termWidth:    100,
+		termHeight:   30,
+		editing:      true,
+		cursor:       0,
+		editFieldIdx: 2, // Editing LINK (last column); no columns hidden
+		editValue:    "http://example.com/b",
+		editCursor:   10,
+	}
+
+	rendered := v.view()
+
+	// No hint should appear since there are zero columns beyond the edited column.
+	if strings.Contains(rendered, "+") && strings.Contains(rendered, "fields") {
+		// More precise check: look for the "+N fields" pattern
+		if strings.Contains(rendered, "+0 fields") || strings.Contains(rendered, "+ fields") {
+			t.Errorf("unexpected overflow hint in rendered edit row when editing last column:\n%s", rendered)
+		}
+	}
+}
+
+// TestInlineEditOverflowHintHiddenColumnCount verifies the hint shows the
+// correct count when editing middle columns with varying numbers of trailing columns.
+func TestInlineEditOverflowHintHiddenColumnCount(t *testing.T) {
+	tests := []struct {
+		name              string
+		editFieldIdx      int
+		totalColumns      int
+		expectedHintCount int
+	}{
+		{"Edit column 0 of 5", 0, 5, 4},      // 4 hidden
+		{"Edit column 1 of 5", 1, 5, 3},      // 3 hidden
+		{"Edit column 2 of 5", 2, 5, 2},      // 2 hidden
+		{"Edit column 3 of 5", 3, 5, 1},      // 1 hidden
+		{"Edit column 4 of 5", 4, 5, 0},      // 0 hidden (last column)
+		{"Edit column 0 of 3", 0, 3, 2},      // 2 hidden
+		{"Edit column 2 of 3", 2, 3, 0},      // 0 hidden (last column)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Build a row with all columns populated
+			customFields := make(map[string]string)
+			columns := make([]collectionColumn, tt.totalColumns)
+			for i := 0; i < tt.totalColumns; i++ {
+				fieldName := fmt.Sprintf("field_%d", i)
+				columns[i] = collectionColumn{field: fieldName, header: strings.ToUpper(fieldName)}
+				customFields[fieldName] = fmt.Sprintf("value_%d", i)
+			}
+
+			rows := []csvplan.CollectionRow{
+				{Index: 0, CustomFields: customFields},
+			}
+			v := collectionView{
+				name:         "test",
+				rows:         rows,
+				states:       []rowState{rowRendered},
+				columns:      columns,
+				rowStatus:    make(map[int]string),
+				termWidth:    200, // Wide terminal to avoid other truncation
+				termHeight:   30,
+				editing:      true,
+				cursor:       0,
+				editFieldIdx: tt.editFieldIdx,
+				editValue:    customFields[columns[tt.editFieldIdx].field],
+				editCursor:   0,
+			}
+
+			rendered := v.view()
+
+			if tt.expectedHintCount > 0 {
+				expectedHint := fmt.Sprintf("+%d fields", tt.expectedHintCount)
+				if !strings.Contains(rendered, expectedHint) {
+					t.Errorf("expected hint %q not found in rendered output", expectedHint)
+				}
+			} else {
+				// No columns hidden; hint should not appear
+				if strings.Contains(rendered, "+ fields") {
+					t.Errorf("hint should not appear when no columns are hidden, but found in output:\n%s", rendered)
+				}
+			}
+		})
+	}
 }
 
 // TestInlineEditOverflowWidthFirstColumn verifies that editing the FIRST
