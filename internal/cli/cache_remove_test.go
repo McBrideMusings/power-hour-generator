@@ -366,3 +366,64 @@ func TestCacheRemoveKeepFileFlagPreservesURLSourcedFile(t *testing.T) {
 		t.Fatal("expected index record to be removed even with --keep-file")
 	}
 }
+
+func TestCacheRemoveDryRunPreservesFileAndIndex(t *testing.T) {
+	dir := t.TempDir()
+	cachedFile := filepath.Join(dir, "cache", "dryrun.mp4")
+	if err := os.MkdirAll(filepath.Dir(cachedFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachedFile, []byte("fake video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := &cache.Index{
+		Version: 2,
+		Entries: map[string]cache.Entry{
+			"youtube:dryrun": {
+				Identifier: "youtube:dryrun",
+				ID:         "dryrun",
+				Title:      "Dry Run Test",
+				SourceType: cache.SourceTypeURL,
+				CachedPath: cachedFile,
+			},
+		},
+	}
+	indexPath := filepath.Join(dir, ".powerhour", "index.json")
+	if err := cache.SaveToPath(indexPath, idx); err != nil {
+		t.Fatalf("SaveToPath: %v", err)
+	}
+	projectDir = dir
+	cacheRemoveDryRun = false
+	cacheRemoveKeepFile = false
+	t.Cleanup(func() {
+		projectDir = ""
+		cacheRemoveDryRun = false
+		cacheRemoveKeepFile = false
+	})
+
+	cmd := newCacheRemoveCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{"--dry-run", "youtube:dryrun"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "Would remove:") {
+		t.Fatalf("expected stdout to contain %q, got %q", "Would remove:", out.String())
+	}
+
+	if _, err := os.Stat(cachedFile); err != nil {
+		t.Fatalf("expected cached file to survive with --dry-run, got stat error: %v", err)
+	}
+
+	loaded, err := cache.LoadFromPath(indexPath)
+	if err != nil {
+		t.Fatalf("LoadFromPath: %v", err)
+	}
+	if _, ok := loaded.GetByIdentifier("youtube:dryrun"); !ok {
+		t.Fatal("expected index entry to survive with --dry-run")
+	}
+}
