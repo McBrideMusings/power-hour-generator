@@ -1707,3 +1707,292 @@ func TestRevealCommandForGOOS(t *testing.T) {
 		})
 	}
 }
+
+// newTestCacheModel builds a Model wired for processDeleteCacheEntry tests: a
+// real ProjectPaths rooted at root, idx persisted to disk via cache.Save (so
+// the reload triggered by delete round-trips through real files), and a
+// "songs" collection whose rows reference referencedLinks (used to make
+// cacheView's filtered/all entry sets differ where a test needs that).
+func newTestCacheModel(t *testing.T, root string, idx *cache.Index, referencedLinks []string) Model {
+	t.Helper()
+
+	pp, err := paths.Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve paths: %v", err)
+	}
+	if err := cache.Save(pp, idx); err != nil {
+		t.Fatalf("save index: %v", err)
+	}
+
+	var rows []csvplan.CollectionRow
+	for _, link := range referencedLinks {
+		rows = append(rows, csvplan.CollectionRow{Link: link})
+	}
+	coll := project.Collection{
+		Name: "songs",
+		Rows: rows,
+	}
+
+	cfg := config.Config{
+		Cache:       config.Default().Cache,
+		Collections: map[string]config.CollectionConfig{"songs": coll.Config},
+	}
+
+	m := Model{
+		cfg:             cfg,
+		pp:              pp,
+		collections:     map[string]project.Collection{"songs": coll},
+		collectionNames: []string{"songs"},
+		collectionViews: []collectionView{{name: "songs", rows: rows}},
+		cacheIdx:        idx,
+	}
+	m.cacheView = newCacheView(cfg, idx, buildCollectionLinks(m.collections))
+	return m
+}
+
+// writeTestCacheFile writes a small real file under dir and returns its path,
+// so os.Remove (URL-sourced deletes) and os.Stat assertions have something
+// real to act on.
+func writeTestCacheFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("data"), 0o644); err != nil {
+		t.Fatalf("write cache file: %v", err)
+	}
+	return path
+}
+
+// buildNCacheEntries builds n URL-sourced cache entries, each with a real
+// cached file under root and a link recorded in idx.Links, and returns the
+// index plus the list of links (in entry order, for use as referencedLinks).
+func buildNCacheEntries(t *testing.T, root string, n int) (*cache.Index, []string) {
+	t.Helper()
+
+	idx := &cache.Index{Entries: map[string]cache.Entry{}, Links: map[string]string{}}
+	var links []string
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("entry%d", i)
+		link := fmt.Sprintf("https://example.com/watch?v=%d", i)
+		path := writeTestCacheFile(t, root, fmt.Sprintf("entry%d.mp4", i))
+		idx.Entries[id] = cache.Entry{
+			Key:        id,
+			Identifier: id,
+			Source:     link,
+			SourceType: cache.SourceTypeURL,
+			CachedPath: path,
+			Title:      fmt.Sprintf("Song %d", i),
+		}
+		idx.Links[link] = id
+		links = append(links, link)
+	}
+	return idx, links
+}
+
+func TestProcessDeleteCacheEntryRemovesURLSourcedFile(t *testing.T) {
+	root := t.TempDir()
+	cachedPath := writeTestCacheFile(t, root, "url-entry.mp4")
+	link := "https://example.com/watch?v=url1"
+
+	idx := &cache.Index{
+		Entries: map[string]cache.Entry{
+			"url1": {
+				Key:        "url1",
+				Identifier: "url1",
+				Source:     link,
+				SourceType: cache.SourceTypeURL,
+				CachedPath: cachedPath,
+				Title:      "URL Song",
+			},
+		},
+		Links: map[string]string{link: "url1"},
+	}
+
+	m := newTestCacheModel(t, root, idx, []string{link})
+	m.cacheView.cursor = 0
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if _, err := os.Stat(cachedPath); !os.IsNotExist(err) {
+		t.Fatalf("cached file stat after delete: err = %v, want IsNotExist", err)
+	}
+	if _, ok := got.cacheIdx.GetByIdentifier("url1"); ok {
+		t.Fatal("index entry \"url1\" still present after delete")
+	}
+	if _, ok := got.cacheIdx.Links[link]; ok {
+		t.Fatalf("link mapping %q still present after delete", link)
+	}
+}
+
+func TestProcessDeleteCacheEntryPreservesLocalSourcedFile(t *testing.T) {
+	root := t.TempDir()
+	cachedPath := writeTestCacheFile(t, root, "local-entry.mp4")
+
+	idx := &cache.Index{
+		Entries: map[string]cache.Entry{
+			"local1": {
+				Key:        "local1",
+				Identifier: "local1",
+				Source:     cachedPath,
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: cachedPath,
+				Title:      "Local Song",
+			},
+		},
+	}
+
+	// A local-sourced entry never carries a URL Source, so newCacheView's
+	// project-referenced check (which only matches URLs) can never place it
+	// in filteredEntries — show all so it is reachable at cursor 0.
+	m := newTestCacheModel(t, root, idx, nil)
+	m.cacheView.showAll = true
+	m.cacheView.cursor = 0
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if _, err := os.Stat(cachedPath); err != nil {
+		t.Fatalf("local file removed after delete (should be preserved): %v", err)
+	}
+	if _, ok := got.cacheIdx.GetByIdentifier("local1"); ok {
+		t.Fatal("index entry \"local1\" still present after delete")
+	}
+}
+
+// TestProcessDeleteCacheEntryCursorResetsWhenLastRowDeleted documents the
+// actual current behavior of the post-delete cursor-adjustment block: since
+// reloadState rebuilds m.cacheView via newCacheView (whose struct literal
+// never sets cursor), m.cacheView.cursor is unconditionally 0 by the time the
+// "cursor >= len(entries) && cursor > 0" guard runs — so the guard's second
+// clause is never true and the decrement never fires. The observable result
+// is that cursor always ends at 0, regardless of which row was deleted.
+func TestProcessDeleteCacheEntryCursorResetsWhenLastRowDeleted(t *testing.T) {
+	root := t.TempDir()
+	idx, links := buildNCacheEntries(t, root, 2)
+	m := newTestCacheModel(t, root, idx, links)
+	m.cacheView.cursor = 1 // last row
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if len(got.cacheView.entries()) != 1 {
+		t.Fatalf("entries = %d, want 1", len(got.cacheView.entries()))
+	}
+	if got.cacheView.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 after deleting the last row", got.cacheView.cursor)
+	}
+}
+
+func TestProcessDeleteCacheEntryCursorResetsWhenMiddleRowDeleted(t *testing.T) {
+	root := t.TempDir()
+	idx, links := buildNCacheEntries(t, root, 3)
+	m := newTestCacheModel(t, root, idx, links)
+	m.cacheView.cursor = 1 // middle row
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if len(got.cacheView.entries()) != 2 {
+		t.Fatalf("entries = %d, want 2", len(got.cacheView.entries()))
+	}
+	if got.cacheView.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 after deleting a middle row", got.cacheView.cursor)
+	}
+
+	remaining := got.cacheView.entries()
+	note := got.cacheView.rowStatus[remaining[got.cacheView.cursor].Identifier]
+	if !strings.HasPrefix(note, "note:removed ") {
+		t.Fatalf("row note for surviving cursor row = %q, want prefix \"note:removed \"", note)
+	}
+}
+
+func TestProcessDeleteCacheEntryLastRemainingEntryNoNote(t *testing.T) {
+	root := t.TempDir()
+	idx, links := buildNCacheEntries(t, root, 1)
+	m := newTestCacheModel(t, root, idx, links)
+	m.cacheView.cursor = 0
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if len(got.cacheView.entries()) != 0 {
+		t.Fatalf("entries = %d, want 0", len(got.cacheView.entries()))
+	}
+	if got.cacheView.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0", got.cacheView.cursor)
+	}
+	if len(got.cacheView.rowStatus) != 0 {
+		t.Fatalf("rowStatus = %v, want empty (no note set when no entries remain)", got.cacheView.rowStatus)
+	}
+}
+
+func TestProcessDeleteCacheEntryPreservesFilterModeShowAllTrue(t *testing.T) {
+	root := t.TempDir()
+	refLink := "https://example.com/watch?v=ref"
+	refPath := writeTestCacheFile(t, root, "ref.mp4")
+	otherPath := writeTestCacheFile(t, root, "other.mp4")
+
+	idx := &cache.Index{
+		Entries: map[string]cache.Entry{
+			"ref": {
+				Key: "ref", Identifier: "ref", Source: refLink,
+				SourceType: cache.SourceTypeURL, CachedPath: refPath, Title: "Referenced",
+			},
+			"other": {
+				Key: "other", Identifier: "other", Source: "https://example.com/watch?v=other",
+				SourceType: cache.SourceTypeURL, CachedPath: otherPath, Title: "Not Referenced",
+			},
+		},
+		Links: map[string]string{refLink: "ref"},
+	}
+
+	m := newTestCacheModel(t, root, idx, []string{refLink})
+	m.cacheView.showAll = true
+	if len(m.cacheView.allEntries) != 2 || len(m.cacheView.filteredEntries) != 1 {
+		t.Fatalf("fixture setup: allEntries=%d filteredEntries=%d, want 2 and 1 (filter must discriminate)",
+			len(m.cacheView.allEntries), len(m.cacheView.filteredEntries))
+	}
+	m.cacheView.cursor = 0
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if !got.cacheView.showAll {
+		t.Fatal("showAll = false, want true (filter mode must be preserved across the delete-triggered reload)")
+	}
+}
+
+func TestProcessDeleteCacheEntryPreservesFilterModeShowAllFalse(t *testing.T) {
+	root := t.TempDir()
+	refLink := "https://example.com/watch?v=ref"
+	refPath := writeTestCacheFile(t, root, "ref.mp4")
+	otherPath := writeTestCacheFile(t, root, "other.mp4")
+
+	idx := &cache.Index{
+		Entries: map[string]cache.Entry{
+			"ref": {
+				Key: "ref", Identifier: "ref", Source: refLink,
+				SourceType: cache.SourceTypeURL, CachedPath: refPath, Title: "Referenced",
+			},
+			"other": {
+				Key: "other", Identifier: "other", Source: "https://example.com/watch?v=other",
+				SourceType: cache.SourceTypeURL, CachedPath: otherPath, Title: "Not Referenced",
+			},
+		},
+		Links: map[string]string{refLink: "ref"},
+	}
+
+	m := newTestCacheModel(t, root, idx, []string{refLink})
+	m.cacheView.showAll = false
+	if len(m.cacheView.entries()) != 1 {
+		t.Fatalf("fixture setup: filtered entries = %d, want 1 (filter must discriminate)", len(m.cacheView.entries()))
+	}
+	m.cacheView.cursor = 0
+
+	gotModel, _ := m.processDeleteCacheEntry()
+	got := gotModel.(Model)
+
+	if got.cacheView.showAll {
+		t.Fatal("showAll = true, want false (filter mode must be preserved across the delete-triggered reload)")
+	}
+}
