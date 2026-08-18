@@ -48,6 +48,10 @@ var knownFieldMapKeys = func() map[string]bool {
 	return out
 }()
 
+// knownFieldMapKeyList is the sorted, comma-joined rendering of
+// knownFieldMapKeys, precomputed for validation messages.
+var knownFieldMapKeyList = strings.Join(sortedKeys(knownFieldMapKeys), ", ")
+
 var knownCacheFields = map[string]bool{
 	"title":       true,
 	"artist":      true,
@@ -154,7 +158,7 @@ func (c Config) validateCacheConfig() []ValidationResult {
 			if normalizedKey == "" || !knownFieldMapKeys[normalizedKey] {
 				results = append(results, ValidationResult{
 					Level:   "warning",
-					Message: fmt.Sprintf("collection %q: field_map key %q is not used (known keys: %s)", name, key, strings.Join(sortedKeys(knownFieldMapKeys), ", ")),
+					Message: fmt.Sprintf("collection %q: field_map key %q is not used (known keys: %s)", name, key, knownFieldMapKeyList),
 				})
 			}
 			validateFields(fmt.Sprintf("collections.%s.field_map.%s", name, key), fields)
