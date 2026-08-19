@@ -33,6 +33,16 @@ type tickMsg time.Time
 // fetch) stays visible before expiring, at 150ms per tick (~15s).
 const errorNoteTicks = 100
 
+// dashboardChromeLines is the fixed outer chrome every dashboard view's
+// content area must fit within: header(1) + blank(1) + blank(1) + status(1)
+// + footer(1) = 5 lines. Model.View() pads content to this budget so the
+// status/footer stay fixed at the bottom regardless of which view is
+// active; every view that computes its own visible-row or content-height
+// budget must derive it from this constant (plus that view's own extra
+// header/section-label lines) so the numbers can't drift independently
+// when the outer chrome layout changes.
+const dashboardChromeLines = 5
+
 // interactionMode tracks what the user is doing.
 type interactionMode int
 
@@ -2229,7 +2239,7 @@ func (m Model) View() string {
 	// Pad content to fill the available space so the status/footer stay fixed
 	// at the bottom regardless of which view is active.
 	// Chrome: header(1) + blank(1) + [content] + blank(1) + status(1) + footer(1) = 5 lines.
-	targetLines := m.termHeight - 5
+	targetLines := m.termHeight - dashboardChromeLines
 	contentLines := strings.Count(content, "\n")
 	b.WriteString(content)
 	for contentLines < targetLines {

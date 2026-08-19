@@ -448,7 +448,7 @@ func fuzzyMatch(query, target string) bool {
 //
 // Content is built as prioritised sections rather than one flat string cut
 // at the end. The never-droppable sections (edit fields, confidence
-// reasons, requery status, and — via the shared termHeight-5 budget — the
+// reasons, requery status, and — via the shared dashboardChromeLines budget — the
 // footer rendered separately by Model.View()) are measured first; whatever
 // budget remains is spent on the optional context fields (dropped first)
 // and the artist suggestion list (capped second). Any reduction is marked
@@ -549,7 +549,7 @@ func (o *cacheDoctorOverlay) view() string {
 	capped := o.termHeight > 0
 	maxLines := 0
 	if capped {
-		maxLines = o.termHeight - 5
+		maxLines = o.termHeight - dashboardChromeLines
 		if maxLines < 0 {
 			maxLines = 0
 		}

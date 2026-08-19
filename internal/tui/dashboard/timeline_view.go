@@ -15,6 +15,11 @@ import (
 	"powerhour/internal/tui"
 )
 
+// timelineHeaderLines is the timeline view's own chrome on top of
+// dashboardChromeLines: panel/section-label overhead plus one line for the
+// unified help row at the bottom.
+const timelineHeaderLines = 8
+
 // timelineView holds the state for the timeline view with output at the top,
 // sequence entries in the middle, and resolved preview at the bottom.
 type timelineView struct {
@@ -82,9 +87,10 @@ func findConcatOutput(projectRoot string) (string, bool, int64, time.Time) {
 }
 
 // contentHeight returns total height available for the sequence and preview panels.
-// -13 reserves chrome plus one line for the unified help row at the bottom.
+// dashboardChromeLines (outer chrome) + timelineHeaderLines reserves panel
+// overhead plus one line for the unified help row at the bottom.
 func (v timelineView) contentHeight() int {
-	h := max(v.termHeight-13, 4)
+	h := max(v.termHeight-dashboardChromeLines-timelineHeaderLines, 4)
 	return h
 }
 
