@@ -51,6 +51,8 @@ func (ti textInput) update(msg tea.KeyMsg) (textInput, inputResult) {
 		}
 	case tea.KeyRunes:
 		ti.value += string(msg.Runes)
+	case tea.KeySpace:
+		ti.value += " "
 	}
 	return ti, inputResult{}
 }
