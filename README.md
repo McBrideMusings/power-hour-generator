@@ -1,10 +1,10 @@
 # Power Hour Generator
 
-Power Hour Generator is a cross-platform CLI, written in Go, that orchestrates `yt-dlp` and `ffmpeg` to produce power hour clip libraries. It ingests a structured CSV describing each clip, manages project-local caches of source footage, and renders normalized MP4 segments with consistent overlays. The initial release focuses on generating discrete per-clip files that you can assemble in an editor of your choice.
+Power Hour Generator is a cross-platform CLI, written in Go, that orchestrates `yt-dlp` and `ffmpeg` to produce a finished power hour video. It ingests a structured CSV or YAML plan describing each clip, manages project-local caches of source footage, renders normalized MP4 segments with consistent overlays, and concatenates them into a single final video following the project's configured timeline.
 
 ## Project status
 
-The project is in active development. This document describes the planned capabilities for the first Go-based release. The previous Python implementation is being replaced and no longer applies.
+The project is in active development. The Go rewrite has fully replaced the earlier Python implementation, which no longer applies.
 
 ## Planned capabilities
 

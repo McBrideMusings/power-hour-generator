@@ -12,6 +12,7 @@ export default defineConfig({
       { text: 'Architecture', link: '/architecture/overview' },
       { text: 'Development', link: '/development/setup' },
       { text: 'Specs', link: '/specs/' },
+      { text: 'ADR', link: '/adr/' },
     ],
 
     sidebar: {
@@ -62,6 +63,15 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/specs/' },
             { text: 'Index Badge at Concat Time', link: '/specs/concat-time-index' },
+          ],
+        },
+      ],
+      '/adr/': [
+        {
+          text: 'ADR',
+          items: [
+            { text: 'Overview', link: '/adr/' },
+            { text: '1. Two-level render hash', link: '/adr/0001-two-level-render-hash' },
           ],
         },
       ],
