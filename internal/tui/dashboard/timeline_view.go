@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/config"
 	"powerhour/internal/project"
@@ -53,6 +54,14 @@ type timelineView struct {
 	// Inline confirm prompt rendered beneath the cursor sequence row (set by
 	// model when modeConfirmDelete is active). Empty = no pending confirm.
 	confirmDelete string
+
+	// Add-slot state (set by model when modeAddSeq is active). Mirrors
+	// collectionView's addFocus/addBuffer/addCursor, but simplified — a
+	// timeline sequence entry is just a collection name or file path, so
+	// there's no suggestions/hint machinery to carry alongside it.
+	addFocus  bool
+	addBuffer string
+	addCursor int
 
 	// Terminal dimensions for viewport calculation.
 	termWidth  int
@@ -304,11 +313,15 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 }
 
 // renderHelpRow returns the single inline help row for the timeline view.
-// Priority matches the collection/cache views: confirm-delete wins, then any
-// transient note on the focused row, then a default action hint. Timeline has
-// no inline-edit or add-slot (those happen via modal prompts), so the ladder
-// is shorter here but the shape is identical.
+// Priority: the focused add-slot wins outright (it and confirm-delete are
+// mutually exclusive by construction — only one interaction mode is active
+// at a time), then confirm-delete, then any transient note on the focused
+// row, then a default action hint. Inline-edit still happens via a modal
+// (open powerhour.yaml), so it has no branch here.
 func (v timelineView) renderHelpRow() string {
+	if v.addFocus {
+		return v.renderAddSlot()
+	}
 	if v.confirmDelete != "" {
 		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
 	}
@@ -321,6 +334,46 @@ func (v timelineView) renderHelpRow() string {
 		return helpRowText("no sequence entries — press a to add one", faint, v.termWidth)
 	}
 	return helpRowText("a add · d delete · J/K reorder · e edit · r render · c concat", faint, v.termWidth)
+}
+
+// renderAddSlot renders the focused timeline add-slot footer: the rendered
+// input with its cursor, plus a trailing keys hint on the same line. Unlike
+// collection's renderAddSlot, this never spans multiple lines — there are no
+// suggestions or dynamic detect hints to show, since a sequence entry is
+// just a collection name or file path.
+func (v timelineView) renderAddSlot() string {
+	cursor := cursorStyle.Render("▸ ")
+	keysHint := "Enter add · Esc cancel · collection name or file path"
+
+	// renderEditField appends a trailing cursor glyph (one visual column)
+	// when the cursor sits at or past the end of the buffer; account for
+	// that here so the budget matches what it actually renders.
+	cursorGlyphWidth := 0
+	if v.addCursor >= len(v.addBuffer) {
+		cursorGlyphWidth = 1
+	}
+
+	avail := max(v.termWidth-len(helpRowPrefix), 12)
+	remaining := avail - runewidth.StringWidth(v.addBuffer) - cursorGlyphWidth
+
+	const gapWidth = 2 // "  " separator before the trailing hint
+	keysWidth := gapWidth + runewidth.StringWidth(keysHint)
+
+	fittedKeys := ""
+	switch {
+	case remaining <= 0:
+		// No room for the hint; the buffer alone fills (or exceeds) the budget.
+	case keysWidth <= remaining:
+		fittedKeys = keysHint
+	default:
+		fittedKeys = tui.TruncateWithEllipsis(keysHint, remaining-gapWidth)
+	}
+
+	line := cursor + "+ " + renderEditField(v.addBuffer, v.addCursor)
+	if fittedKeys != "" {
+		line += "  " + faint.Render(fittedKeys)
+	}
+	return line
 }
 
 func timelineSliceLabel(raw string) string {

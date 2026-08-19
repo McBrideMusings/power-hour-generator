@@ -62,7 +62,7 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 	case "timeline":
 		section("Timeline View",
 			"r            Render all segments (runs powerhour render)",
-			"a            Add a sequence entry (collection or file)",
+			"a            Focus the Add slot (type a collection name or file path)",
 			"J/K          Reorder the selected entry",
 			"x            Delete the selected entry, or the output row",
 			"e            On an entry row: open powerhour.yaml (press u after editing)",

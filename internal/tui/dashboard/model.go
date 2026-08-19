@@ -53,6 +53,7 @@ const (
 	modeInlineEdit                      // editing a row's fields inline
 	modeCacheInlineEdit                 // editing a cache entry's fields inline
 	modeAddClip                         // add-clip slot focused (paste link/path/CSV)
+	modeAddSeq                          // timeline add-slot focused (collection name or file path)
 )
 
 // Model is the top-level bubbletea model for the dashboard.
@@ -588,6 +589,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCacheInlineEditKey(msg)
 	case modeAddClip:
 		return m.handleAddClipKey(msg)
+	case modeAddSeq:
+		return m.handleAddSeqKey(msg)
 	}
 
 	if m.job.active {
@@ -665,9 +668,6 @@ func (m Model) handleInputKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if result.submitted {
 		m.mode = modeNormal
-		if m.activeView == 0 {
-			return m.processAddTimelineEntry(result.value)
-		}
 		return m.processAddRow(result.value)
 	}
 
@@ -1154,6 +1154,80 @@ func (m *Model) resetAddClipInput(cvIdx int, keepFocus bool) {
 // cancelAddClip returns to normal mode, clearing the slot focus.
 func (m Model) cancelAddClip() Model {
 	m.resetAddClipInput(m.addCvIdx, false)
+	m.mode = modeNormal
+	return m
+}
+
+// handleAddSeqKey drives the timeline's persistent add-slot. It mirrors
+// handleAddClipKey but trimmed down: a timeline sequence entry is just a
+// collection name or file path (classified by processAddTimelineEntry), so
+// there is no cache lookup, suggestions, or URL/CSV detection to drive.
+func (m Model) handleAddSeqKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	v := m.timelineView
+
+	switch msg.Type {
+	case tea.KeyEscape:
+		return m.cancelAddSeq(), nil
+
+	case tea.KeyEnter:
+		trimmed := strings.TrimSpace(v.addBuffer)
+		m.resetSeqAddInput(false)
+		m.mode = modeNormal
+		if trimmed == "" {
+			return m, nil
+		}
+		return m.processAddTimelineEntry(trimmed)
+
+	case tea.KeyRight:
+		if v.addCursor < len(v.addBuffer) {
+			v.addCursor++
+		}
+		m.timelineView = v
+		return m, nil
+
+	case tea.KeyLeft:
+		if v.addCursor > 0 {
+			v.addCursor--
+		}
+		m.timelineView = v
+		return m, nil
+
+	case tea.KeyBackspace:
+		if v.addCursor > 0 && len(v.addBuffer) > 0 {
+			v.addBuffer = v.addBuffer[:v.addCursor-1] + v.addBuffer[v.addCursor:]
+			v.addCursor--
+		}
+		m.timelineView = v
+		return m, nil
+
+	case tea.KeyRunes:
+		ch := string(msg.Runes)
+		v.addBuffer = v.addBuffer[:v.addCursor] + ch + v.addBuffer[v.addCursor:]
+		v.addCursor += len(ch)
+		m.timelineView = v
+		return m, nil
+
+	case tea.KeySpace:
+		v.addBuffer = v.addBuffer[:v.addCursor] + " " + v.addBuffer[v.addCursor:]
+		v.addCursor++
+		m.timelineView = v
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// resetSeqAddInput clears the timeline add-slot buffer, optionally keeping
+// it focused so another entry can be typed immediately.
+func (m *Model) resetSeqAddInput(keepFocus bool) {
+	m.timelineView.addFocus = keepFocus
+	m.timelineView.addBuffer = ""
+	m.timelineView.addCursor = 0
+}
+
+// cancelAddSeq returns to normal mode, clearing the timeline add-slot focus.
+func (m Model) cancelAddSeq() Model {
+	m.resetSeqAddInput(false)
 	m.mode = modeNormal
 	return m
 }
@@ -1661,8 +1735,11 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, nil
 		}
 		if v.focusPanel == 0 {
-			m.mode = modeInput
-			m.input = newTextInput("Add sequence entry — [c]ollection or [f]ile path:")
+			m.mode = modeAddSeq
+			v.addFocus = true
+			v.addBuffer = ""
+			v.addCursor = 0
+			m.timelineView = v
 			return m, nil
 		}
 		return m, nil
@@ -2297,6 +2374,8 @@ func (m Model) View() string {
 		case modeInlineEdit:
 			b.WriteString("")
 		case modeAddClip:
+			b.WriteString("")
+		case modeAddSeq:
 			b.WriteString("")
 		default:
 			b.WriteString(renderFooter(m))

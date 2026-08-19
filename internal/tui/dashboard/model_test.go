@@ -864,6 +864,71 @@ func TestProcessAddTimelineEntryUsesInlineNote(t *testing.T) {
 	}
 }
 
+func TestTimelineAKeyFocusesAddSlot(t *testing.T) {
+	m := testTimelineModel(t)
+
+	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	got := gotModel.(Model)
+
+	if got.mode != modeAddSeq {
+		t.Fatalf("mode = %v, want modeAddSeq", got.mode)
+	}
+	if !got.timelineView.addFocus {
+		t.Fatal("timelineView.addFocus = false, want true")
+	}
+}
+
+func TestHandleAddSeqKeyTypesAndAddsEntry(t *testing.T) {
+	m := testTimelineModel(t)
+	m.mode = modeAddSeq
+	m.timelineView.addFocus = true
+
+	for _, ch := range "songs" {
+		gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = gotModel.(Model)
+	}
+	if m.timelineView.addBuffer != "songs" {
+		t.Fatalf("addBuffer = %q, want %q", m.timelineView.addBuffer, "songs")
+	}
+
+	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+
+	if got.mode != modeNormal {
+		t.Fatalf("mode = %v, want modeNormal", got.mode)
+	}
+	if got.timelineView.addFocus {
+		t.Fatal("addFocus = true, want false after Enter")
+	}
+	if len(got.timelineView.sequence) != 2 {
+		t.Fatalf("sequence len = %d, want 2", len(got.timelineView.sequence))
+	}
+}
+
+func TestHandleAddSeqKeyEscCancels(t *testing.T) {
+	m := testTimelineModel(t)
+	m.mode = modeAddSeq
+	m.timelineView.addFocus = true
+	m.timelineView.addBuffer = "partial"
+	m.timelineView.addCursor = len(m.timelineView.addBuffer)
+
+	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyEscape})
+	got := gotModel.(Model)
+
+	if got.mode != modeNormal {
+		t.Fatalf("mode = %v, want modeNormal", got.mode)
+	}
+	if got.timelineView.addFocus {
+		t.Fatal("addFocus = true, want false after Esc")
+	}
+	if got.timelineView.addBuffer != "" {
+		t.Fatalf("addBuffer = %q, want empty after Esc", got.timelineView.addBuffer)
+	}
+	if len(got.timelineView.sequence) != 1 {
+		t.Fatalf("sequence len = %d, want unchanged 1", len(got.timelineView.sequence))
+	}
+}
+
 func TestProcessDeleteTimelineEntryUsesInlineNote(t *testing.T) {
 	m := testTimelineModel(t)
 	m.timelineView.sequence = append(m.timelineView.sequence, config.SequenceEntry{Collection: "songs", Slice: "start:2"})
