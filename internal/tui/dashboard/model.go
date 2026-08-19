@@ -2105,7 +2105,8 @@ func (m Model) applyCurrentDoctorEntry() Model {
 	if o.cursor < 0 || o.cursor >= len(o.findings) {
 		return m
 	}
-	identifier := o.findings[o.cursor].finding.Identifier
+	item := o.findings[o.cursor]
+	identifier := item.finding.Identifier
 	title := strings.TrimSpace(o.editTitle)
 	artist := strings.TrimSpace(o.editArtist)
 
@@ -2122,13 +2123,32 @@ func (m Model) applyCurrentDoctorEntry() Model {
 	entry.Title = title
 	entry.Artist = artist
 	idx.SetEntry(entry)
+
+	// If the user actively corrected the artist field, persist it as an
+	// alias for future normalization and reapply it across the index, same
+	// as the CLI's interactive "a" (alias+apply) path.
+	aliasSaved := false
+	if o.artistTouched && artist != "" && strings.TrimSpace(item.finding.AliasCandidate) != "" {
+		if err := cache.SaveArtistAlias(item.finding.AliasCandidate, artist); err != nil {
+			m.statusMsg = fmt.Sprintf("Alias save error: %v", err)
+		} else {
+			aliasSaved = true
+			normCfg := cache.LoadNormalizationConfig()
+			cachedoctor.ApplyAliasAcrossIndex(idx, normCfg, item.finding.AliasCandidate)
+		}
+	}
+
 	if err := cache.Save(m.pp, idx); err != nil {
 		m.statusMsg = fmt.Sprintf("Save error: %v", err)
 		return m
 	}
 	o.applied++
 	o.rememberArtist(artist)
-	m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+	if aliasSaved {
+		m.statusMsg = fmt.Sprintf("Saved: %s – %s (alias remembered)", title, artist)
+	} else {
+		m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+	}
 	m = reloadState(m)
 
 	// Advance to next entry.
