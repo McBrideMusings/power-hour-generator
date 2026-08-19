@@ -145,15 +145,15 @@ func TestCacheInlineEditRenderSkipsTrailingColumns(t *testing.T) {
 				Values:     []string{"Another Song", uniqueArtistValue},
 			},
 		},
-		showAll:       false,
-		editing:       true,
-		cursor:        0,
-		editFieldIdx:  0, // editing the first column (title)
-		editValue:     "EditedTitle",
-		editCursor:    5,
-		termWidth:     120,
-		termHeight:    30,
-		rowStatus:     make(map[string]string),
+		showAll:      false,
+		editing:      true,
+		cursor:       0,
+		editFieldIdx: 0, // editing the first column (title)
+		editValue:    "EditedTitle",
+		editCursor:   5,
+		termWidth:    120,
+		termHeight:   30,
+		rowStatus:    make(map[string]string),
 	}
 
 	rendered := v.view()
@@ -190,5 +190,61 @@ func TestCacheInlineEditRenderSkipsTrailingColumns(t *testing.T) {
 	// (because the break statement skips rendering it).
 	if strings.Contains(editRowLine, "Some Artist") {
 		t.Errorf("edit row unexpectedly contains the second column value 'Some Artist'. This suggests the break statement is not working correctly (trailing columns are being rendered). Edit row: %q", editRowLine)
+	}
+}
+
+// TestConfirmDeletePromptRoutesThroughFooterInConfirmStyle verifies that,
+// like the timeline view (and unlike the collection view's per-row
+// insertion), the cache view has no per-row insertion point for
+// confirmDelete — it is routed through the single shared footer help row
+// via renderHelpRow, styled with confirmStyle, and its presence does not
+// change the total rendered line count (no row drift) versus the
+// no-prompt render.
+func TestCacheConfirmDeletePromptRoutesThroughFooterInConfirmStyle(t *testing.T) {
+	withANSIColorProfile(t)
+
+	entries := []cacheEntry{
+		{
+			Identifier: "vid1",
+			Source:     "http://example.com/vid1",
+			CachedPath: "/cache/vid1.mp4",
+			Values:     []string{"My Song", "Some Artist"},
+		},
+		{
+			Identifier: "vid2",
+			Source:     "http://example.com/vid2",
+			CachedPath: "/cache/vid2.mp4",
+			Values:     []string{"Another Song", "Other Artist"},
+		},
+	}
+
+	base := cacheView{
+		columns:         []string{"title", "artist"},
+		allEntries:      entries,
+		filteredEntries: entries,
+		showAll:         false,
+		cursor:          0,
+		termWidth:       100,
+		termHeight:      40,
+		rowStatus:       make(map[string]string),
+	}
+
+	without := base
+	without.confirmDelete = ""
+	withoutRendered := without.view()
+	withoutLines := strings.Count(withoutRendered, "\n")
+
+	with := base
+	with.confirmDelete = "Delete vid1? [y/n]"
+	withRendered := with.view()
+	withLines := strings.Count(withRendered, "\n")
+
+	if withLines != withoutLines {
+		t.Errorf("expected total line count to stay unchanged (prompt replaces the footer, not adds a row): without=%d with=%d\nwith:\n%s", withoutLines, withLines, withRendered)
+	}
+
+	wantFooter := helpRowText(with.confirmDelete, confirmStyle, with.termWidth)
+	if !strings.Contains(withRendered, wantFooter) {
+		t.Errorf("footer does not carry the confirmStyle-rendered prompt.\nwant substring: %q\ngot view:\n%s", wantFooter, withRendered)
 	}
 }
