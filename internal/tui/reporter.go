@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"powerhour/internal/project"
 	"powerhour/internal/render"
 )
 
@@ -12,27 +13,41 @@ import (
 // interface. It uses caller-supplied functions to extract keys and fields so the
 // tui package doesn't need to know about specific column layouts.
 type RenderReporter struct {
-	send           func(tea.Msg)
-	keyFromSeg     func(render.Segment) string
-	keyFromRes     func(render.Result) string
-	startFields    func(render.Segment) map[string]string
-	completeFields func(render.Result) map[string]string
+	send             func(tea.Msg)
+	keyFromSeg       func(render.Segment) string
+	keyFromRes       func(render.Result) string
+	keyFromClip      func(project.CollectionClip) string
+	startFields      func(render.Segment) map[string]string
+	completeFields   func(render.Result) map[string]string
+	fetchingFields   func(project.CollectionClip) map[string]string
+	fetchedFields    func(project.CollectionClip, render.Segment) map[string]string
+	fetchErrorFields func(project.CollectionClip, error) map[string]string
 }
 
 // NewRenderReporter constructs a reporter with the given mapping functions.
+// The fetch-phase functions (keyFromClip, fetchingFields, fetchedFields,
+// fetchErrorFields) may be nil if the caller never reports fetch events.
 func NewRenderReporter(
 	send func(tea.Msg),
 	keyFromSeg func(render.Segment) string,
 	keyFromRes func(render.Result) string,
+	keyFromClip func(project.CollectionClip) string,
 	startFields func(render.Segment) map[string]string,
 	completeFields func(render.Result) map[string]string,
+	fetchingFields func(project.CollectionClip) map[string]string,
+	fetchedFields func(project.CollectionClip, render.Segment) map[string]string,
+	fetchErrorFields func(project.CollectionClip, error) map[string]string,
 ) *RenderReporter {
 	return &RenderReporter{
-		send:           send,
-		keyFromSeg:     keyFromSeg,
-		keyFromRes:     keyFromRes,
-		startFields:    startFields,
-		completeFields: completeFields,
+		send:             send,
+		keyFromSeg:       keyFromSeg,
+		keyFromRes:       keyFromRes,
+		keyFromClip:      keyFromClip,
+		startFields:      startFields,
+		completeFields:   completeFields,
+		fetchingFields:   fetchingFields,
+		fetchedFields:    fetchedFields,
+		fetchErrorFields: fetchErrorFields,
 	}
 }
 
@@ -57,6 +72,39 @@ func (r *RenderReporter) Complete(res render.Result) {
 	r.send(RowUpdateMsg{
 		Key:    r.keyFromRes(res),
 		Fields: r.completeFields(res),
+	})
+}
+
+// Fetching implements render.ProgressReporter.
+func (r *RenderReporter) Fetching(clip project.CollectionClip) {
+	if r.keyFromClip == nil || r.fetchingFields == nil {
+		return
+	}
+	r.send(RowUpdateMsg{
+		Key:    r.keyFromClip(clip),
+		Fields: r.fetchingFields(clip),
+	})
+}
+
+// Fetched implements render.ProgressReporter.
+func (r *RenderReporter) Fetched(clip project.CollectionClip, seg render.Segment) {
+	if r.keyFromClip == nil || r.fetchedFields == nil {
+		return
+	}
+	r.send(RowUpdateMsg{
+		Key:    r.keyFromClip(clip),
+		Fields: r.fetchedFields(clip, seg),
+	})
+}
+
+// FetchError implements render.ProgressReporter.
+func (r *RenderReporter) FetchError(clip project.CollectionClip, err error) {
+	if r.keyFromClip == nil || r.fetchErrorFields == nil {
+		return
+	}
+	r.send(RowUpdateMsg{
+		Key:    r.keyFromClip(clip),
+		Fields: r.fetchErrorFields(clip, err),
 	})
 }
 

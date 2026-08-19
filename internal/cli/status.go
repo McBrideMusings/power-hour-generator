@@ -17,6 +17,7 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/job"
 	"powerhour/internal/render/state"
 	"powerhour/pkg/csvplan"
 )
@@ -238,7 +239,7 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 			isURL := strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu")
 
 			if isURL {
-				_, ok, err := resolveEntryForRow(pp, idx, r)
+				_, ok, err := job.ResolveEntryForRow(pp, idx, r)
 				if err == nil && ok {
 					cacheStatus = "cached"
 				}
