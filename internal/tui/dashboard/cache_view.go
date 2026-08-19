@@ -11,6 +11,10 @@ import (
 	"powerhour/internal/config"
 )
 
+// cacheHeaderLines is the cache view's own chrome on top of
+// dashboardChromeLines: the unified help row at the bottom.
+const cacheHeaderLines = 5
+
 // cacheEntry is a flattened cache entry for display.
 type cacheEntry struct {
 	Identifier string
@@ -145,8 +149,9 @@ func (v *cacheView) toggle() {
 }
 
 func (v cacheView) visibleRowCount() int {
-	// -10 reserves one line for the unified help row at the bottom.
-	h := max(v.termHeight-10, 1)
+	// dashboardChromeLines (outer chrome) + cacheHeaderLines reserves one
+	// line for the unified help row at the bottom.
+	h := max(v.termHeight-dashboardChromeLines-cacheHeaderLines, 1)
 	return h
 }
 

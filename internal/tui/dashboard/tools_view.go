@@ -66,7 +66,7 @@ func (v toolsView) view() string {
 	// Determine if we need to truncate based on termHeight budget.
 	maxLines := 0
 	if v.termHeight > 0 {
-		maxLines = v.termHeight - 5
+		maxLines = v.termHeight - dashboardChromeLines
 	}
 
 	// If no budget or budget is zero/negative, emit all blocks (no truncation).
