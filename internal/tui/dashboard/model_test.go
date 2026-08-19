@@ -370,7 +370,7 @@ func TestInlineEditInsertAndBackspaceAtCaret(t *testing.T) {
 	m.collectionViews[0].editValue = "FirstSong"
 	m.collectionViews[0].editCursor = len("First")
 
-	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" ")})
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeySpace})
 	got := gotModel.(Model)
 
 	if got.editValue != "First Song" {
