@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
@@ -16,8 +17,10 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/state"
 	"powerhour/internal/tools"
 	"powerhour/internal/tui"
+	"powerhour/pkg/csvplan"
 )
 
 var (
@@ -124,6 +127,17 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 
 	if concatDryRun {
 		sw.Stop()
+
+		// Build hash info for inline file entries so their status can show
+		// stale (hash mismatch) vs. rendered (✓), mirroring `status`'s
+		// timeline section.
+		rs, _ := state.Load(pp.RenderStateFile)
+		inlineHashes := buildInlineHashes(pp, cfg, rs)
+
+		green := lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Inline(true)
+		yellow := lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Inline(true)
+		red := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Inline(true)
+
 		fmt.Fprintf(outWriter, "Segment order (%d clips):\n", len(segments))
 		for i, seg := range segments {
 			rel, rerr := filepath.Rel(pp.Root, seg.Path)
@@ -134,7 +148,16 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 			if col == "" {
 				col = "-"
 			}
-			fmt.Fprintf(outWriter, "  %3d  %-15s %s\n", i+1, col, rel)
+
+			statusLabel := green.Render(segStatusOK)
+			switch segmentDryRunStatus(seg.Path, inlineHashes) {
+			case segStatusMissing:
+				statusLabel = red.Render(segStatusMissing)
+			case segStatusStale:
+				statusLabel = yellow.Render(segStatusStale)
+			}
+
+			fmt.Fprintf(outWriter, "  %3d  %-15s %-8s %s\n", i+1, col, statusLabel, rel)
 		}
 		return nil
 	}
@@ -261,6 +284,79 @@ func containerExt(container string) string {
 	default:
 		return ".mp4"
 	}
+}
+
+// inlineHashInfo carries the stored (render-state) and freshly-computed
+// input hash for an inline file entry's segment, used to detect staleness
+// in `concat --dry-run`.
+type inlineHashInfo struct {
+	stored   string
+	computed string
+}
+
+// Dry-run status tokens, mirroring the per-row status labels `status` shows
+// for the timeline section.
+const (
+	segStatusOK      = "✓"
+	segStatusStale   = "stale"
+	segStatusMissing = "missing"
+)
+
+// buildInlineHashes computes, for every inline `file:` timeline entry, the
+// current input hash and the hash last recorded in render state — keyed by
+// the entry's resolved segment output path. This mirrors the construction
+// in status.go's runStatus and collections_render.go's renderInlineFiles.
+func buildInlineHashes(pp paths.ProjectPaths, cfg config.Config, rs *state.RenderState) map[string]inlineHashInfo {
+	tmpl := cfg.SegmentFilenameTemplate()
+	inlineHashes := make(map[string]inlineHashInfo)
+	for seqIdx, entry := range cfg.Timeline.Sequence {
+		if entry.File == "" {
+			continue
+		}
+		sourcePath := entry.File
+		if !filepath.IsAbs(sourcePath) {
+			sourcePath = filepath.Join(pp.Root, sourcePath)
+		}
+		segPath := render.InlineSegmentPath(pp.SegmentsDir, seqIdx, sourcePath)
+		fadeIn, fadeOut := config.ResolveFade(entry.Fade, entry.FadeIn, entry.FadeOut)
+		inlineSeg := render.Segment{
+			Clip: project.Clip{
+				Sequence:       seqIdx + 1,
+				ClipType:       project.ClipType("__inline__"),
+				TypeIndex:      seqIdx,
+				SourceKind:     project.SourceKindPlan,
+				FadeInSeconds:  fadeIn,
+				FadeOutSeconds: fadeOut,
+				Row: csvplan.Row{
+					Index: seqIdx + 1,
+					Link:  sourcePath,
+				},
+			},
+			OutputPath: segPath,
+		}
+		info := inlineHashInfo{computed: state.SegmentInputHash(inlineSeg, tmpl)}
+		if rs != nil {
+			if prior, ok := rs.Segments[segPath]; ok {
+				info.stored = prior.InputHash
+			}
+		}
+		inlineHashes[segPath] = info
+	}
+	return inlineHashes
+}
+
+// segmentDryRunStatus reports whether a resolved segment path is missing,
+// stale (inline file entry whose stored hash doesn't match the current
+// computed hash), or ok. Only inline file entries carry hash-based drift
+// detection; collection-rendered segments only get an existence check.
+func segmentDryRunStatus(path string, inlineHashes map[string]inlineHashInfo) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return segStatusMissing
+	}
+	if info, ok := inlineHashes[path]; ok && info.stored != "" && info.stored != info.computed {
+		return segStatusStale
+	}
+	return segStatusOK
 }
 
 func hasMissingSegments(segments []render.TimelineSegmentPath) bool {
