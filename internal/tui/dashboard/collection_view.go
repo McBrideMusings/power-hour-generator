@@ -28,6 +28,12 @@ const (
 	rowStale                       // rendered, but input changed since last render
 )
 
+const (
+	// maxAddSuggestions is the maximum number of song suggestions displayed
+	// in the add-clip slot.
+	maxAddSuggestions = 3
+)
+
 var rowStateStyles = map[rowState]lipgloss.Style{
 	rowRendered:    lipgloss.NewStyle(),                                   // default
 	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("214")), // amber
