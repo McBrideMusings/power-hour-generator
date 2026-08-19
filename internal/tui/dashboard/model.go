@@ -1953,19 +1953,19 @@ func (m Model) handleCacheInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // entry under the cursor and persists the index. When exitMode is true, the
 // model also returns to modeNormal and clears the edit state.
 func (m Model) saveCacheEdit(v cacheView, exitMode bool) (tea.Model, tea.Cmd) {
-	entries := v.entries()
-	entry := entries[v.cursor]
-	field := v.columns[v.editFieldIdx]
-
-	idx, err := cache.Load(m.pp)
-	if err != nil {
-		m.statusMsg = fmt.Sprintf("Cache load error: %v", err)
+	if m.cacheIdx == nil {
+		m.statusMsg = "Cache index not loaded"
 		v.editing = false
 		m.cacheView = v
 		m.mode = modeNormal
 		return m, nil
 	}
-	stored, ok := idx.GetByIdentifier(entry.Identifier)
+
+	entries := v.entries()
+	entry := entries[v.cursor]
+	field := v.columns[v.editFieldIdx]
+
+	stored, ok := m.cacheIdx.GetByIdentifier(entry.Identifier)
 	if !ok {
 		m.statusMsg = "Cache entry not found"
 		v.editing = false
@@ -1980,15 +1980,14 @@ func (m Model) saveCacheEdit(v cacheView, exitMode bool) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		return m, nil
 	}
-	idx.SetEntry(stored)
-	if err := cache.Save(m.pp, idx); err != nil {
+	m.cacheIdx.SetEntry(stored)
+	if err := cache.Save(m.pp, m.cacheIdx); err != nil {
 		m.statusMsg = fmt.Sprintf("Cache save error: %v", err)
 		v.editing = false
 		m.cacheView = v
 		m.mode = modeNormal
 		return m, nil
 	}
-	m.cacheIdx = idx
 
 	if exitMode {
 		v.editing = false
