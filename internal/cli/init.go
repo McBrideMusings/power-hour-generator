@@ -17,7 +17,19 @@ const (
 defaults:
     start_time: "0:00"
     duration: "60"
-rows: []
+rows:
+  - title: "Example Song 1"
+    artist: "Example Artist"
+    name: "Example One"
+    start_time: "0:00"
+    duration: "60"
+    link: ""
+  - title: "Example Song 2"
+    artist: "Example Artist"
+    name: "Example Two"
+    start_time: "0:00"
+    duration: "60"
+    link: ""
 `
 	interstitialsPlanYAML = `columns: [link, start_time, duration]
 defaults:
@@ -25,8 +37,11 @@ defaults:
     duration: "5"
 rows: []
 `
-	songsPlanCSV         = "title,artist,name,start_time,duration,link\n"
-	songsPlanTSV         = "title\tartist\tname\tstart_time\tduration\tlink\n"
+	songsPlanCSV         = `title,artist,name,start_time,duration,link
+Example Song 1,Example Artist,Example One,0:00,60,
+Example Song 2,Example Artist,Example Two,0:00,60,
+`
+	songsPlanTSV         = "title\tartist\tname\tstart_time\tduration\tlink\nExample Song 1\tExample Artist\tExample One\t0:00\t60\t\nExample Song 2\tExample Artist\tExample Two\t0:00\t60\t\n"
 	interstitialsPlanCSV = "link,start_time,duration\n"
 	interstitialsPlanTSV = "link\tstart_time\tduration\n"
 )
