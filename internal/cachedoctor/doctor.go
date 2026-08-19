@@ -26,9 +26,38 @@ type Finding struct {
 	NeedsAttention bool     `json:"needs_attention"`
 }
 
-func InspectEntry(ctx context.Context, svc interface {
+type remoteIDQuerier interface {
 	QueryRemoteID(context.Context, string) (cache.RemoteIDInfo, error)
-}, normCfg cache.NormalizationConfig, knownArtists []string, entry cache.Entry, requery bool) (Finding, bool, error) {
+}
+
+// InspectEntry inspects a single cache entry and returns a Finding only when
+// normalization proposes a change (NeedsAttention). Callers that want the
+// Finding for every entry, regardless of NeedsAttention, should use
+// InspectEntryAll instead.
+func InspectEntry(ctx context.Context, svc remoteIDQuerier, normCfg cache.NormalizationConfig, knownArtists []string, entry cache.Entry, requery bool) (Finding, bool, error) {
+	finding, err := buildFinding(ctx, svc, normCfg, knownArtists, entry, requery)
+	if err != nil {
+		return Finding{}, false, err
+	}
+	if !finding.NeedsAttention {
+		return Finding{}, false, nil
+	}
+	return finding, true, nil
+}
+
+// InspectEntryAll inspects a single cache entry and always returns the fully
+// populated Finding (including its NeedsAttention flag), whether or not
+// normalization proposes a change. Used by callers that want to review or
+// edit every entry, not just entries flagged as needing attention.
+func InspectEntryAll(ctx context.Context, svc remoteIDQuerier, normCfg cache.NormalizationConfig, knownArtists []string, entry cache.Entry, requery bool) (Finding, bool, error) {
+	finding, err := buildFinding(ctx, svc, normCfg, knownArtists, entry, requery)
+	if err != nil {
+		return Finding{}, false, err
+	}
+	return finding, finding.NeedsAttention, nil
+}
+
+func buildFinding(ctx context.Context, svc remoteIDQuerier, normCfg cache.NormalizationConfig, knownArtists []string, entry cache.Entry, requery bool) (Finding, error) {
 	input := cache.NormalizationInput{
 		Title:    entry.Title,
 		Artist:   entry.Artist,
@@ -46,7 +75,7 @@ func InspectEntry(ctx context.Context, svc interface {
 		if link != "" {
 			info, err := svc.QueryRemoteID(ctx, link)
 			if err != nil {
-				return Finding{}, false, fmt.Errorf("requery %s: %w", link, err)
+				return Finding{}, fmt.Errorf("requery %s: %w", link, err)
 			}
 			input = cache.NormalizationInput{
 				Title:    firstNonEmpty(info.Title, entry.Title),
@@ -67,10 +96,6 @@ func InspectEntry(ctx context.Context, svc interface {
 		result.Artist != strings.TrimSpace(entry.Artist) ||
 		(similar != "" && !strings.EqualFold(similar, result.Artist))
 
-	if !needsAttention {
-		return Finding{}, false, nil
-	}
-
 	return Finding{
 		Identifier:     entry.Identifier,
 		File:           filepath.Base(entry.CachedPath),
@@ -85,7 +110,7 @@ func InspectEntry(ctx context.Context, svc interface {
 		AliasCandidate: firstNonEmpty(result.AliasCandidate, result.AliasSource, entry.Artist, entry.Uploader, entry.Channel),
 		SimilarArtist:  similar,
 		NeedsAttention: needsAttention,
-	}, true, nil
+	}, nil
 }
 
 func ApplyFinding(idx *cache.Index, finding Finding) error {
