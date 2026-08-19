@@ -56,6 +56,8 @@ rows:
     link: https://youtu.be/fJ9rUzIMcZQ
 ```
 
+> **Note:** The `name` column provides text for the end-of-clip credit overlay rendered by the `song-info` preset. The credit line displays as "Credit: {name}" at the end of each clip (when `name` is present). See [Overlays](/guide/overlays) for details on customizing it.
+
 ### The one-command path
 
 Once your config and plan files are in place, one command produces the finished video:
