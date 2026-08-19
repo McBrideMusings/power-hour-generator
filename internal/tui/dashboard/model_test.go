@@ -2100,3 +2100,111 @@ func TestUpdateTextInputConsumesKeystroke(t *testing.T) {
 		t.Fatalf("mode = %v, want modeInput (%v) — the model must stay in text-input mode after a plain keystroke", got.mode, modeInput)
 	}
 }
+
+// TestSaveConfigAndReResolveBlocksOnCollectionAndFileBoth verifies that
+// a sequence entry naming both collection and file is rejected at save time
+// with a clear error message.
+func TestSaveConfigAndReResolveBlocksOnCollectionAndFileBoth(t *testing.T) {
+	m := testCollectionModel(t)
+
+	// Create an invalid sequence entry with both Collection and File set.
+	m.cfg.Timeline.Sequence = []config.SequenceEntry{
+		{
+			Collection: "songs",
+			File:       "invalid.mp4", // mutually exclusive with Collection
+		},
+	}
+
+	// Save should be blocked by validation.
+	got := saveConfigAndReResolve(m)
+
+	// Config should not be written to disk.
+	_, err := os.ReadFile(m.pp.ConfigFile)
+	if err == nil {
+		// If we read the config, check that it doesn't contain the invalid entry.
+		cfgFromDisk, _ := config.Load(m.pp.ConfigFile)
+		if len(cfgFromDisk.Timeline.Sequence) > 0 && cfgFromDisk.Timeline.Sequence[0].File != "" {
+			t.Fatal("invalid config was written to disk")
+		}
+	}
+
+	// Status message should reflect the validation error.
+	if got.statusMsg == "" {
+		t.Fatal("statusMsg is empty, want validation error message")
+	}
+	if !strings.Contains(got.statusMsg, "validation error") {
+		t.Fatalf("statusMsg = %q, want to contain 'validation error'", got.statusMsg)
+	}
+}
+
+// TestSaveConfigAndReResolveBlocksOnNegativeFade verifies that
+// a sequence entry with a negative fade value is rejected at save time
+// with a clear error message.
+func TestSaveConfigAndReResolveBlocksOnNegativeFade(t *testing.T) {
+	m := testCollectionModel(t)
+
+	// Create an invalid sequence entry with negative fade.
+	m.cfg.Timeline.Sequence = []config.SequenceEntry{
+		{
+			Collection: "songs",
+			Fade:       -1.0, // invalid: fade must be non-negative
+		},
+	}
+
+	// Save should be blocked by validation.
+	got := saveConfigAndReResolve(m)
+
+	// Config should not be written to disk.
+	_, err := os.ReadFile(m.pp.ConfigFile)
+	if err == nil {
+		// If we read the config, check that it doesn't contain the invalid entry.
+		cfgFromDisk, _ := config.Load(m.pp.ConfigFile)
+		if len(cfgFromDisk.Timeline.Sequence) > 0 && cfgFromDisk.Timeline.Sequence[0].Fade < 0 {
+			t.Fatal("invalid config was written to disk")
+		}
+	}
+
+	// Status message should reflect the validation error.
+	if got.statusMsg == "" {
+		t.Fatal("statusMsg is empty, want validation error message")
+	}
+	if !strings.Contains(got.statusMsg, "validation error") {
+		t.Fatalf("statusMsg = %q, want to contain 'validation error'", got.statusMsg)
+	}
+}
+
+// TestSaveConfigAndReResolveSavesValidConfig verifies that
+// a valid config is saved and re-resolved successfully.
+func TestSaveConfigAndReResolveSavesValidConfig(t *testing.T) {
+	m := testCollectionModel(t)
+
+	// Create a valid sequence entry.
+	m.cfg.Timeline.Sequence = []config.SequenceEntry{
+		{
+			Collection: "songs",
+			Fade:       1.0,
+		},
+	}
+
+	originalStatusMsg := m.statusMsg
+
+	// Save should succeed.
+	got := saveConfigAndReResolve(m)
+
+	// Status message should not be set (or should be the original value, not an error).
+	if got.statusMsg != originalStatusMsg {
+		t.Fatalf("statusMsg = %q, want %q (should not be changed by a successful save)", got.statusMsg, originalStatusMsg)
+	}
+
+	// Config should be written to disk.
+	cfgFromDisk, err := config.Load(m.pp.ConfigFile)
+	if err != nil {
+		t.Fatalf("failed to read config from disk: %v", err)
+	}
+	if len(cfgFromDisk.Timeline.Sequence) == 0 {
+		t.Fatal("config was not saved to disk")
+	}
+	if cfgFromDisk.Timeline.Sequence[0].Collection != "songs" {
+		t.Fatalf("saved config sequence[0].Collection = %q, want %q", cfgFromDisk.Timeline.Sequence[0].Collection, "songs")
+	}
+}
