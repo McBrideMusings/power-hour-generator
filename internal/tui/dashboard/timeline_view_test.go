@@ -166,3 +166,60 @@ func TestTimelineViewWastesNoRowWithoutScrollIndicators(t *testing.T) {
 		t.Logf("view:\n%s", view)
 	}
 }
+
+// TestConfirmDeletePromptRoutesThroughFooterInConfirmStyle verifies that,
+// unlike the collection view (which inserts the prompt beneath the target
+// row), the timeline view has no per-row insertion point — confirmDelete
+// is routed through the single shared footer help row via renderHelpRow,
+// styled with confirmStyle, and its presence does not change the total
+// rendered line count (no row drift) versus the no-prompt render.
+func TestConfirmDeletePromptRoutesThroughFooterInConfirmStyle(t *testing.T) {
+	withANSIColorProfile(t)
+
+	m := testTimelineModel(t)
+	m.timelineView.termWidth = 100
+	m.timelineView.termHeight = 40
+	m.timelineView.sequence = []config.SequenceEntry{
+		{Collection: "songs"},
+		{Collection: "songs"},
+	}
+	m.timelineView.resolved = []project.TimelineEntry{
+		{Collection: "songs", Index: 1, Sequence: 0},
+		{Collection: "songs", Index: 2, Sequence: 1},
+	}
+	m.collections["songs"] = project.Collection{
+		Name: "songs",
+		Rows: []csvplan.CollectionRow{
+			{Index: 0, DurationSeconds: 60, CustomFields: map[string]string{"title": "Song A", "artist": "Artist"}},
+			{Index: 1, DurationSeconds: 60, CustomFields: map[string]string{"title": "Song B", "artist": "Artist"}},
+		},
+	}
+	m.timelineView.collections = m.collections
+
+	without := m.timelineView.view(nil)
+	withoutLines := strings.Count(without, "\n")
+
+	m.timelineView.confirmDelete = "Delete sequence entry 0? [y/n]"
+	with := m.timelineView.view(nil)
+	withLines := strings.Count(with, "\n")
+
+	if withLines != withoutLines {
+		t.Errorf("expected total line count to stay unchanged (prompt replaces the footer, not adds a row): without=%d with=%d\nwith:\n%s", withoutLines, withLines, with)
+	}
+
+	wantFooter := helpRowText(m.timelineView.confirmDelete, confirmStyle, m.timelineView.termWidth)
+	if !strings.Contains(with, wantFooter) {
+		t.Errorf("footer does not carry the confirmStyle-rendered prompt.\nwant substring: %q\ngot view:\n%s", wantFooter, with)
+	}
+
+	// Sanity: styled footer must carry real ANSI SGR codes, not have
+	// degraded to plain text.
+	lines := strings.Split(with, "\n")
+	footerLine := lines[len(lines)-2] // last line is "", trailing \n from view()
+	if strings.TrimSpace(footerLine) == "" {
+		footerLine = lines[len(lines)-1]
+	}
+	if !strings.Contains(footerLine, "\x1b[") {
+		t.Errorf("footer line has no ANSI escape codes, expected confirmStyle SGR codes: %q", footerLine)
+	}
+}
