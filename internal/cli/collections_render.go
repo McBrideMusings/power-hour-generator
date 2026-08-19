@@ -36,6 +36,22 @@ func addCollectionRenderFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&renderCollection, "collection", "", "Render only the specified collection (omit to render all collections)")
 }
 
+// cacheResolverFor converts svc to job.CacheResolver, returning a true nil
+// interface when svc is nil rather than a non-nil interface wrapping a nil
+// *cache.Service. Assigning a nil *cache.Service directly into a
+// job.CacheResolver-typed field triggers Go's typed-nil gotcha: the
+// resulting interface value is non-nil (it carries type information), so a
+// "!= nil" check on the interface passes even though the underlying pointer
+// is nil. RunCollectionJob relies on "nil CacheService disables auto-fetch",
+// so every call site must route through this helper instead of assigning
+// *cache.Service directly.
+func cacheResolverFor(svc *cache.Service) job.CacheResolver {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
 // runCollectionRender handles rendering for collections-based configuration.
 func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.ProjectPaths, cfg config.Config) error {
 	if len(cfg.Collections) == 0 {
@@ -149,6 +165,13 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 			return fmt.Errorf("auto-fetch: %w", cacheErr)
 		}
 	}
+	// cacheResolverFor converts cacheSvc to job.CacheResolver, preserving a
+	// true nil interface when cacheSvc is nil. Assigning a nil *cache.Service
+	// directly into the job.CacheResolver-typed CollectionJobParams.CacheService
+	// field would produce a non-nil interface wrapping a nil pointer (Go's
+	// typed-nil gotcha), which would defeat the "nil disables auto-fetch"
+	// check in RunCollectionJob.
+	cacheResolver := cacheResolverFor(cacheSvc)
 
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {
@@ -176,7 +199,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 			Paths:         pp,
 			Config:        cfg,
 			Index:         idx,
-			CacheService:  cacheSvc,
+			CacheService:  cacheResolver,
 			RenderService: svc,
 			Clips:         collectionClips,
 			Force:         renderForce,
@@ -238,7 +261,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 				Paths:         pp,
 				Config:        cfg,
 				Index:         idx,
-				CacheService:  cacheSvc,
+				CacheService:  cacheResolver,
 				RenderService: svc,
 				Clips:         collectionClips,
 				Reporter:      reporter,
@@ -266,7 +289,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 			Paths:         pp,
 			Config:        cfg,
 			Index:         idx,
-			CacheService:  cacheSvc,
+			CacheService:  cacheResolver,
 			RenderService: svc,
 			Clips:         collectionClips,
 			Force:         renderForce,
