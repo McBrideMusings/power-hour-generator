@@ -12,8 +12,9 @@ import (
 )
 
 // cacheHeaderLines is the cache view's own chrome on top of
-// dashboardChromeLines: the unified help row at the bottom.
-const cacheHeaderLines = 5
+// dashboardChromeLines: the section label (1 line), column headers (1 line),
+// and the unified help row (1 line) = 3 lines of fixed non-data content.
+const cacheHeaderLines = 3
 
 // cacheEntry is a flattened cache entry for display.
 type cacheEntry struct {
@@ -149,8 +150,9 @@ func (v *cacheView) toggle() {
 }
 
 func (v cacheView) visibleRowCount() int {
-	// dashboardChromeLines (outer chrome) + cacheHeaderLines reserves one
-	// line for the unified help row at the bottom.
+	// dashboardChromeLines (outer chrome: header/blanks/status/footer) +
+	// cacheHeaderLines (section label, column header, help row) = 8 lines
+	// of fixed chrome reserved; the remaining termHeight is available for data rows.
 	h := max(v.termHeight-dashboardChromeLines-cacheHeaderLines, 1)
 	return h
 }

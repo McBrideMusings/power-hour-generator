@@ -20,9 +20,9 @@ import (
 )
 
 // collectionHeaderLines is the collection view's own chrome on top of
-// dashboardChromeLines: the persistent help row plus surrounding headers
-// and the section label.
-const collectionHeaderLines = 5
+// dashboardChromeLines: the section label (1 line), column headers (1 line),
+// and the unified help row (1 line) = 3 lines of fixed non-data content.
+const collectionHeaderLines = 3
 
 // rowState describes the cache/render state of a collection row.
 type rowState int
@@ -220,9 +220,9 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 }
 
 func (v collectionView) visibleRowCount() int {
-	// dashboardChromeLines (outer chrome) + collectionHeaderLines reserves
-	// one line for the persistent help row at the bottom plus surrounding
-	// chrome (headers, section label).
+	// dashboardChromeLines (outer chrome: header/blanks/status/footer) +
+	// collectionHeaderLines (section label, column header, help row) = 8 lines
+	// of fixed chrome reserved; the remaining termHeight is available for data rows.
 	h := v.termHeight - dashboardChromeLines - collectionHeaderLines
 	// The focused add-slot is the only help row that can exceed a single
 	// line: it optionally adds suggestion rows and a dynamic hint line.
