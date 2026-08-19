@@ -262,6 +262,94 @@ func TestCleanStaleLocalCopiesRemovesFileAndClearsCachedPath(t *testing.T) {
 	}
 }
 
+func TestCleanStaleLocalCopiesKeepsCachedPathWhenRemovalFails(t *testing.T) {
+	dir := t.TempDir()
+
+	// This entry's CachedPath resolves successfully and should be cleared.
+	removablePath := filepath.Join(dir, "cache", "removable.mp4")
+	if err := os.MkdirAll(filepath.Dir(removablePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(removablePath, []byte("fake video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// This entry's CachedPath points at a non-empty directory, so os.Remove
+	// fails on it (ENOTEMPTY/EISDIR) and the index reference must survive.
+	stuckPath := filepath.Join(dir, "cache", "stuck.mp4")
+	if err := os.MkdirAll(stuckPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stuckPath, "child"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := &cache.Index{
+		Version: 2,
+		Entries: map[string]cache.Entry{
+			"local:removable": {
+				Identifier: "local:removable",
+				Title:      "Removable Stale Copy",
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: removablePath,
+			},
+			"local:stuck": {
+				Identifier: "local:stuck",
+				Title:      "Stuck Stale Copy",
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: stuckPath,
+			},
+		},
+	}
+	indexPath := filepath.Join(dir, ".powerhour", "index.json")
+	if err := cache.SaveToPath(indexPath, idx); err != nil {
+		t.Fatal(err)
+	}
+	projectDir = dir
+	cleanDryRun = false
+	t.Cleanup(func() {
+		projectDir = ""
+		cleanDryRun = false
+	})
+
+	cmd := newCleanStaleLocalCopiesCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if _, err := os.Stat(removablePath); !os.IsNotExist(err) {
+		t.Fatal("expected removable stale cache file to be deleted")
+	}
+	if _, err := os.Stat(stuckPath); err != nil {
+		t.Fatalf("expected stuck path to survive the failed removal, got stat error: %v", err)
+	}
+
+	loaded, err := cache.LoadFromPath(indexPath)
+	if err != nil {
+		t.Fatalf("LoadFromPath: %v", err)
+	}
+
+	removableEntry, ok := loaded.GetByIdentifier("local:removable")
+	if !ok {
+		t.Fatal("expected removable entry to still exist")
+	}
+	if removableEntry.CachedPath != "" {
+		t.Fatalf("expected removable entry's CachedPath to be cleared, got %q", removableEntry.CachedPath)
+	}
+
+	stuckEntry, ok := loaded.GetByIdentifier("local:stuck")
+	if !ok {
+		t.Fatal("expected stuck entry to still exist")
+	}
+	if stuckEntry.CachedPath != stuckPath {
+		t.Fatalf("expected stuck entry's CachedPath to remain unchanged after failed removal, got %q", stuckEntry.CachedPath)
+	}
+}
+
 func TestCleanStaleLocalCopiesLeavesExternalLocalFileUntouched(t *testing.T) {
 	externalDir := t.TempDir()
 	externalPath := filepath.Join(externalDir, "my-song.mp4")

@@ -232,8 +232,8 @@ func runCleanStaleLocalCopies(cmd *cobra.Command, _ []string) error {
 
 	for _, identifier := range staleIdentifiers {
 		entry := idx.Entries[identifier]
-		removeFileEntry(entry.CachedPath, out, &result)
-		if !cleanDryRun {
+		removed := removeFileEntry(entry.CachedPath, out, &result)
+		if !cleanDryRun && removed {
 			entry.CachedPath = ""
 			idx.SetEntry(entry)
 		}
@@ -426,11 +426,16 @@ func removeSingleFile(path string, out io.Writer, result *cleanResult) {
 	removeFileEntry(path, out, result)
 }
 
-func removeFileEntry(path string, out io.Writer, result *cleanResult) {
+// removeFileEntry removes the file at path, reporting outcome via result and
+// out. It returns true when path is now confirmed gone from disk (removal
+// succeeded, or nothing was there to begin with) — safe for a caller to drop
+// any index reference to it — and false when os.Remove itself failed and the
+// file is still present, meaning any index reference to it must be kept.
+func removeFileEntry(path string, out io.Writer, result *cleanResult) bool {
 	info, err := os.Stat(path)
 	if err != nil {
 		result.Skipped++
-		return
+		return true
 	}
 	size := info.Size()
 
@@ -438,7 +443,7 @@ func removeFileEntry(path string, out io.Writer, result *cleanResult) {
 		fmt.Fprintf(out, "would remove %s (%s)\n", path, formatSize(size))
 		result.Removed++
 		result.FreedBytes += size
-		return
+		return true
 	}
 
 	if err := os.Remove(path); err != nil {
@@ -446,7 +451,7 @@ func removeFileEntry(path string, out io.Writer, result *cleanResult) {
 			fmt.Fprintf(out, "error removing %s: %v\n", path, err)
 		}
 		result.Skipped++
-		return
+		return false
 	}
 
 	result.Removed++
@@ -454,6 +459,7 @@ func removeFileEntry(path string, out io.Writer, result *cleanResult) {
 	if !outputJSON {
 		fmt.Fprintf(out, "removed %s (%s)\n", path, formatSize(size))
 	}
+	return true
 }
 
 func writeCleanResult(out io.Writer, label string, result cleanResult) error {
