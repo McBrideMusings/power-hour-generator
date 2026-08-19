@@ -163,9 +163,8 @@ func (v cacheView) visibleRowCount() int {
 func (v cacheView) renderHelpRow() string {
 	entries := v.entries()
 
-	if v.confirmDelete != "" {
-		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
-	}
+	var sources []helpRowSource
+	sources = append(sources, helpRowSource{v.confirmDelete, confirmStyle})
 
 	if v.editing && v.cursor >= 0 && v.cursor < len(entries) {
 		parts := []string{"Edit · " + v.currentEditField(),
@@ -173,23 +172,24 @@ func (v cacheView) renderHelpRow() string {
 		if hint := strings.TrimSpace(v.editHint); hint != "" {
 			parts = append(parts, hint)
 		}
-		return helpRowText(strings.Join(parts, " · "), faint, v.termWidth)
+		sources = append(sources, helpRowSource{strings.Join(parts, " · "), faint})
 	}
 
 	if v.cursor >= 0 && v.cursor < len(entries) {
-		if note := inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0); note != "" {
-			return helpRowText(note, editStyle, v.termWidth)
-		}
+		sources = append(sources, helpRowSource{inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0), editStyle})
 	}
 
+	defaultText := "e edit · d doctor all · D doctor problematic · f toggle filter · x remove"
 	if len(entries) == 0 {
 		if v.showAll {
-			return helpRowText("no cached sources — run 'fetch' to populate", faint, v.termWidth)
+			defaultText = "no cached sources — run 'fetch' to populate"
+		} else {
+			defaultText = "no cached sources for this project — press f to show all"
 		}
-		return helpRowText("no cached sources for this project — press f to show all", faint, v.termWidth)
 	}
+	sources = append(sources, helpRowSource{defaultText, faint})
 
-	return helpRowText("e edit · d doctor all · D doctor problematic · f toggle filter · x remove", faint, v.termWidth)
+	return resolveHelpRow(v.termWidth, nil, sources...)
 }
 
 func (v cacheView) currentEditField() string {

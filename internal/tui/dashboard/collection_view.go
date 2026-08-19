@@ -491,42 +491,35 @@ func editContextNote(v collectionView, row csvplan.CollectionRow) string {
 // Only the add-slot branch can produce multiple lines (input + suggestions +
 // dynamic hint); all others render exactly one line via helpRowText.
 func (v collectionView) renderHelpRow() string {
+	var sources []helpRowSource
+
 	// 1. Inline-edit context. If the edit row also carries a transient note,
 	// the note wins (so "saved" / "probing" are visible during the edit lull
-	// between keystrokes).
+	// between keystrokes). This branch always contributes a non-empty
+	// source, so it always wins the ladder outright.
 	if v.editing && v.cursor >= 0 && v.cursor < len(v.rows) {
 		row := v.rows[v.cursor]
 		rawStatus := v.rowStatus[row.Index]
 		if note := inlineRowNote(rawStatus, v.tick); note != "" {
-			noteStyle := editStyle
-			if isErrorRowNote(rawStatus) {
-				noteStyle = errorNoteStyle
-			}
-			return helpRowText(note, noteStyle, v.termWidth)
+			sources = append(sources, helpRowSource{note, noteStyleFor(rawStatus)})
+		} else {
+			sources = append(sources, helpRowSource{editContextNote(v, row), faint})
 		}
-		return helpRowText(editContextNote(v, row), faint, v.termWidth)
-	}
-
-	// 2. Transient note on the cursor row.
-	if v.cursor >= 0 && v.cursor < len(v.rows) {
+	} else if v.cursor >= 0 && v.cursor < len(v.rows) {
+		// 2. Transient note on the cursor row.
 		row := v.rows[v.cursor]
 		rawStatus := v.rowStatus[row.Index]
-		if note := inlineRowNote(rawStatus, v.tick); note != "" {
-			noteStyle := editStyle
-			if isErrorRowNote(rawStatus) {
-				noteStyle = errorNoteStyle
-			}
-			return helpRowText(note, noteStyle, v.termWidth)
-		}
+		sources = append(sources, helpRowSource{inlineRowNote(rawStatus, v.tick), noteStyleFor(rawStatus)})
 	}
 
-	// 3. Focused add slot.
+	// 3. Focused add slot / 4. default — the add slot can render multiple
+	// lines, so it's the fallback rather than a source.
+	fallback := func() string { return helpRowText("press a to add a clip", faint, v.termWidth) }
 	if v.addFocus {
-		return v.renderAddSlot()
+		fallback = v.renderAddSlot
 	}
 
-	// 4. Default.
-	return helpRowText("press a to add a clip", faint, v.termWidth)
+	return resolveHelpRow(v.termWidth, fallback, sources...)
 }
 
 // renderAddSlot renders the focused add-clip footer: the rendered input

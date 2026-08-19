@@ -319,21 +319,28 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 // row, then a default action hint. Inline-edit still happens via a modal
 // (open powerhour.yaml), so it has no branch here.
 func (v timelineView) renderHelpRow() string {
+	// Focused add slot wins outright — it and confirm-delete are mutually
+	// exclusive by construction, so this is a short-circuit, not a source:
+	// renderAddSlot never produces multi-line output here (see its doc
+	// comment), but it still isn't a plain (text, style) pair.
 	if v.addFocus {
 		return v.renderAddSlot()
 	}
-	if v.confirmDelete != "" {
-		return helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
-	}
+
+	var sources []helpRowSource
+	sources = append(sources, helpRowSource{v.confirmDelete, confirmStyle})
+
 	if v.focusPanel == 0 && !v.concatFocus && v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
-		if note := inlineRowNote(v.seqStatus[v.seqCursor], 0); note != "" {
-			return helpRowText(note, editStyle, v.termWidth)
-		}
+		sources = append(sources, helpRowSource{inlineRowNote(v.seqStatus[v.seqCursor], 0), editStyle})
 	}
+
+	defaultText := "a add · d delete · J/K reorder · e edit · r render · c concat"
 	if len(v.sequence) == 0 {
-		return helpRowText("no sequence entries — press a to add one", faint, v.termWidth)
+		defaultText = "no sequence entries — press a to add one"
 	}
-	return helpRowText("a add · d delete · J/K reorder · e edit · r render · c concat", faint, v.termWidth)
+	sources = append(sources, helpRowSource{defaultText, faint})
+
+	return resolveHelpRow(v.termWidth, nil, sources...)
 }
 
 // renderAddSlot renders the focused timeline add-slot footer: the rendered
