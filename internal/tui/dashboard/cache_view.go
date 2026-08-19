@@ -189,7 +189,7 @@ func (v cacheView) renderHelpRow() string {
 		return helpRowText("no cached sources for this project — press f to show all", faint, v.termWidth)
 	}
 
-	return helpRowText("e edit · D doctor problematic · f toggle filter · x remove", faint, v.termWidth)
+	return helpRowText("e edit · d doctor all · D doctor problematic · f toggle filter · x remove", faint, v.termWidth)
 }
 
 func (v cacheView) currentEditField() string {

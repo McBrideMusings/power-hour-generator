@@ -1818,7 +1818,14 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cacheView = v
-		return m.openDoctorOverlay(append([]cacheEntry(nil), entries...)), nil
+		return m.openDoctorOverlay(append([]cacheEntry(nil), entries...), false), nil
+	case "d":
+		if len(entries) == 0 {
+			m.cacheView = v
+			return m, nil
+		}
+		m.cacheView = v
+		return m.openDoctorOverlay(append([]cacheEntry(nil), entries...), true), nil
 	case "x":
 		if len(entries) == 0 || v.cursor >= len(entries) {
 			m.cacheView = v
@@ -2024,7 +2031,12 @@ func (v *cacheView) autoScroll() {
 	}
 }
 
-func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
+// openDoctorOverlay opens the cache doctor overlay for the given entries.
+// When showAll is false (the "D" binding), only entries where normalization
+// proposes a change (NeedsAttention) are included. When showAll is true (the
+// "d" binding), every entry with a resolvable cache identifier is included,
+// whether or not normalization proposes a change.
+func (m Model) openDoctorOverlay(entries []cacheEntry, showAll bool) Model {
 	idx, err := cache.Load(m.pp)
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Cache load error: %v", err)
@@ -2043,6 +2055,14 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 		if !ok {
 			continue
 		}
+		if showAll {
+			finding, _, err := cachedoctor.InspectEntryAll(context.Background(), nil, normCfg, knownArtists, entry, false)
+			if err != nil {
+				continue
+			}
+			items = append(items, doctorItem{entry: entry, finding: finding})
+			continue
+		}
 		finding, needsFix, err := cachedoctor.InspectEntry(context.Background(), nil, normCfg, knownArtists, entry, false)
 		if err != nil {
 			continue
@@ -2053,7 +2073,11 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 		items = append(items, doctorItem{entry: entry, finding: finding})
 	}
 	if len(items) == 0 {
-		m.statusMsg = "All entries look clean"
+		if showAll {
+			m.statusMsg = "Cache is empty"
+		} else {
+			m.statusMsg = "All entries look clean"
+		}
 		return m
 	}
 	m.doctorInstanceSeq++
