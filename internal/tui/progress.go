@@ -398,5 +398,6 @@ func TruncateWithEllipsis(value string, max int) string {
 		return ""
 	}
 	value = strings.TrimSpace(value)
-	return TruncateToWidth(value, max, TruncateOptions{Ellipsis: "..."})
+	result, _ := TruncateToWidth(value, max, TruncateOptions{Ellipsis: "..."})
+	return result
 }

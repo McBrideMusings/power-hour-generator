@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
+
+	"powerhour/internal/tui"
 )
 
 var cursorCharStyle = lipgloss.NewStyle().Reverse(true).Background(lipgloss.AdaptiveColor{Light: "#e4e4e4", Dark: "#262626"})
@@ -77,8 +79,9 @@ func renderEditCell(value string, cursor int, width int) string {
 		}
 	}
 
-	content, actualStart := sliceRunesByColumn(value, startCol, width)
-	contentWidth := runewidth.StringWidth(string(content))
+	windowStr, actualStart := tui.TruncateToWidth(value, width, tui.TruncateOptions{WindowStart: startCol})
+	content := []rune(windowStr)
+	contentWidth := runewidth.StringWidth(windowStr)
 	if pad := width - contentWidth; pad > 0 {
 		content = append(content, []rune(strings.Repeat(" ", pad))...)
 	}
@@ -113,36 +116,4 @@ func renderEditCell(value string, cursor int, width int) string {
 	return editStyle.Render(string(content[:idx])) +
 		cursorCharStyle.Render(string(content[idx:idx+1])) +
 		editStyle.Render(string(content[idx+1:]))
-}
-
-// sliceRunesByColumn returns the runes of value whose visual columns fall
-// within [startCol, startCol+width) — the sliding viewport used by
-// renderEditCell — plus actualStart, the visual column the returned runes
-// actually begin at. actualStart matches startCol unless a wide rune
-// straddles that boundary; such a rune is dropped rather than split
-// (mirroring the drop-not-split rule at the trailing edge), which pushes the
-// real start one column later than requested. Callers must measure cursor
-// position against actualStart, not startCol, or the cursor highlight lands
-// one cell off whenever that drop happens.
-func sliceRunesByColumn(value string, startCol, width int) (runes []rune, actualStart int) {
-	endCol := startCol + width
-	actualStart = -1
-	col := 0
-	for _, r := range value {
-		rw := runewidth.RuneWidth(r)
-		if col >= startCol {
-			if col+rw > endCol {
-				break
-			}
-			if actualStart < 0 {
-				actualStart = col
-			}
-			runes = append(runes, r)
-		}
-		col += rw
-	}
-	if actualStart < 0 {
-		actualStart = startCol
-	}
-	return runes, actualStart
 }

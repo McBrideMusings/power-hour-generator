@@ -711,7 +711,8 @@ func (o *cacheDoctorOverlay) doctorFooter() string {
 		if budget <= 0 {
 			return footerStyle.Render(plain)
 		}
-		return footerStyle.Render(prefix + tui.TruncateToWidth(label, budget, tui.TruncateOptions{Ellipsis: "..."}))
+		truncated, _ := tui.TruncateToWidth(label, budget, tui.TruncateOptions{Ellipsis: "..."})
+		return footerStyle.Render(prefix + truncated)
 	}
 	if len(o.findings) == 0 {
 		return footerStyle.Render("Esc close")

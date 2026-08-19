@@ -152,7 +152,7 @@ func TestTruncateToWidth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := TruncateToWidth(tt.value, tt.max, tt.opts)
+			got, _ := TruncateToWidth(tt.value, tt.max, tt.opts)
 			if got != tt.want {
 				t.Errorf("TruncateToWidth(%q, %d, %+v) = %q, want %q", tt.value, tt.max, tt.opts, got, tt.want)
 			}
