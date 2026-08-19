@@ -135,6 +135,9 @@ func installFromRelease(ctx context.Context, def ToolDefinition, spec releaseSpe
 	if spec.URL == "" {
 		return Status{Tool: def.Name, Notes: notes}, fmt.Errorf("release metadata missing download url")
 	}
+	if spec.Checksum == "" {
+		return Status{Tool: def.Name, Notes: notes}, fmt.Errorf("release metadata missing checksum for %s %s; refusing to install an unverified binary", def.Name, spec.Version)
+	}
 
 	downloads, err := downloadsDir()
 	if err != nil {
