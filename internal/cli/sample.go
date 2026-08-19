@@ -15,6 +15,7 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/job"
 )
 
 var (
@@ -158,7 +159,7 @@ func runSample(cmd *cobra.Command, args []string) error {
 		targetClip = tc.CollectionClip
 		clipOffset = offset
 
-		title := clipDisplayTitle(targetClip.Clip)
+		title := job.ClipDisplayTitle(targetClip.Clip)
 		fmt.Fprintf(cmd.OutOrStdout(), "Timeline %s → %s #%d %q at %s\n",
 			formatSampleTime(sampleTime),
 			targetClip.CollectionName,
@@ -193,7 +194,7 @@ func runSample(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build the render segment for the target clip.
-	seg, err := buildCollectionRenderSegment(pp, cfg, idx, resolver, targetClip)
+	seg, err := job.BuildCollectionRenderSegment(pp, cfg, idx, targetClip)
 	if err != nil {
 		return fmt.Errorf("build segment: %w", err)
 	}

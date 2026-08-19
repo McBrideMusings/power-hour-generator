@@ -60,11 +60,18 @@ type Result struct {
 	Err        error
 }
 
-// ProgressReporter receives notifications as segments move through the render pipeline.
+// ProgressReporter receives notifications as segments move through the render
+// pipeline. The three Fetch* methods report the auto-fetch phase that
+// precedes rendering for URL-backed sources that aren't cached yet; they are
+// keyed by project.CollectionClip rather than Segment because a fetchable
+// clip has no Segment.SourcePath until the fetch succeeds.
 type ProgressReporter interface {
 	Start(segment Segment)
 	Progress(segment Segment, pct float64) // pct in 0.0–1.0
 	Complete(result Result)
+	Fetching(clip project.CollectionClip)
+	Fetched(clip project.CollectionClip, seg Segment)
+	FetchError(clip project.CollectionClip, err error)
 }
 
 // NewService prepares a renderer bound to a project.
