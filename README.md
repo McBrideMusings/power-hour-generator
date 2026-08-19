@@ -12,6 +12,7 @@ The project is in active development. The Go rewrite has fully replaced the earl
 - CLI orchestrates downloads via `yt-dlp`, probes/transcodes with `ffmpeg`/`ffprobe`, and hides those toolchains behind a unified interface.
 - Project-oriented workflow: each project is an on-disk directory with standardized file names alongside `cache/`, `logs/`, `segments/`, and a hidden `.powerhour/index.json`.
 - Automatic download caching to avoid re-fetching source media across multiple renders.
+- yt-dlp downloads are checksum-verified against GitHub's published `SHA2-256SUMS` before install.
 - Overlay system built from reusable segments that can each define text, transforms, timing, and positioning (defaults cover title + artist on entry, optional outro name, and a persistent index badge).
 - Configurable video/audio encoding parameters and overlay styling via optional YAML.
 - Normalized output: H.264 video at CRF 20 (`veryfast`) with AAC audio (192 kbps, 48 kHz) by default.
