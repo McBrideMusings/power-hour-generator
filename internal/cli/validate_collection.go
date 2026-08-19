@@ -17,6 +17,7 @@ import (
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
+	"powerhour/internal/render/job"
 	"powerhour/pkg/csvplan"
 )
 
@@ -129,7 +130,7 @@ func validateCollectionRow(pp paths.ProjectPaths, idx *cache.Index, collClip pro
 	result.ExpectedID = expectedID
 
 	// Resolve cache entry
-	entry, hasEntry, err := resolveEntryForRow(pp, idx, row)
+	entry, hasEntry, err := job.ResolveEntryForRow(pp, idx, row)
 	if err != nil {
 		result.Status = "error"
 		result.Error = err.Error()
