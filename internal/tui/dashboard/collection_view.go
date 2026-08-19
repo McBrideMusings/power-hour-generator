@@ -593,7 +593,7 @@ func (v collectionView) renderAddSlot() string {
 		// keysHint has priority and fits fully; the detect hint shrinks or
 		// drops into whatever's left.
 		fittedKeys = keysHint
-		detectBudget := remaining - keysWidth
+		detectBudget := remaining - keysWidth - gapWidth
 		if detectText != "" && detectBudget > 0 {
 			fittedDetect = tui.TruncateWithEllipsis(detectText, detectBudget)
 		}
