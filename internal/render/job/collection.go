@@ -192,13 +192,23 @@ func preflightResult(clip project.Clip, err error) render.Result {
 	}
 }
 
+// CacheResolver is the slice of *cache.Service that RunCollectionJob's
+// auto-fetch phase depends on. *cache.Service satisfies this structurally,
+// so production callers pass it unchanged; tests can substitute a lightweight
+// fake instead of constructing a real *cache.Service, which only
+// cache.NewService can build (it shells out to yt-dlp/ffmpeg via
+// internal/tools for tool detection).
+type CacheResolver interface {
+	Resolve(ctx context.Context, idx *cache.Index, row csvplan.Row, opts cache.ResolveOptions) (cache.ResolveResult, error)
+}
+
 // CollectionJobParams describes one render pass over a set of resolved
 // collection clips.
 type CollectionJobParams struct {
 	Paths         paths.ProjectPaths
 	Config        config.Config
 	Index         *cache.Index
-	CacheService  *cache.Service // nil disables auto-fetch of missing URL sources
+	CacheService  CacheResolver // nil disables auto-fetch of missing URL sources
 	RenderService *render.Service
 	Clips         []project.CollectionClip
 	Reporter      render.ProgressReporter // may be nil
