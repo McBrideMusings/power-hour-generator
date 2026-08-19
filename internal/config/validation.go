@@ -67,6 +67,8 @@ var knownCacheFields = map[string]bool{
 	"id":          true,
 	"extractor":   true,
 	"cached_path": true,
+	"duration":    true,
+	"disk_usage":  true,
 }
 
 func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {

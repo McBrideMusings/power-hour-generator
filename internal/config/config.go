@@ -377,7 +377,7 @@ func Default() Config {
 		Downloads: DownloadsConfig{FilenameTemplate: "$ID"},
 		Cache: CacheConfig{
 			View: CacheViewConfig{
-				Columns: []string{"title", "artist"},
+				Columns: []string{"title", "artist", "duration", "disk_usage"},
 			},
 			Ytdlp: CacheYtdlpConfig{
 				SearchFields: []string{"title", "artist"},

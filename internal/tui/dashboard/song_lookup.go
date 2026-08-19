@@ -47,6 +47,16 @@ func cacheFieldValues(entry cache.Entry, field string) []string {
 		return []string{entry.Extractor}
 	case "cached_path":
 		return []string{entry.CachedPath}
+	case "duration":
+		if entry.Probe == nil {
+			return []string{""}
+		}
+		return []string{formatDuration(int(entry.Probe.DurationSeconds))}
+	case "disk_usage":
+		if entry.SizeBytes <= 0 {
+			return []string{""}
+		}
+		return []string{formatFileSize(entry.SizeBytes)}
 	default:
 		return nil
 	}
