@@ -2048,7 +2048,7 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 		return m
 	}
 	m.doctorInstanceSeq++
-	overlay := newCacheDoctorOverlay(items, knownArtists, m.termWidth, m.termHeight, m.doctorInstanceSeq)
+	overlay := newCacheDoctorOverlay(items, m.cacheView.columns, knownArtists, m.termWidth, m.termHeight, m.doctorInstanceSeq)
 	m.doctorOverlay = &overlay
 	m.overlay = overlayDoctor
 	return m
@@ -2107,8 +2107,6 @@ func (m Model) applyCurrentDoctorEntry() Model {
 		return m
 	}
 	identifier := o.findings[o.cursor].finding.Identifier
-	title := strings.TrimSpace(o.editTitle)
-	artist := strings.TrimSpace(o.editArtist)
 
 	idx, err := cache.Load(m.pp)
 	if err != nil {
@@ -2120,16 +2118,34 @@ func (m Model) applyCurrentDoctorEntry() Model {
 		m.statusMsg = "Entry not found in cache"
 		return m
 	}
-	entry.Title = title
-	entry.Artist = artist
+
+	for i, field := range o.columns {
+		if i >= len(o.editValues) {
+			continue
+		}
+		setCacheEntryField(&entry, field, o.editValues[i])
+	}
+
 	idx.SetEntry(entry)
 	if err := cache.Save(m.pp, idx); err != nil {
 		m.statusMsg = fmt.Sprintf("Save error: %v", err)
 		return m
 	}
 	o.applied++
-	o.rememberArtist(artist)
-	m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+
+	var title, artist string
+	if o.titleIdx >= 0 && o.titleIdx < len(o.editValues) {
+		title = strings.TrimSpace(o.editValues[o.titleIdx])
+	}
+	if o.artistIdx >= 0 && o.artistIdx < len(o.editValues) {
+		artist = strings.TrimSpace(o.editValues[o.artistIdx])
+		o.rememberArtist(artist)
+	}
+	if title != "" || artist != "" {
+		m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+	} else {
+		m.statusMsg = "Saved"
+	}
 	m = reloadState(m)
 
 	// Advance to next entry.
