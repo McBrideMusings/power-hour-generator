@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"powerhour/internal/cache"
 )
 
 func TestGlobFiles(t *testing.T) {
@@ -116,4 +120,206 @@ func TestRemoveFileEntry(t *testing.T) {
 			t.Fatalf("got skipped=%d, want 1", result.Skipped)
 		}
 	})
+}
+
+func setUpCleanStaleLocalCopiesProject(t *testing.T, idx *cache.Index) (dir, indexPath string) {
+	t.Helper()
+	dir = t.TempDir()
+	indexPath = filepath.Join(dir, ".powerhour", "index.json")
+	if err := cache.SaveToPath(indexPath, idx); err != nil {
+		t.Fatalf("SaveToPath: %v", err)
+	}
+
+	projectDir = dir
+	cleanDryRun = false
+	t.Cleanup(func() {
+		projectDir = ""
+		cleanDryRun = false
+	})
+
+	return dir, indexPath
+}
+
+func TestCleanStaleLocalCopiesDryRunLeavesFileAndIndexUntouched(t *testing.T) {
+	dir := t.TempDir()
+	stalePath := filepath.Join(dir, "cache", "stale-local.mp4")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePath, []byte("fake video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := &cache.Index{
+		Version: 2,
+		Entries: map[string]cache.Entry{
+			"local:stale": {
+				Identifier: "local:stale",
+				Title:      "Stale Local Copy",
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: stalePath,
+			},
+		},
+	}
+	indexPath := filepath.Join(dir, ".powerhour", "index.json")
+	if err := cache.SaveToPath(indexPath, idx); err != nil {
+		t.Fatal(err)
+	}
+	projectDir = dir
+	cleanDryRun = true
+	t.Cleanup(func() {
+		projectDir = ""
+		cleanDryRun = false
+	})
+
+	cmd := newCleanStaleLocalCopiesCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "would remove") {
+		t.Fatalf("expected dry-run output to list stale entry, got %q", out.String())
+	}
+
+	if _, err := os.Stat(stalePath); err != nil {
+		t.Fatalf("expected stale file to survive dry run, got stat error: %v", err)
+	}
+
+	loaded, err := cache.LoadFromPath(indexPath)
+	if err != nil {
+		t.Fatalf("LoadFromPath: %v", err)
+	}
+	entry, ok := loaded.GetByIdentifier("local:stale")
+	if !ok {
+		t.Fatal("expected entry to still exist after dry run")
+	}
+	if entry.CachedPath != stalePath {
+		t.Fatalf("expected CachedPath to be unchanged after dry run, got %q", entry.CachedPath)
+	}
+}
+
+func TestCleanStaleLocalCopiesRemovesFileAndClearsCachedPath(t *testing.T) {
+	dir := t.TempDir()
+	stalePath := filepath.Join(dir, "cache", "stale-local.mp4")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePath, []byte("fake video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := &cache.Index{
+		Version: 2,
+		Entries: map[string]cache.Entry{
+			"local:stale": {
+				Identifier: "local:stale",
+				Title:      "Stale Local Copy",
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: stalePath,
+			},
+		},
+	}
+	indexPath := filepath.Join(dir, ".powerhour", "index.json")
+	if err := cache.SaveToPath(indexPath, idx); err != nil {
+		t.Fatal(err)
+	}
+	projectDir = dir
+	cleanDryRun = false
+	t.Cleanup(func() {
+		projectDir = ""
+		cleanDryRun = false
+	})
+
+	cmd := newCleanStaleLocalCopiesCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatal("expected stale cache file to be deleted")
+	}
+
+	loaded, err := cache.LoadFromPath(indexPath)
+	if err != nil {
+		t.Fatalf("LoadFromPath: %v", err)
+	}
+	entry, ok := loaded.GetByIdentifier("local:stale")
+	if !ok {
+		t.Fatal("expected index entry to still exist (not deleted)")
+	}
+	if entry.CachedPath != "" {
+		t.Fatalf("expected CachedPath to be cleared, got %q", entry.CachedPath)
+	}
+	if entry.SourceType != cache.SourceTypeLocal {
+		t.Fatalf("expected entry to remain SourceTypeLocal, got %q", entry.SourceType)
+	}
+}
+
+func TestCleanStaleLocalCopiesLeavesExternalLocalFileUntouched(t *testing.T) {
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "my-song.mp4")
+	if err := os.WriteFile(externalPath, []byte("fake video"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := &cache.Index{
+		Version: 2,
+		Entries: map[string]cache.Entry{
+			"local:external": {
+				Identifier: "local:external",
+				Title:      "External Local File",
+				SourceType: cache.SourceTypeLocal,
+				CachedPath: externalPath,
+			},
+		},
+	}
+	_, indexPath := setUpCleanStaleLocalCopiesProject(t, idx)
+
+	t.Run("dry run", func(t *testing.T) {
+		cleanDryRun = true
+		cmd := newCleanStaleLocalCopiesCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if strings.Contains(out.String(), externalPath) {
+			t.Fatalf("expected external entry to be left out of dry-run output, got %q", out.String())
+		}
+	})
+
+	t.Run("real run", func(t *testing.T) {
+		cleanDryRun = false
+		cmd := newCleanStaleLocalCopiesCmd()
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&out)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+	})
+
+	if _, err := os.Stat(externalPath); err != nil {
+		t.Fatalf("expected external local file to survive both runs, got stat error: %v", err)
+	}
+
+	loaded, err := cache.LoadFromPath(indexPath)
+	if err != nil {
+		t.Fatalf("LoadFromPath: %v", err)
+	}
+	entry, ok := loaded.GetByIdentifier("local:external")
+	if !ok {
+		t.Fatal("expected entry to still exist")
+	}
+	if entry.CachedPath != externalPath {
+		t.Fatalf("expected CachedPath to remain untouched, got %q", entry.CachedPath)
+	}
 }
