@@ -382,6 +382,58 @@ func TestConfirmDeletePromptRespectsHeightBudget(t *testing.T) {
 	}
 }
 
+// TestConfirmDeletePromptUsesConfirmStyle verifies that the inline
+// confirm-delete prompt inserted beneath the cursor row is rendered through
+// confirmStyle (bold, color "3"), not plain/unstyled text. Complements
+// TestConfirmDeletePromptRendersBeneathCursorRow (placement) and
+// TestConfirmDeletePromptRespectsHeightBudget (no row drift) — this test
+// is the styling gap those two leave open.
+func TestConfirmDeletePromptUsesConfirmStyle(t *testing.T) {
+	withANSIColorProfile(t)
+
+	rows, states := makeConfirmTestRows(10)
+	v := collectionView{
+		name:          "songs",
+		rows:          rows,
+		states:        states,
+		columns:       []collectionColumn{{field: "title", header: "TITLE"}, {field: "artist", header: "ARTIST"}},
+		cursor:        3,
+		rowStatus:     make(map[int]string),
+		termWidth:     100,
+		termHeight:    60,
+		confirmDelete: "Delete row 03 \"Song D\"? [y/n]",
+	}
+
+	rendered := v.view()
+	lines := strings.Split(rendered, "\n")
+
+	var promptLine string
+	for _, line := range lines {
+		if strings.Contains(line, "[y/n]") {
+			promptLine = line
+			break
+		}
+	}
+	if promptLine == "" {
+		t.Fatalf("confirm prompt line not found in rendered view:\n%s", rendered)
+	}
+
+	// confirmStyle renders through helpRowText, so the styled prompt must
+	// match exactly what confirmStyle.Render would produce for the same
+	// truncated text — same shape TestEditRowBackgroundTint uses to assert
+	// on real SGR codes rather than guessing at escape sequences by hand.
+	want := helpRowText(v.confirmDelete, confirmStyle, v.termWidth)
+	if promptLine != want {
+		t.Errorf("confirm prompt line does not match confirmStyle-rendered output:\ngot:  %q\nwant: %q", promptLine, want)
+	}
+
+	// Sanity: the styled line must actually carry ANSI SGR codes (bold +
+	// color 3), not have silently degraded to plain text.
+	if !strings.Contains(promptLine, "\x1b[") {
+		t.Errorf("confirm prompt line has no ANSI escape codes, expected confirmStyle SGR codes: %q", promptLine)
+	}
+}
+
 func TestEditContextNoteNoFieldSelected(t *testing.T) {
 	// When editFieldIdx is -1 or out of range, should still work gracefully.
 	v := collectionView{
