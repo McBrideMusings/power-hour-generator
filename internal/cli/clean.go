@@ -7,9 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
@@ -31,6 +33,7 @@ func newCleanCmd() *cobra.Command {
 	cmd.AddCommand(newCleanSegmentsCmd())
 	cmd.AddCommand(newCleanLogsCmd())
 	cmd.AddCommand(newCleanOrphansCmd())
+	cmd.AddCommand(newCleanStaleLocalCopiesCmd())
 	cmd.AddCommand(newCleanAllCmd())
 
 	return cmd
@@ -57,6 +60,14 @@ func newCleanOrphansCmd() *cobra.Command {
 		Use:   "orphans",
 		Short: "Remove segment files not in the current plan",
 		RunE:  runCleanOrphans,
+	}
+}
+
+func newCleanStaleLocalCopiesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stale-local-copies",
+		Short: "Remove duplicate cache files for local-sourced entries",
+		RunE:  runCleanStaleLocalCopies,
 	}
 }
 
@@ -173,6 +184,99 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 	}
 
 	return writeCleanResult(out, "orphans", result)
+}
+
+func runCleanStaleLocalCopies(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("clean-stale-local-copies")
+	defer gcloser.Close()
+	glogf("clean stale-local-copies started (dry_run=%v)", cleanDryRun)
+
+	pp, err := resolveCleanPaths()
+	if err != nil {
+		return err
+	}
+	glogf("project resolved: %s", pp.Root)
+
+	cfg, err := config.Load(pp.ConfigFile)
+	if err != nil {
+		return err
+	}
+	pp = paths.ApplyConfig(pp, cfg)
+
+	// Deliberately skip paths.ApplyLibrary: "stale local copies" means files
+	// left behind in this project's own cache/ dir from before local
+	// sources stopped being copied there. The shared library's index and
+	// sources dir are a different concern and must not be substituted here.
+	idx, err := cache.Load(pp)
+	if err != nil {
+		return err
+	}
+
+	var staleIdentifiers []string
+	for identifier, entry := range idx.Entries {
+		if entry.SourceType != cache.SourceTypeLocal {
+			continue
+		}
+		if entry.CachedPath == "" {
+			continue
+		}
+		if !isPathInsideDir(entry.CachedPath, pp.CacheDir) {
+			continue
+		}
+		staleIdentifiers = append(staleIdentifiers, identifier)
+	}
+	sort.Strings(staleIdentifiers)
+
+	out := cmd.OutOrStdout()
+	result := cleanResult{DryRun: cleanDryRun}
+
+	for _, identifier := range staleIdentifiers {
+		entry := idx.Entries[identifier]
+		removeFileEntry(entry.CachedPath, out, &result)
+		if !cleanDryRun {
+			entry.CachedPath = ""
+			idx.SetEntry(entry)
+		}
+	}
+
+	glogf("found %d stale local copies", len(staleIdentifiers))
+
+	if !cleanDryRun && len(staleIdentifiers) > 0 {
+		if err := cache.Save(pp, idx); err != nil {
+			return fmt.Errorf("save index: %w", err)
+		}
+	}
+
+	return writeCleanResult(out, "stale-local-copies", result)
+}
+
+// isPathInsideDir reports whether path lies inside dir (after cleaning both
+// to absolute form). A path equal to dir itself is not considered inside it.
+func isPathInsideDir(path, dir string) bool {
+	if path == "" || dir == "" {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	absPath = filepath.Clean(absPath)
+	absDir = filepath.Clean(absDir)
+	if absPath == absDir {
+		return false
+	}
+	rel, err := filepath.Rel(absDir, absPath)
+	if err != nil {
+		return false
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
+		return false
+	}
+	return true
 }
 
 func runCleanAll(cmd *cobra.Command, _ []string) error {
