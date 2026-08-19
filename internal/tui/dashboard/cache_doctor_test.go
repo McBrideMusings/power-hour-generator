@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"powerhour/internal/cache"
 	"powerhour/internal/cachedoctor"
+	"powerhour/internal/paths"
 )
 
 // newTestDoctorOverlay builds a doctor overlay with a fully-populated
@@ -691,5 +693,79 @@ func TestDoctorFooterRequeryUnresolvableTargetFallsBackToPlainMessage(t *testing
 	}
 	if strings.Contains(footer, "Song A") {
 		t.Errorf("doctorFooter() = %q, should not name an unrelated entry", footer)
+	}
+}
+
+// TestApplyCurrentDoctorEntrySavesArtistAlias is the discriminating test for
+// issue #48: correcting an artist in the cache doctor overlay must persist
+// the correction as an alias for future normalization, not just save it on
+// the one entry being edited. It calls applyCurrentDoctorEntry() directly —
+// the real accept-flow function — rather than reimplementing its
+// alias-detection condition inline, so reverting the production wiring
+// makes this test fail.
+func TestApplyCurrentDoctorEntrySavesArtistAlias(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	projectRoot := t.TempDir()
+	pp := paths.ProjectPaths{
+		Root:      projectRoot,
+		IndexFile: filepath.Join(projectRoot, ".powerhour", "index.json"),
+	}
+
+	const identifier = "yt:corrected123"
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	idx.SetEntry(cache.Entry{
+		Identifier: identifier,
+		Source:     "https://youtube.com/watch?v=corrected123",
+		SourceType: cache.SourceTypeURL,
+		Title:      "Some Song",
+		Artist:     "Old Artist Name",
+		Uploader:   "SomeUploaderChannel",
+	})
+	if err := cache.Save(pp, idx); err != nil {
+		t.Fatalf("seed cache save: %v", err)
+	}
+
+	entry, _ := idx.GetByIdentifier(identifier)
+	finding := cachedoctor.Finding{
+		Identifier:     identifier,
+		CurrentTitle:   entry.Title,
+		CurrentArtist:  entry.Artist,
+		ProposedTitle:  entry.Title,
+		ProposedArtist: entry.Artist,
+		AliasCandidate: entry.Uploader, // "SomeUploaderChannel"
+	}
+
+	overlay := newCacheDoctorOverlay([]doctorItem{{entry: entry, finding: finding}}, nil, 80, 40, 0)
+	overlay.editTitle = entry.Title
+	overlay.editArtist = "Corrected Artist Name"
+	overlay.artistCursor = len(overlay.editArtist)
+	overlay.artistTouched = true
+
+	m := Model{pp: pp, doctorOverlay: &overlay}
+
+	m = m.applyCurrentDoctorEntry()
+
+	// The entry itself must be updated (existing behavior).
+	updatedIdx, err := cache.Load(pp)
+	if err != nil {
+		t.Fatalf("reload cache: %v", err)
+	}
+	updatedEntry, ok := updatedIdx.GetByIdentifier(identifier)
+	if !ok {
+		t.Fatalf("entry %q missing after apply", identifier)
+	}
+	if updatedEntry.Artist != "Corrected Artist Name" {
+		t.Errorf("entry.Artist = %q, want %q", updatedEntry.Artist, "Corrected Artist Name")
+	}
+
+	// The alias must be persisted for future normalization (the fix under test).
+	normCfg := cache.LoadNormalizationConfig()
+	got, ok := normCfg.ArtistAliases[strings.ToLower(strings.TrimSpace(finding.AliasCandidate))]
+	if !ok {
+		t.Fatalf("no alias saved for %q; ArtistAliases = %#v", finding.AliasCandidate, normCfg.ArtistAliases)
+	}
+	if got != "Corrected Artist Name" {
+		t.Errorf("saved alias = %q, want %q", got, "Corrected Artist Name")
 	}
 }
