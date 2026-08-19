@@ -24,15 +24,16 @@ type releaseSpec struct {
 }
 
 // releaseIndex captures known download artefacts per tool/OS/arch. Checksums are
-// currently left blank; populate them as part of the release process when the
-// authoritative SHA256 values are available.
+// vendored from each release's SHA2-256SUMS asset at the time the version is
+// pinned here (e.g. https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/SHA2-256SUMS)
+// rather than fetched again at install time.
 var releaseIndex = map[string]map[string]map[string]releaseSpec{
 	"yt-dlp": {
 		"darwin-amd64": {
 			"2024.07.16": {
 				Version:  "2024.07.16",
 				URL:      "https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/yt-dlp_macos",
-				Checksum: "",
+				Checksum: "8ce707eb1b14432c531fb3c74466219b8aa60eaae1d9c7f83ff356a3cf862ee0",
 				Archive:  archiveFormatNone,
 			},
 		},
@@ -40,7 +41,7 @@ var releaseIndex = map[string]map[string]map[string]releaseSpec{
 			"2024.07.16": {
 				Version:  "2024.07.16",
 				URL:      "https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/yt-dlp_macos",
-				Checksum: "",
+				Checksum: "8ce707eb1b14432c531fb3c74466219b8aa60eaae1d9c7f83ff356a3cf862ee0",
 				Archive:  archiveFormatNone,
 			},
 		},
@@ -48,7 +49,7 @@ var releaseIndex = map[string]map[string]map[string]releaseSpec{
 			"2024.07.16": {
 				Version:  "2024.07.16",
 				URL:      "https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/yt-dlp_linux",
-				Checksum: "",
+				Checksum: "a6b840e536014ce7b2c7c40b758080498ed5054aa96979e64fcc369752cdc8d3",
 				Archive:  archiveFormatNone,
 			},
 		},
@@ -56,7 +57,7 @@ var releaseIndex = map[string]map[string]map[string]releaseSpec{
 			"2024.07.16": {
 				Version:  "2024.07.16",
 				URL:      "https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/yt-dlp_linux_aarch64",
-				Checksum: "",
+				Checksum: "3babd96d69327bb565874c858abe696c96b5b73d87ad36d0da71ccf623eb06cb",
 				Archive:  archiveFormatNone,
 			},
 		},
@@ -64,7 +65,7 @@ var releaseIndex = map[string]map[string]map[string]releaseSpec{
 			"2024.07.16": {
 				Version:  "2024.07.16",
 				URL:      "https://github.com/yt-dlp/yt-dlp/releases/download/2024.07.16/yt-dlp.exe",
-				Checksum: "",
+				Checksum: "f01b37ca4f3e934208a5439d1ec8ae49a18f2be9f68fec5e3cfed08cc38b3275",
 				Archive:  archiveFormatNone,
 			},
 		},
