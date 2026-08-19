@@ -15,6 +15,7 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/job"
 	"powerhour/internal/render/state"
 	"powerhour/internal/tools"
 )
@@ -204,7 +205,7 @@ func checkSources(pp paths.ProjectPaths, collections map[string]project.Collecti
 		for _, row := range coll.Rows {
 			total++
 			r := row.ToRow()
-			_, ok, err := resolveEntryForRow(pp, idx, r)
+			_, ok, err := job.ResolveEntryForRow(pp, idx, r)
 			if err == nil && ok {
 				cached++
 			}

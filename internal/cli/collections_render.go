@@ -6,10 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -23,6 +21,7 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/job"
 	"powerhour/internal/render/state"
 	"powerhour/internal/tui"
 	"powerhour/pkg/csvplan"
@@ -114,38 +113,22 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 	// consumed by each timeline entry. Uses the same cursor logic as
 	// ResolveTimeline so that a collection appearing twice with different
 	// fades affects only its own portion of clips.
-	applySequenceEntryFades(cfg, collectionClips)
+	project.ApplySequenceEntryFades(cfg, collectionClips)
 
+	// Cheap pre-scan (local file stat / index lookup only, no network) to
+	// build a display-only segments slice for the initial TUI table and to
+	// decide whether auto-fetch is needed at all. job.RunCollectionJob
+	// redoes this preflight itself once the real job runs; recomputing it
+	// is inexpensive since it does no network I/O.
 	segments := make([]render.Segment, len(collectionClips))
-	renderOrder := make([]int, 0, len(collectionClips))
-	preflight := make([]render.Result, len(collectionClips))
-	shouldRender := make([]bool, len(collectionClips))
-
+	needsFetch := false
 	for i, collClip := range collectionClips {
-		segment, err := buildCollectionRenderSegment(pp, cfg, idx, resolver, collClip)
+		segment, buildErr := job.BuildCollectionRenderSegment(pp, cfg, idx, collClip)
 		segments[i] = segment
-
-		if err != nil {
-			if errors.Is(err, errMissingCachedSource) {
-				preflight[i] = renderPreflightResult(collClip.Clip, err)
-				if segment.OutputPath != "" {
-					preflight[i].OutputPath = segment.OutputPath
-				}
-				continue
-			}
-			return err
-		}
-		renderOrder = append(renderOrder, i)
-		shouldRender[i] = true
-	}
-
-	// Identify missing sources that can be auto-fetched (URLs only).
-	var missingIndices []int
-	for i, res := range preflight {
-		if res.Err != nil && errors.Is(res.Err, errMissingCachedSource) {
-			link := collectionClips[i].Clip.Row.Link
+		if buildErr != nil && errors.Is(buildErr, job.ErrMissingCachedSource) {
+			link := collClip.Clip.Row.Link
 			if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu") {
-				missingIndices = append(missingIndices, i)
+				needsFetch = true
 			}
 		}
 	}
@@ -153,11 +136,8 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 	// Create cache service if we need to auto-fetch (before TUI starts, since tool
 	// detection is slow and we don't want it to happen inside the render callback).
 	var cacheSvc *cache.Service
-	var fetchLogger *log.Logger
-	var fetchLogCloser io.Closer
-	if len(missingIndices) > 0 {
-		var logErr error
-		fetchLogger, fetchLogCloser, logErr = logx.New(pp)
+	if needsFetch {
+		fetchLogger, fetchLogCloser, logErr := logx.New(pp)
 		if logErr != nil {
 			return logErr
 		}
@@ -183,198 +163,41 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		svc.SetWriters(cmd.OutOrStdout(), nil)
 	}
 
-	// autoFetchAndRebuild fetches missing sources, re-runs preflight for fetched clips,
-	// then rebuilds validSegments, change detection, and toRender/skipResults.
-	// If send is non-nil, it sends TUI row updates for each fetch.
-	autoFetchAndRebuild := func(send func(tea.Msg)) ([]render.Segment, []render.Segment, map[string]render.Result, *state.RenderState, error) {
-		if len(missingIndices) > 0 && cacheSvc != nil {
-			opts := cache.ResolveOptions{}
-			dirty := false
-			for _, i := range missingIndices {
-				cc := collectionClips[i]
-				row := cc.Clip.Row
-				key := collectionRenderKey(cc)
-
-				if send != nil {
-					send(tui.RowUpdateMsg{
-						Key:    key,
-						Fields: map[string]string{"STATUS": "fetching"},
-					})
-				}
-
-				result, fetchErr := cacheSvc.Resolve(ctx, idx, row, opts)
-				if fetchErr != nil {
-					fetchLogger.Printf("auto-fetch collection=%s row %03d failed: %v", cc.CollectionName, row.Index, fetchErr)
-					if send != nil {
-						send(tui.RowUpdateMsg{
-							Key:    key,
-							Fields: map[string]string{"STATUS": "error", "SOURCE": "UNAVAILABLE"},
-						})
-					} else {
-						fmt.Fprintf(cmd.ErrOrStderr(), "fetch %s #%03d failed: %v\n", cc.CollectionName, row.Index, fetchErr)
-					}
-					continue
-				}
-				if result.Updated {
-					dirty = true
-				}
-
-				// Re-run preflight for this clip.
-				segment, buildErr := buildCollectionRenderSegment(pp, cfg, idx, resolver, cc)
-				segments[i] = segment
-				if buildErr != nil {
-					if errors.Is(buildErr, errMissingCachedSource) {
-						continue
-					}
-					return nil, nil, nil, nil, buildErr
-				}
-				preflight[i] = render.Result{}
-				renderOrder = append(renderOrder, i)
-				shouldRender[i] = true
-
-				if send != nil {
-					source := "-"
-					if segment.SourcePath != "" {
-						source = filepath.Base(segment.SourcePath)
-					}
-					send(tui.RowUpdateMsg{
-						Key:    key,
-						Fields: map[string]string{"STATUS": "fetched", "SOURCE": source},
-					})
-				} else {
-					fmt.Fprintf(cmd.ErrOrStderr(), "fetched %s #%03d\n", cc.CollectionName, row.Index)
-				}
-			}
-			if dirty {
-				if saveErr := cache.Save(pp, idx); saveErr != nil {
-					return nil, nil, nil, nil, fmt.Errorf("save cache index after auto-fetch: %w", saveErr)
-				}
-			}
-		}
-
-		// Sort renderOrder so valid segments are in clip-index order.
-		// mergeCollectionRenderResultsWithSkips iterates clips 0..N and
-		// consumes render results sequentially, so the order must match.
-		sort.Ints(renderOrder)
-
-		// Rebuild valid segments list
-		valid := make([]render.Segment, 0, len(renderOrder))
-		for _, idx := range renderOrder {
-			valid = append(valid, segments[idx])
-		}
-
-		// Change detection
-		rs, loadErr := state.Load(pp.RenderStateFile)
-		if loadErr != nil {
-			return nil, nil, nil, nil, fmt.Errorf("load render state: %w", loadErr)
-		}
-
-		filenameTemplate := cfg.SegmentFilenameTemplate()
-
-		// Wire stored hashes into segments for service-level change detection.
-		for i := range valid {
-			if prior, ok := rs.Segments[valid[i].OutputPath]; ok {
-				valid[i].StoredHash = prior.InputHash
-			}
-		}
-
-		actions := state.DetectChanges(rs, valid, cfg, filenameTemplate, renderForce)
-
-		var toRender []render.Segment
-		skip := make(map[string]render.Result)
-		for i, a := range actions {
-			seg := valid[i]
-			if a.Action == state.ActionSkip {
-				skip[seg.OutputPath] = render.Result{
-					Index:      seg.Clip.Sequence,
-					ClipType:   seg.Clip.ClipType,
-					TypeIndex:  seg.Clip.TypeIndex,
-					Title:      clipDisplayTitle(seg.Clip),
-					OutputPath: seg.OutputPath,
-					Skipped:    true,
-					Reason:     a.Reason,
-				}
-			} else {
-				toRender = append(toRender, seg)
-			}
-		}
-
-		return valid, toRender, skip, rs, nil
+	// seqToKey is built from the full clip set (not just the render-order
+	// subset) so the reporter can resolve keys for fetch-phase events, which
+	// fire before the render order is known.
+	seqToKey := make(map[int]string, len(collectionClips))
+	for _, cc := range collectionClips {
+		seqToKey[cc.Clip.Sequence] = collectionRenderKey(cc)
 	}
 
 	if renderDryRun {
-		validSegments, _, _, rs, buildErr := autoFetchAndRebuild(nil)
-		if buildErr != nil {
-			return buildErr
+		jobResult, jobErr := job.RunCollectionJob(ctx, job.CollectionJobParams{
+			Paths:         pp,
+			Config:        cfg,
+			Index:         idx,
+			CacheService:  cacheSvc,
+			RenderService: svc,
+			Clips:         collectionClips,
+			Force:         renderForce,
+			Concurrency:   renderConcurrency,
+			DryRun:        true,
+		})
+		if jobErr != nil {
+			return jobErr
 		}
-		filenameTemplate := cfg.SegmentFilenameTemplate()
-		actions := state.DetectChanges(rs, validSegments, cfg, filenameTemplate, renderForce)
-		printDryRun(cmd, actions, outputJSON)
+		printDryRun(cmd, jobResult.Actions, outputJSON)
 		return nil
 	}
 
 	var fullResults []render.Result
+	var renderErr error
 
 	if mode == tui.ModeTUI {
 		fmt.Fprintf(outWriter, "Project: %s\n", pp.Root)
 		model := buildCollectionRenderProgressModel(pp.Root, collectionClips, segments)
 
-		// Build set of fetchable indices for quick lookup.
-		fetchableSet := make(map[int]bool, len(missingIndices))
-		for _, i := range missingIndices {
-			fetchableSet[i] = true
-		}
-
 		err := tui.RunWithWork(outWriter, model, func(send func(tea.Msg)) {
-			// Send non-fetchable preflight errors immediately so they show
-			// as "error" rather than staying "pending" during the fetch phase.
-			for i := range collectionClips {
-				if preflight[i].Err != nil && !fetchableSet[i] {
-					send(tui.RowUpdateMsg{
-						Key:    collectionRenderKey(collectionClips[i]),
-						Fields: collectionRenderResultFields(pp.Root, collectionClips[i], segments[i], preflight[i]),
-					})
-				}
-			}
-
-			// Phase 1: Auto-fetch missing sources
-			validSegments, toRender, skipResults, rs, buildErr := autoFetchAndRebuild(send)
-			if buildErr != nil {
-				fullResults = mergeCollectionRenderResultsWithSkips(collectionClips, preflight, shouldRender, nil, nil)
-				_ = rs
-				_ = validSegments
-				return
-			}
-
-			// Send preflight errors for clips that failed to fetch
-			for i := range collectionClips {
-				if preflight[i].Err != nil && fetchableSet[i] {
-					send(tui.RowUpdateMsg{
-						Key:    collectionRenderKey(collectionClips[i]),
-						Fields: collectionRenderResultFields(pp.Root, collectionClips[i], segments[i], preflight[i]),
-					})
-				}
-			}
-
-			// Send skip results from change detection
-			for _, clipIdx := range renderOrder {
-				cc := collectionClips[clipIdx]
-				seg := segments[clipIdx]
-				if sr, ok := skipResults[seg.OutputPath]; ok {
-					send(tui.RowUpdateMsg{
-						Key:    collectionRenderKey(cc),
-						Fields: collectionRenderResultFields(pp.Root, cc, seg, sr),
-					})
-				}
-			}
-
-			// Phase 2: Render
-			seqToKey := make(map[int]string, len(collectionClips))
-			for _, clipIdx := range renderOrder {
-				cc := collectionClips[clipIdx]
-				seqToKey[cc.Clip.Sequence] = collectionRenderKey(cc)
-			}
-
 			reporter := tui.NewRenderReporter(
 				send,
 				func(seg render.Segment) string {
@@ -389,112 +212,71 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 					}
 					return fmt.Sprintf("unknown:%d", res.Index)
 				},
+				collectionRenderKey,
 				func(seg render.Segment) map[string]string {
 					return map[string]string{"STATUS": "queued"}
 				},
 				func(res render.Result) map[string]string {
-					for _, clipIdx := range renderOrder {
-						cc := collectionClips[clipIdx]
-						if cc.Clip.Sequence == res.Index {
-							return collectionRenderResultFields(pp.Root, cc, segments[clipIdx], res)
-						}
+					return collectionRenderResultFields(pp.Root, res)
+				},
+				func(cc project.CollectionClip) map[string]string {
+					return map[string]string{"STATUS": "fetching"}
+				},
+				func(cc project.CollectionClip, seg render.Segment) map[string]string {
+					source := "-"
+					if seg.SourcePath != "" {
+						source = filepath.Base(seg.SourcePath)
 					}
-					status := "rendered"
-					if res.Err != nil {
-						status = "error"
-					} else if res.Skipped {
-						status = "cached"
-					}
-					return map[string]string{"STATUS": status}
+					return map[string]string{"STATUS": "fetched", "SOURCE": source}
+				},
+				func(cc project.CollectionClip, err error) map[string]string {
+					return map[string]string{"STATUS": "error", "SOURCE": "UNAVAILABLE"}
 				},
 			)
 
-			var renderResults []render.Result
-			if len(toRender) > 0 {
-				renderResults = svc.Render(ctx, toRender, render.Options{
-					Concurrency: renderConcurrency,
-					Force:       renderForce,
-					Reporter:    reporter,
-				})
+			jobResult, jobErr := job.RunCollectionJob(ctx, job.CollectionJobParams{
+				Paths:         pp,
+				Config:        cfg,
+				Index:         idx,
+				CacheService:  cacheSvc,
+				RenderService: svc,
+				Clips:         collectionClips,
+				Reporter:      reporter,
+				Force:         renderForce,
+				Concurrency:   renderConcurrency,
+			})
+			if jobErr != nil {
+				renderErr = jobErr
+				return
 			}
-
-			fullResults = mergeCollectionRenderResultsWithSkips(collectionClips, preflight, shouldRender, renderResults, skipResults)
-
-			// Update render state
-			rs.GlobalConfigHash = state.GlobalConfigHash(cfg)
-			segByPath := make(map[string]render.Segment, len(validSegments))
-			for _, seg := range validSegments {
-				segByPath[seg.OutputPath] = seg
-			}
-			filenameTemplate := cfg.SegmentFilenameTemplate()
-			for _, res := range fullResults {
-				if !res.Skipped && res.Err == nil && res.OutputPath != "" {
-					if seg, ok := segByPath[res.OutputPath]; ok {
-						rs.Segments[res.OutputPath] = state.SegmentState{
-							InputHash:  state.SegmentInputHash(seg, filenameTemplate),
-							RenderedAt: time.Now(),
-							SourcePath: seg.CachedPath,
-							DurationS:  float64(seg.Clip.DurationSeconds),
-						}
-					}
-				}
-			}
-			currentKeys := make(map[string]bool, len(validSegments))
-			for _, seg := range validSegments {
-				currentKeys[seg.OutputPath] = true
-			}
-			state.Prune(rs, currentKeys)
-			_ = rs.Save(pp.RenderStateFile)
+			fullResults = jobResult.Results
+			segments = jobResult.Segments
 		})
 		if err != nil {
 			return err
 		}
+		if renderErr != nil {
+			return renderErr
+		}
 
 		printCollectionRenderSummary(outWriter, fullResults)
 	} else {
-		// Non-TUI: fetch then render sequentially
-		validSegments, toRender, skipResults, rs, buildErr := autoFetchAndRebuild(nil)
-		if buildErr != nil {
-			return buildErr
+		// Non-TUI: fetch then render sequentially.
+		jobResult, jobErr := job.RunCollectionJob(ctx, job.CollectionJobParams{
+			Paths:         pp,
+			Config:        cfg,
+			Index:         idx,
+			CacheService:  cacheSvc,
+			RenderService: svc,
+			Clips:         collectionClips,
+			Force:         renderForce,
+			Concurrency:   renderConcurrency,
+		})
+		if jobErr != nil {
+			return jobErr
 		}
-
-		var renderResults []render.Result
-		if len(toRender) > 0 {
-			renderResults = svc.Render(ctx, toRender, render.Options{
-				Concurrency: renderConcurrency,
-				Force:       renderForce,
-			})
-		}
-
-		fullResults = mergeCollectionRenderResultsWithSkips(collectionClips, preflight, shouldRender, renderResults, skipResults)
-
-		// Update render state
-		rs.GlobalConfigHash = state.GlobalConfigHash(cfg)
-		segByPath := make(map[string]render.Segment, len(validSegments))
-		for _, seg := range validSegments {
-			segByPath[seg.OutputPath] = seg
-		}
-		filenameTemplate := cfg.SegmentFilenameTemplate()
-		for _, res := range fullResults {
-			if !res.Skipped && res.Err == nil && res.OutputPath != "" {
-				if seg, ok := segByPath[res.OutputPath]; ok {
-					rs.Segments[res.OutputPath] = state.SegmentState{
-						InputHash:  state.SegmentInputHash(seg, filenameTemplate),
-						RenderedAt: time.Now(),
-						SourcePath: seg.CachedPath,
-						DurationS:  float64(seg.Clip.DurationSeconds),
-					}
-				}
-			}
-		}
-		currentKeys := make(map[string]bool, len(validSegments))
-		for _, seg := range validSegments {
-			currentKeys[seg.OutputPath] = true
-		}
-		state.Prune(rs, currentKeys)
-		if saveErr := rs.Save(pp.RenderStateFile); saveErr != nil {
-			return fmt.Errorf("save render state: %w", saveErr)
-		}
+		fullResults = jobResult.Results
+		segments = jobResult.Segments
 
 		if mode == tui.ModeJSON {
 			return writeCollectionRenderJSON(cmd, pp.Root, collectionClips, fullResults)
@@ -597,84 +379,6 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 	}
 	_ = rs.Save(pp.RenderStateFile)
 	return nil
-}
-
-func buildCollectionRenderSegment(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, _ *project.CollectionResolver, collClip project.CollectionClip) (render.Segment, error) {
-	clip := collClip.Clip
-
-	clip.Row.DurationSeconds = clip.DurationSeconds
-	if clip.Row.Index <= 0 {
-		clip.Row.Index = clip.TypeIndex
-		if clip.Row.Index <= 0 {
-			clip.Row.Index = clip.Sequence
-		}
-	}
-
-	segment := render.Segment{
-		Clip:     clip,
-		Overlays: collClip.Overlays,
-	}
-
-	outputDir := collClip.OutputDir
-	if !filepath.IsAbs(outputDir) {
-		outputDir = filepath.Join(pp.SegmentsDir, outputDir)
-	}
-	baseName := render.SegmentBaseName(cfg.SegmentFilenameTemplate(), segment)
-	segment.OutputPath = filepath.Join(outputDir, baseName+".mp4")
-
-	link := clip.Row.Link
-	isURL := strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu")
-
-	if !isURL {
-		link = strings.Trim(link, "'\"")
-
-		var sourcePath string
-		if filepath.IsAbs(link) {
-			if _, err := os.Stat(link); err == nil {
-				sourcePath = link
-			} else {
-				sourcePath = filepath.Join(pp.Root, strings.TrimPrefix(link, string(filepath.Separator)))
-			}
-		} else {
-			sourcePath = filepath.Join(pp.Root, link)
-		}
-
-		if _, err := os.Stat(sourcePath); err != nil {
-			if os.IsNotExist(err) {
-				return segment, missingCachedSourceError{
-					msg: fmt.Sprintf("local file not found: %s", sourcePath),
-				}
-			}
-			return segment, fmt.Errorf("collection %q row %03d: stat local file: %w", collClip.CollectionName, clip.Row.Index, err)
-		}
-
-		segment.SourcePath = sourcePath
-		segment.CachedPath = sourcePath
-	} else {
-		entry, ok, err := resolveEntryForRow(pp, idx, clip.Row)
-		if err != nil {
-			return segment, err
-		}
-		if !ok {
-			return segment, missingCachedSourceError{
-				msg: "video not downloaded; may be unavailable or region-locked",
-			}
-		}
-
-		segment.Entry = entry
-		segment.SourcePath = entry.CachedPath
-		segment.CachedPath = entry.CachedPath
-	}
-
-	return segment, nil
-}
-
-// applySequenceEntryFades walks the timeline sequence with a stateful cursor
-// and applies per-entry fade overrides to the corresponding clips. This ensures
-// that a collection appearing twice with different fade values gets different
-// fades for each portion.
-func applySequenceEntryFades(cfg config.Config, clips []project.CollectionClip) {
-	project.ApplySequenceEntryFades(cfg, clips)
 }
 
 func writeCollectionRenderJSON(cmd *cobra.Command, projectRoot string, clips []project.CollectionClip, results []render.Result) error {
@@ -835,7 +539,7 @@ func buildCollectionRenderProgressModel(projectRoot string, clips []project.Coll
 	return model
 }
 
-func collectionRenderResultFields(projectRoot string, _ project.CollectionClip, _ render.Segment, res render.Result) map[string]string {
+func collectionRenderResultFields(projectRoot string, res render.Result) map[string]string {
 	fields := make(map[string]string)
 
 	if res.Err != nil {
@@ -863,55 +567,6 @@ func collectionRenderResultFields(projectRoot string, _ project.CollectionClip, 
 	return fields
 }
 
-func mergeCollectionRenderResults(clips []project.CollectionClip, preflight []render.Result, shouldRender []bool, results []render.Result) []render.Result {
-	fullResults := make([]render.Result, len(clips))
-	resultIdx := 0
-	for i := range clips {
-		if shouldRender[i] {
-			fullResults[i] = results[resultIdx]
-			resultIdx++
-		} else {
-			fullResults[i] = preflight[i]
-		}
-	}
-	return fullResults
-}
-
-// mergeCollectionRenderResultsWithSkips merges preflight errors, change-detection
-// skips, and actual render results into a unified results slice.
-func mergeCollectionRenderResultsWithSkips(clips []project.CollectionClip, preflight []render.Result, shouldRender []bool, renderResults []render.Result, skipResults map[string]render.Result) []render.Result {
-	fullResults := make([]render.Result, len(clips))
-	renderIdx := 0
-	for i := range clips {
-		if !shouldRender[i] {
-			// Preflight error (e.g. missing cached source)
-			fullResults[i] = preflight[i]
-			continue
-		}
-		// Check if this segment was skipped by change detection
-		outputPath := preflight[i].OutputPath // may be empty
-		if outputPath == "" && i < len(clips) {
-			// Try to find it from render or skip results
-			for path, sr := range skipResults {
-				if sr.Index == clips[i].Clip.Sequence {
-					outputPath = path
-					break
-				}
-			}
-		}
-		if sr, ok := skipResults[outputPath]; ok {
-			fullResults[i] = sr
-			continue
-		}
-		// Actual render result
-		if renderIdx < len(renderResults) {
-			fullResults[i] = renderResults[renderIdx]
-			renderIdx++
-		}
-	}
-	return fullResults
-}
-
 func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput bool) {
 	if jsonOutput {
 		type jsonAction struct {
@@ -925,7 +580,7 @@ func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput b
 		for _, a := range actions {
 			out = append(out, jsonAction{
 				Index:  a.Segment.Clip.Sequence,
-				Title:  clipDisplayTitle(a.Segment.Clip),
+				Title:  job.ClipDisplayTitle(a.Segment.Clip),
 				Action: a.Action,
 				Reason: a.Reason,
 				Output: a.Segment.OutputPath,
@@ -952,7 +607,7 @@ func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput b
 			tag = "RENDER"
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  %s  %03d  %-20s  (%s)\n",
-			tag, a.Segment.Clip.Sequence, clipDisplayTitle(a.Segment.Clip), a.Reason)
+			tag, a.Segment.Clip.Sequence, job.ClipDisplayTitle(a.Segment.Clip), a.Reason)
 	}
 }
 

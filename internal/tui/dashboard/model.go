@@ -22,8 +22,8 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
+	"powerhour/internal/render/job"
 	"powerhour/internal/render/state"
-	renderstate "powerhour/internal/render/state"
 	"powerhour/pkg/csvplan"
 )
 
@@ -2476,74 +2476,47 @@ func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, collName st
 		events <- jobCompletedEvent{label: "Render", err: err}
 		return
 	}
-	applySequenceEntryFadesLocal(cfg, collectionClips)
+	project.ApplySequenceEntryFades(cfg, collectionClips)
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {
 		events <- jobCompletedEvent{label: "Render", err: err}
 		return
 	}
-	rs, err := renderstate.Load(pp.RenderStateFile)
-	if err != nil {
-		events <- jobCompletedEvent{label: "Render", err: err}
+
+	// Auto-fetch missing URL-backed sources, matching the CLI render path —
+	// a dashboard render against an uncached source used to fail outright
+	// instead of fetching it first.
+	fetchLogger := log.New(io.Discard, "", 0)
+	cacheSvc, cacheErr := cache.NewService(ctx, pp, fetchLogger, nil)
+	if cacheErr != nil {
+		events <- jobCompletedEvent{label: "Render", err: cacheErr}
 		return
 	}
-	filenameTemplate := cfg.SegmentFilenameTemplate()
-	segments := make([]render.Segment, 0, len(collectionClips))
-	for _, cc := range collectionClips {
-		seg, err := buildCollectionRenderSegmentLocal(pp, cfg, idx, cc)
-		if err != nil {
-			events <- jobCompletedEvent{label: "Render", err: err}
-			return
-		}
-		if prior, ok := rs.Segments[seg.OutputPath]; ok {
-			seg.StoredHash = prior.InputHash
-		}
-		segments = append(segments, seg)
-	}
-	actions := renderstate.DetectChanges(rs, segments, cfg, filenameTemplate, false)
-	toRender := make([]render.Segment, 0, len(segments))
-	for i, action := range actions {
-		rowIndex := segments[i].Clip.Row.Index
-		switch action.Action {
-		case renderstate.ActionSkip:
-			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: rowIndex, status: "cached"}
-		default:
-			toRender = append(toRender, segments[i])
-			events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: rowIndex, status: "queued"}
-		}
-	}
+
 	if all {
 		events <- jobCollectionStatusEvent{collectionIdx: cvIdx, status: "rendering all"}
 	}
+
 	reporter := &dashboardRenderReporter{collectionIdx: cvIdx, events: events}
-	results := svc.Render(ctx, toRender, render.Options{
-		Concurrency: max(1, min(runtime.NumCPU(), 2)),
-		Force:       false,
-		Reporter:    reporter,
+	jobResult, jobErr := job.RunCollectionJob(ctx, job.CollectionJobParams{
+		Paths:         pp,
+		Config:        cfg,
+		Index:         idx,
+		CacheService:  cacheSvc,
+		RenderService: svc,
+		Clips:         collectionClips,
+		Reporter:      reporter,
+		Concurrency:   max(1, min(runtime.NumCPU(), 2)),
 	})
-	segByPath := make(map[string]render.Segment, len(segments))
-	for _, seg := range segments {
-		segByPath[seg.OutputPath] = seg
+	if jobErr != nil {
+		events <- jobCompletedEvent{label: "Render", err: jobErr}
+		return
 	}
-	for _, res := range results {
+	for _, res := range jobResult.Results {
 		if res.Err != nil {
 			events <- jobCompletedEvent{label: "Render", err: res.Err}
 			return
 		}
-		if !res.Skipped && res.OutputPath != "" {
-			if seg, ok := segByPath[res.OutputPath]; ok {
-				rs.Segments[res.OutputPath] = renderstate.SegmentState{
-					InputHash:  renderstate.SegmentInputHash(seg, filenameTemplate),
-					RenderedAt: time.Now(),
-					SourcePath: seg.CachedPath,
-					DurationS:  float64(seg.Clip.DurationSeconds),
-				}
-			}
-		}
-	}
-	if err := rs.Save(pp.RenderStateFile); err != nil {
-		events <- jobCompletedEvent{label: "Render", err: err}
-		return
 	}
 	events <- jobCompletedEvent{label: "Render", err: nil}
 }
@@ -2572,96 +2545,16 @@ func (r *dashboardRenderReporter) Complete(res render.Result) {
 	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: res.TypeIndex, status: status}
 }
 
-func buildCollectionRenderSegmentLocal(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, collClip project.CollectionClip) (render.Segment, error) {
-	clip := collClip.Clip
-	clip.Row.DurationSeconds = clip.DurationSeconds
-	if clip.Row.Index <= 0 {
-		clip.Row.Index = clip.TypeIndex
-		if clip.Row.Index <= 0 {
-			clip.Row.Index = clip.Sequence
-		}
-	}
-
-	segment := render.Segment{
-		Clip:     clip,
-		Overlays: collClip.Overlays,
-	}
-
-	outputDir := collClip.OutputDir
-	if !filepath.IsAbs(outputDir) {
-		outputDir = filepath.Join(pp.SegmentsDir, outputDir)
-	}
-	baseName := render.SegmentBaseName(cfg.SegmentFilenameTemplate(), segment)
-	segment.OutputPath = filepath.Join(outputDir, baseName+".mp4")
-
-	link := clip.Row.Link
-	isURL := strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") || strings.HasPrefix(link, "youtu")
-	if !isURL {
-		link = strings.Trim(link, "'\"")
-		sourcePath := link
-		if !filepath.IsAbs(sourcePath) {
-			sourcePath = filepath.Join(pp.Root, link)
-		}
-		if _, err := os.Stat(sourcePath); err != nil {
-			return segment, err
-		}
-		segment.SourcePath = sourcePath
-		segment.CachedPath = sourcePath
-		return segment, nil
-	}
-
-	entry, ok, err := resolveDashboardEntryForRow(pp, idx, clip.Row)
-	if err != nil {
-		return segment, err
-	}
-	if !ok {
-		return segment, fmt.Errorf("video not downloaded; may be unavailable or region-locked")
-	}
-	segment.Entry = entry
-	segment.SourcePath = entry.CachedPath
-	segment.CachedPath = entry.CachedPath
-	return segment, nil
+func (r *dashboardRenderReporter) Fetching(clip project.CollectionClip) {
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: clip.Clip.Row.Index, status: "fetching"}
 }
 
-func applySequenceEntryFadesLocal(cfg config.Config, clips []project.CollectionClip) {
-	project.ApplySequenceEntryFades(cfg, clips)
+func (r *dashboardRenderReporter) Fetched(clip project.CollectionClip, seg render.Segment) {
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: clip.Clip.Row.Index, status: "fetched"}
 }
 
-func resolveDashboardEntryForRow(pp paths.ProjectPaths, idx *cache.Index, row csvplan.Row) (cache.Entry, bool, error) {
-	if idx == nil {
-		return cache.Entry{}, false, fmt.Errorf("row %03d: cache index is nil", row.Index)
-	}
-
-	link := strings.TrimSpace(row.Link)
-	if link == "" {
-		return cache.Entry{}, false, fmt.Errorf("row %03d missing link", row.Index)
-	}
-
-	if isURL(link) {
-		key, exists := idx.LookupLink(link)
-		if !exists {
-			return cache.Entry{}, false, nil
-		}
-		entry, ok := idx.GetByIdentifier(key)
-		if !ok || strings.TrimSpace(entry.CachedPath) == "" {
-			return cache.Entry{}, false, nil
-		}
-		return entry, true, nil
-	}
-
-	path := link
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(pp.Root, link)
-	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return cache.Entry{}, false, err
-	}
-	entry, ok := idx.GetByIdentifier(abs)
-	if !ok || strings.TrimSpace(entry.CachedPath) == "" {
-		return cache.Entry{}, false, nil
-	}
-	return entry, true, nil
+func (r *dashboardRenderReporter) FetchError(clip project.CollectionClip, err error) {
+	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: clip.Clip.Row.Index, status: "note:ERROR - " + strings.TrimSpace(err.Error())}
 }
 
 // processAddTimelineEntry adds a new sequence entry to the timeline.

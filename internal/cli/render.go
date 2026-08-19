@@ -2,19 +2,14 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
-	"powerhour/internal/project"
-	"powerhour/internal/render"
 )
 
 var (
@@ -24,20 +19,6 @@ var (
 	renderIndexArg    []string
 	renderNoProgress  bool
 )
-
-var errMissingCachedSource = errors.New("missing cached source")
-
-type missingCachedSourceError struct {
-	msg string
-}
-
-func (e missingCachedSourceError) Error() string {
-	return e.msg
-}
-
-func (e missingCachedSourceError) Is(target error) bool {
-	return target == errMissingCachedSource
-}
 
 func newRenderCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -93,27 +74,4 @@ func runRender(cmd *cobra.Command, _ []string) error {
 		glogf("render finished")
 	}
 	return err
-}
-
-func renderPreflightResult(clip project.Clip, err error) render.Result {
-	return render.Result{
-		Index:     clip.Sequence,
-		ClipType:  clip.ClipType,
-		TypeIndex: clip.TypeIndex,
-		Title:     clipDisplayTitle(clip),
-		Err:       err,
-	}
-}
-
-func clipDisplayTitle(clip project.Clip) string {
-	if title := strings.TrimSpace(clip.Row.Title); title != "" {
-		return title
-	}
-	if name := strings.TrimSpace(clip.Row.Name); name != "" {
-		return name
-	}
-	if clip.SourceKind == project.SourceKindMedia && strings.TrimSpace(clip.MediaPath) != "" {
-		return filepath.Base(clip.MediaPath)
-	}
-	return string(clip.ClipType)
 }
