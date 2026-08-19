@@ -1117,7 +1117,7 @@ func (m Model) refreshAddClipHint(cvIdx int) Model {
 				v.addHint = "Unknown link. Enter adds the row and auto-probes metadata."
 			}
 		} else {
-			if suggestions := searchCachedSongs(m.cacheIdx, trimmed, lookup, 3); len(suggestions) > 0 {
+			if suggestions := searchCachedSongs(m.cacheIdx, trimmed, lookup, maxAddSuggestions); len(suggestions) > 0 {
 				v.addSuggestions = suggestions
 				v.addSelected = min(v.addSelected, len(suggestions)-1)
 			}
