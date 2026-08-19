@@ -108,6 +108,11 @@ func runSample(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Apply per-sequence-entry fade overrides so a sampled frame reflects
+	// the fade actually used at render time, not just a collection's own
+	// base fade config. Mirrors collections_render.go's runCollectionsRender.
+	project.ApplySequenceEntryFades(cfg, collectionClips)
+
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {
 		return err
