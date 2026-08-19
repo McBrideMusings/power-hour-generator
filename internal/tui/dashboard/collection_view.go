@@ -18,6 +18,11 @@ import (
 	"powerhour/pkg/csvplan"
 )
 
+// collectionHeaderLines is the collection view's own chrome on top of
+// dashboardChromeLines: the persistent help row plus surrounding headers
+// and the section label.
+const collectionHeaderLines = 5
+
 // rowState describes the cache/render state of a collection row.
 type rowState int
 
@@ -208,9 +213,10 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 }
 
 func (v collectionView) visibleRowCount() int {
-	// -10 reserves one line for the persistent help row at the bottom plus
-	// surrounding chrome (headers, section label).
-	h := v.termHeight - 10
+	// dashboardChromeLines (outer chrome) + collectionHeaderLines reserves
+	// one line for the persistent help row at the bottom plus surrounding
+	// chrome (headers, section label).
+	h := v.termHeight - dashboardChromeLines - collectionHeaderLines
 	// The focused add-slot is the only help row that can exceed a single
 	// line: it optionally adds suggestion rows and a dynamic hint line.
 	if v.addFocus {
