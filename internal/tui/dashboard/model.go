@@ -2047,7 +2047,7 @@ func (m Model) openDoctorOverlay(entries []cacheEntry) Model {
 		return m
 	}
 	m.doctorInstanceSeq++
-	overlay := newCacheDoctorOverlay(items, knownArtists, m.termWidth, m.termHeight, m.doctorInstanceSeq)
+	overlay := newCacheDoctorOverlay(items, m.cacheView.columns, knownArtists, m.termWidth, m.termHeight, m.doctorInstanceSeq)
 	m.doctorOverlay = &overlay
 	m.overlay = overlayDoctor
 	return m
@@ -2107,8 +2107,6 @@ func (m Model) applyCurrentDoctorEntry() Model {
 	}
 	item := o.findings[o.cursor]
 	identifier := item.finding.Identifier
-	title := strings.TrimSpace(o.editTitle)
-	artist := strings.TrimSpace(o.editArtist)
 
 	idx, err := cache.Load(m.pp)
 	if err != nil {
@@ -2120,15 +2118,31 @@ func (m Model) applyCurrentDoctorEntry() Model {
 		m.statusMsg = "Entry not found in cache"
 		return m
 	}
-	entry.Title = title
-	entry.Artist = artist
+
+	for i, field := range o.columns {
+		if i >= len(o.editValues) {
+			continue
+		}
+		setCacheEntryField(&entry, field, o.editValues[i])
+	}
+
 	idx.SetEntry(entry)
+
+	var title, artist string
+	if o.titleIdx >= 0 && o.titleIdx < len(o.editValues) {
+		title = strings.TrimSpace(o.editValues[o.titleIdx])
+	}
+	artistTouched := false
+	if o.artistIdx >= 0 && o.artistIdx < len(o.editValues) {
+		artist = strings.TrimSpace(o.editValues[o.artistIdx])
+		artistTouched = o.artistIdx < len(o.editTouched) && o.editTouched[o.artistIdx]
+	}
 
 	// If the user actively corrected the artist field, persist it as an
 	// alias for future normalization and reapply it across the index, same
 	// as the CLI's interactive "a" (alias+apply) path.
 	aliasSaved := false
-	if o.artistTouched && artist != "" && strings.TrimSpace(item.finding.AliasCandidate) != "" {
+	if artistTouched && artist != "" && strings.TrimSpace(item.finding.AliasCandidate) != "" {
 		if err := cache.SaveArtistAlias(item.finding.AliasCandidate, artist); err != nil {
 			m.statusMsg = fmt.Sprintf("Alias save error: %v", err)
 		} else {
@@ -2143,11 +2157,16 @@ func (m Model) applyCurrentDoctorEntry() Model {
 		return m
 	}
 	o.applied++
-	o.rememberArtist(artist)
-	if aliasSaved {
+	if artist != "" {
+		o.rememberArtist(artist)
+	}
+	switch {
+	case aliasSaved:
 		m.statusMsg = fmt.Sprintf("Saved: %s – %s (alias remembered)", title, artist)
-	} else {
+	case title != "" || artist != "":
 		m.statusMsg = fmt.Sprintf("Saved: %s – %s", title, artist)
+	default:
+		m.statusMsg = "Saved"
 	}
 	m = reloadState(m)
 

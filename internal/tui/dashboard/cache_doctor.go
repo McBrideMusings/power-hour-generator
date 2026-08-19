@@ -19,19 +19,26 @@ type doctorItem struct {
 	finding cachedoctor.Finding
 }
 
+// cacheDoctorOverlay walks the configured cache columns (cache.view.columns,
+// the same list cacheView renders) one entry at a time. The title/artist
+// columns (when configured) get the normalization "Current / Proposed"
+// treatment sourced from cachedoctor.Finding; every other configured column
+// is a plain editable "Current / New" row sourced from the cache entry via
+// cacheFieldValues, matching the inline cache editor.
 type cacheDoctorOverlay struct {
 	findings []doctorItem
 	cursor   int
 
-	// 0 = title, 1 = artist
+	columns   []string
+	titleIdx  int // index into columns; -1 if "title" is not configured
+	artistIdx int // index into columns; -1 if "artist" is not configured
+
+	// activeField indexes into columns/editValues/editCursors/editTouched.
 	activeField int
 
-	editTitle     string
-	editArtist    string
-	titleCursor   int
-	artistCursor  int
-	titleTouched  bool
-	artistTouched bool
+	editValues  []string
+	editCursors []int
+	editTouched []bool
 
 	applied int
 
@@ -53,9 +60,16 @@ type cacheDoctorOverlay struct {
 	termHeight int
 }
 
-func newCacheDoctorOverlay(items []doctorItem, knownArtists []string, w, h, instance int) cacheDoctorOverlay {
+func newCacheDoctorOverlay(items []doctorItem, columns []string, knownArtists []string, w, h, instance int) cacheDoctorOverlay {
+	cols := append([]string(nil), columns...)
+	if len(cols) == 0 {
+		cols = []string{"title", "artist"}
+	}
 	o := cacheDoctorOverlay{
 		findings:     items,
+		columns:      cols,
+		titleIdx:     columnIndex(cols, "title"),
+		artistIdx:    columnIndex(cols, "artist"),
 		knownArtists: knownArtists,
 		termWidth:    w,
 		termHeight:   h,
@@ -65,18 +79,49 @@ func newCacheDoctorOverlay(items []doctorItem, knownArtists []string, w, h, inst
 	return o
 }
 
+// columnIndex returns the position of field within cols (case-insensitive),
+// or -1 when the field is not configured.
+func columnIndex(cols []string, field string) int {
+	for i, c := range cols {
+		if strings.EqualFold(strings.TrimSpace(c), field) {
+			return i
+		}
+	}
+	return -1
+}
+
 func (o *cacheDoctorOverlay) loadCurrentEntry() {
 	if o.cursor < 0 || o.cursor >= len(o.findings) {
 		return
 	}
-	f := o.findings[o.cursor].finding
-	o.editTitle = f.ProposedTitle
-	o.editArtist = f.ProposedArtist
-	o.titleCursor = len(o.editTitle)
-	o.artistCursor = len(o.editArtist)
-	o.titleTouched = false
-	o.artistTouched = false
-	o.activeField = 0
+	item := o.findings[o.cursor]
+	f := item.finding
+	entry := item.entry
+
+	n := len(o.columns)
+	o.editValues = make([]string, n)
+	o.editCursors = make([]int, n)
+	o.editTouched = make([]bool, n)
+
+	for i, field := range o.columns {
+		var val string
+		switch {
+		case i == o.titleIdx:
+			val = f.ProposedTitle
+		case i == o.artistIdx:
+			val = f.ProposedArtist
+		default:
+			val = firstConfiguredCacheValue(entry, []string{field})
+		}
+		o.editValues[i] = val
+		o.editCursors[i] = len(val)
+	}
+
+	if o.titleIdx >= 0 {
+		o.activeField = o.titleIdx
+	} else {
+		o.activeField = 0
+	}
 	o.requeryStatus = ""
 }
 
@@ -96,37 +141,33 @@ func (o *cacheDoctorOverlay) rememberArtist(name string) {
 }
 
 func (o *cacheDoctorOverlay) activeText() string {
-	if o.activeField == 0 {
-		return o.editTitle
+	if o.activeField < 0 || o.activeField >= len(o.editValues) {
+		return ""
 	}
-	return o.editArtist
+	return o.editValues[o.activeField]
 }
 
 func (o *cacheDoctorOverlay) activeCursor() int {
-	if o.activeField == 0 {
-		return o.titleCursor
+	if o.activeField < 0 || o.activeField >= len(o.editCursors) {
+		return 0
 	}
-	return o.artistCursor
+	return o.editCursors[o.activeField]
 }
 
 func (o *cacheDoctorOverlay) setActiveText(s string, cur int) {
-	if o.activeField == 0 {
-		o.editTitle = s
-		o.titleCursor = cur
-		o.titleTouched = true
-	} else {
-		o.editArtist = s
-		o.artistCursor = cur
-		o.artistTouched = true
+	if o.activeField < 0 || o.activeField >= len(o.editValues) {
+		return
 	}
+	o.editValues[o.activeField] = s
+	o.editCursors[o.activeField] = cur
+	o.editTouched[o.activeField] = true
 }
 
 func (o *cacheDoctorOverlay) setActiveCursor(cur int) {
-	if o.activeField == 0 {
-		o.titleCursor = cur
-	} else {
-		o.artistCursor = cur
+	if o.activeField < 0 || o.activeField >= len(o.editCursors) {
+		return
 	}
+	o.editCursors[o.activeField] = cur
 }
 
 // applyRequery applies a completed yt-dlp requery result to the entry it was
@@ -137,6 +178,9 @@ func (o *cacheDoctorOverlay) setActiveCursor(cur int) {
 // currently-displayed edit buffers), or discarded entirely if the entry is
 // gone. This guards against the cursor moving while an async requery is in
 // flight and the result landing on the wrong entry.
+//
+// The requery only ever proposes title/artist normalization, so only those
+// two configured columns (when present) are updated.
 func (o *cacheDoctorOverlay) applyRequery(identifier string, info cache.RemoteIDInfo, normCfg cache.NormalizationConfig) {
 	defer func() {
 		o.requerying = false
@@ -184,13 +228,13 @@ func (o *cacheDoctorOverlay) applyRequery(identifier string, info cache.RemoteID
 		return
 	}
 
-	if !o.titleTouched {
-		o.editTitle = result.Title
-		o.titleCursor = len(o.editTitle)
+	if o.titleIdx >= 0 && o.titleIdx < len(o.editTouched) && !o.editTouched[o.titleIdx] {
+		o.editValues[o.titleIdx] = result.Title
+		o.editCursors[o.titleIdx] = len(result.Title)
 	}
-	if !o.artistTouched {
-		o.editArtist = result.Artist
-		o.artistCursor = len(o.editArtist)
+	if o.artistIdx >= 0 && o.artistIdx < len(o.editTouched) && !o.editTouched[o.artistIdx] {
+		o.editValues[o.artistIdx] = result.Artist
+		o.editCursors[o.artistIdx] = len(result.Artist)
 	}
 
 	if changed {
@@ -255,21 +299,17 @@ func (o *cacheDoctorOverlay) handleKey(msg tea.KeyMsg) (done bool, applyNow bool
 		// Requery — handled by model to start async job.
 		return false, false
 	case tea.KeyEnter:
-		if o.activeField == 1 {
+		if o.artistIdx >= 0 && o.activeField == o.artistIdx {
 			if suggestions := o.artistSuggestions(); len(suggestions) > 0 {
-				o.editArtist = suggestions[0]
-				o.artistCursor = len(o.editArtist)
-				o.artistTouched = true
+				o.setActiveText(suggestions[0], len(suggestions[0]))
 				return false, false
 			}
 		}
 		return o.cursor >= len(o.findings)-1, true
 	case tea.KeyTab:
-		if o.activeField == 1 {
+		if o.artistIdx >= 0 && o.activeField == o.artistIdx {
 			if suggestions := o.artistSuggestions(); len(suggestions) > 0 {
-				o.editArtist = suggestions[0]
-				o.artistCursor = len(o.editArtist)
-				o.artistTouched = true
+				o.setActiveText(suggestions[0], len(suggestions[0]))
 				return false, false
 			}
 		}
@@ -285,10 +325,14 @@ func (o *cacheDoctorOverlay) handleKey(msg tea.KeyMsg) (done bool, applyNow bool
 		}
 		return false, false
 	case tea.KeyUp:
-		o.activeField = 0
+		if n := len(o.columns); n > 0 {
+			o.activeField = (o.activeField - 1 + n) % n
+		}
 		return false, false
 	case tea.KeyDown:
-		o.activeField = 1
+		if n := len(o.columns); n > 0 {
+			o.activeField = (o.activeField + 1) % n
+		}
 		return false, false
 	case tea.KeyLeft:
 		text := o.activeText()
@@ -345,10 +389,10 @@ func isRequeryKey(msg tea.KeyMsg) bool {
 
 // artistSuggestions returns fuzzy-matched known artists based on current edit text.
 func (o *cacheDoctorOverlay) artistSuggestions() []string {
-	if o.activeField != 1 || !o.artistTouched {
+	if o.artistIdx < 0 || o.activeField != o.artistIdx || o.artistIdx >= len(o.editTouched) || !o.editTouched[o.artistIdx] {
 		return nil
 	}
-	query := strings.ToLower(strings.TrimSpace(o.editArtist))
+	query := strings.ToLower(strings.TrimSpace(o.editValues[o.artistIdx]))
 	if query == "" {
 		return nil
 	}
@@ -418,7 +462,8 @@ func (o *cacheDoctorOverlay) view() string {
 	entry := item.entry
 	finding := item.finding
 
-	// pre: header through the ARTIST "New:" line — never droppable.
+	// pre: header through the last configured field's "New:" line — never
+	// droppable.
 	var pre []string
 
 	confStyle := confidenceStyle(finding.Confidence)
@@ -440,37 +485,51 @@ func (o *cacheDoctorOverlay) view() string {
 	pre = append(pre, faint.Render("FILE    ")+truncate(entry.CachedPath, o.termWidth-12))
 	pre = append(pre, "")
 
-	titleLabel := "TITLE"
-	if o.activeField == 0 {
-		titleLabel = editStyle.Render(titleLabel)
-	} else {
-		titleLabel = bold.Render(titleLabel)
-	}
-	currentTitle := displayBlank(finding.CurrentTitle)
-	pre = append(pre, " "+titleLabel)
-	pre = append(pre, "   Current:  "+faint.Render(currentTitle))
-	if o.activeField == 0 {
-		pre = append(pre, "   New:      "+renderEditField(o.editTitle, o.titleCursor))
-	} else {
-		pre = append(pre, "   New:      "+o.editTitle)
-	}
-	pre = append(pre, "")
+	// lastFieldNewIdx tracks the index (within pre) of the last field's
+	// "New:" line, so the omission markers below have somewhere to attach
+	// when there's no budget left for a dedicated line.
+	lastFieldNewIdx := len(pre) - 1
 
-	artistLabel := "ARTIST"
-	if o.activeField == 1 {
-		artistLabel = editStyle.Render(artistLabel)
-	} else {
-		artistLabel = bold.Render(artistLabel)
+	for i, field := range o.columns {
+		label := strings.ToUpper(field)
+		if o.activeField == i {
+			label = editStyle.Render(label)
+		} else {
+			label = bold.Render(label)
+		}
+
+		var current string
+		switch {
+		case i == o.titleIdx:
+			current = displayBlank(finding.CurrentTitle)
+		case i == o.artistIdx:
+			current = displayBlank(finding.CurrentArtist)
+		default:
+			current = displayBlank(firstConfiguredCacheValue(entry, []string{field}))
+		}
+
+		val := ""
+		if i < len(o.editValues) {
+			val = o.editValues[i]
+		}
+
+		pre = append(pre, " "+label)
+		pre = append(pre, "   Current:  "+faint.Render(current))
+		if o.activeField == i {
+			cur := 0
+			if i < len(o.editCursors) {
+				cur = o.editCursors[i]
+			}
+			pre = append(pre, "   New:      "+renderEditField(val, cur))
+		} else {
+			pre = append(pre, "   New:      "+val)
+		}
+		lastFieldNewIdx = len(pre) - 1
+
+		if i < len(o.columns)-1 {
+			pre = append(pre, "")
+		}
 	}
-	currentArtist := displayBlank(finding.CurrentArtist)
-	pre = append(pre, " "+artistLabel)
-	pre = append(pre, "   Current:  "+faint.Render(currentArtist))
-	if o.activeField == 1 {
-		pre = append(pre, "   New:      "+renderEditField(o.editArtist, o.artistCursor))
-	} else {
-		pre = append(pre, "   New:      "+o.editArtist)
-	}
-	artistNewIdx := len(pre) - 1
 
 	// Required tail: reasons + requery status. Always present when non-empty.
 	var reasonsRequery []string
@@ -518,7 +577,7 @@ func (o *cacheDoctorOverlay) view() string {
 			budget--
 		default:
 			n := countContextFields(entry)
-			pre[artistNewIdx] += faint.Render(fmt.Sprintf("  CONTEXT hidden (%d field%s)", n, pluralSuffix(n)))
+			pre[lastFieldNewIdx] += faint.Render(fmt.Sprintf("  CONTEXT hidden (%d field%s)", n, pluralSuffix(n)))
 		}
 	}
 
@@ -538,7 +597,7 @@ func (o *cacheDoctorOverlay) view() string {
 			suggestOut[len(suggestOut)-1] += faint.Render(fmt.Sprintf("  … %d more", total-shown))
 			budget = 0
 		default:
-			pre[artistNewIdx] += faint.Render(fmt.Sprintf("  … %d more", total))
+			pre[lastFieldNewIdx] += faint.Render(fmt.Sprintf("  … %d more", total))
 		}
 	}
 
@@ -606,7 +665,7 @@ func pluralSuffix(n int) string {
 // suggestionDisplayLines renders the artist autocomplete suggestion list
 // as pre-styled lines, matching the layout previously inlined in view().
 func (o *cacheDoctorOverlay) suggestionDisplayLines() []string {
-	if o.activeField != 1 {
+	if o.artistIdx < 0 || o.activeField != o.artistIdx {
 		return nil
 	}
 	suggestions := o.artistSuggestions()
