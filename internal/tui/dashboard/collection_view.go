@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
@@ -539,24 +540,84 @@ func (v collectionView) renderAddSlot() string {
 	buf := v.addBuffer
 	body, detect := classifyAddBuffer(buf)
 
+	keysHint := "Enter save · Esc cancel · paste URL or search cache"
+	if len(v.addSuggestions) > 0 {
+		keysHint = "↑/↓ select · Tab/Enter save selected · Esc cancel"
+	}
+
+	// Budget the trailing plain text (detect hint, then keys hint) against
+	// what's left after the fixed cursor/marker/body, mirroring
+	// helpRowText's budget-then-style order: compute the width on plain
+	// text first, then apply lipgloss styling only to what survives. The
+	// "▸" cursor replaces the leading two spaces of helpRowPrefix, and "+ "
+	// is the marker, so the available budget is computed the same way
+	// helpRowText computes it.
+	// renderEditField appends a trailing cursor glyph (one visual column)
+	// when the cursor sits at or past the end of body, which is one column
+	// wider than body's own plain width; the multi-line branch always
+	// appends a "█" cursor glyph. Either way, account for it here so the
+	// budget matches what renderEditField actually produces below.
+	cursorGlyphWidth := 0
+	switch {
+	case strings.Contains(body, "\n"):
+		cursorGlyphWidth = runewidth.RuneWidth('█')
+	case v.addCursor >= len(body):
+		cursorGlyphWidth = 1
+	}
+
+	avail := max(v.termWidth-len(helpRowPrefix), 12)
+	remaining := avail - runewidth.StringWidth(body) - cursorGlyphWidth
+
+	const gapWidth = 2 // "  " separator before each trailer
+	detectText := ""
+	if detect != "" {
+		detectText = "· " + detect
+	}
+	keysWidth := gapWidth + runewidth.StringWidth(keysHint)
+	detectWidth := 0
+	if detectText != "" {
+		detectWidth = gapWidth + runewidth.StringWidth(detectText)
+	}
+
+	fittedKeys := ""
+	fittedDetect := ""
+	switch {
+	case remaining <= 0:
+		// No room for either trailer; body alone fills (or exceeds) the
+		// budget.
+	case detectWidth+keysWidth <= remaining:
+		// Both trailers fit untouched.
+		fittedKeys = keysHint
+		fittedDetect = detectText
+	case keysWidth <= remaining:
+		// keysHint has priority and fits fully; the detect hint shrinks or
+		// drops into whatever's left.
+		fittedKeys = keysHint
+		detectBudget := remaining - keysWidth
+		if detectText != "" && detectBudget > 0 {
+			fittedDetect = tui.TruncateWithEllipsis(detectText, detectBudget)
+		}
+	default:
+		// Not even keysHint fits fully; drop the detect hint and shrink
+		// keysHint into the remaining space.
+		keysBudget := remaining - gapWidth
+		fittedKeys = tui.TruncateWithEllipsis(keysHint, keysBudget)
+	}
+
 	var rendered string
 	if strings.Contains(body, "\n") {
 		rendered = editStyle.Render(body) + editStyle.Render("█")
 	} else {
 		rendered = renderEditField(body, v.addCursor)
 	}
-	if detect != "" {
-		rendered += "  " + faint.Render("· "+detect)
+	if fittedDetect != "" {
+		rendered += "  " + faint.Render(fittedDetect)
 	}
 
-	keysHint := "Enter save · Esc cancel · paste URL or search cache"
-	if len(v.addSuggestions) > 0 {
-		keysHint = "↑/↓ select · Tab/Enter save selected · Esc cancel"
+	line := cursor + "+ " + rendered
+	if fittedKeys != "" {
+		line += "  " + faint.Render(fittedKeys)
 	}
-
-	// The "▸" cursor replaces the leading two spaces of helpRowPrefix so the
-	// focused slot reads the same width as the idle/default help row.
-	line := cursor + "+ " + rendered + "  " + faint.Render(keysHint)
 
 	if strings.TrimSpace(v.addHint) == "" && len(v.addSuggestions) == 0 {
 		return line

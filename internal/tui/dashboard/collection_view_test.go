@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -828,5 +829,107 @@ func TestEditRowBackgroundTint(t *testing.T) {
 	if backgroundCount < 3 {
 		// We should see at least a few background codes for gutter, cells, and separators
 		t.Logf("warning: edit row has only %d background SGR codes, expected at least 3. Line: %q", backgroundCount, songBLine)
+	}
+}
+
+// ansiEscapeRe matches a complete SGR escape sequence, e.g. "\x1b[38;5;240m".
+var ansiEscapeRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// assertNoDanglingEscape fails t if s contains an "\x1b[" that is not
+// followed by a valid SGR terminator ('m') before either the next "\x1b["
+// or the end of the string — i.e. a truncated/unterminated escape sequence.
+func assertNoDanglingEscape(t *testing.T, s string) {
+	t.Helper()
+	for i := 0; i < len(s); {
+		idx := strings.Index(s[i:], "\x1b[")
+		if idx < 0 {
+			return
+		}
+		start := i + idx
+		rest := s[start:]
+		loc := ansiEscapeRe.FindStringIndex(rest)
+		if loc == nil || loc[0] != 0 {
+			t.Fatalf("dangling/unterminated ANSI escape sequence at byte %d in %q", start, s)
+		}
+		i = start + loc[1]
+	}
+}
+
+// TestRenderAddSlotBudgetsPlainTextBeforeStyling renders the add-clip slot
+// help row at a narrow terminal width with a long pasted single-line body
+// and a long keysHint (forced via addSuggestions) and asserts the composed
+// first line never exceeds termWidth in visual columns, and that no ANSI
+// escape sequence is truncated mid-code — regression for #101, where the
+// line was composed entirely from already-styled segments with no width
+// budget at all.
+func TestRenderAddSlotBudgetsPlainTextBeforeStyling(t *testing.T) {
+	// A body long enough to leave little room for the trailers (detect hint,
+	// keysHint) but short enough that it alone fits within the available
+	// budget at termWidth=40 — this exercises the trailer truncation/drop
+	// logic that #101 fixed.
+	moderateURL := "https://youtu.be/dQw4w9WgXcQabcd"
+
+	// A body long enough to exceed the available budget by itself.
+	// classifyAddBuffer caps single-line bodies at 80 bytes, well past a
+	// termWidth=40 budget, so the composed line can still exceed termWidth
+	// in this case — renderEditField's body rendering is unbounded and out
+	// of scope for #101 (noted in the issue and in the implementation
+	// summary as unresolved follow-up). This case only asserts no ANSI
+	// escape sequence is truncated mid-code.
+	longURL := "https://example.com/watch?v=" + strings.Repeat("abcdef1234", 8)
+
+	cases := []struct {
+		name           string
+		addBuffer      string
+		addSuggestions []songSuggestion
+		assertWidth    bool
+	}{
+		{
+			name:        "moderate single-line paste, default keysHint",
+			addBuffer:   moderateURL,
+			assertWidth: true,
+		},
+		{
+			name:      "moderate single-line paste, select keysHint",
+			addBuffer: moderateURL,
+			addSuggestions: []songSuggestion{
+				{Title: "Some Song", Artist: "Some Artist"},
+			},
+			assertWidth: true,
+		},
+		{
+			name:      "long single-line paste, select keysHint",
+			addBuffer: longURL,
+			addSuggestions: []songSuggestion{
+				{Title: "Some Song", Artist: "Some Artist"},
+			},
+			assertWidth: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := collectionView{
+				addFocus:       true,
+				addBuffer:      tc.addBuffer,
+				addCursor:      len(tc.addBuffer),
+				addSuggestions: tc.addSuggestions,
+				termWidth:      40,
+				termHeight:     24,
+			}
+
+			out := v.renderAddSlot()
+			lines := strings.Split(out, "\n")
+			firstLine := lines[0]
+
+			assertNoDanglingEscape(t, firstLine)
+
+			if tc.assertWidth {
+				plain := stripANSI(firstLine)
+				if w := runewidth.StringWidth(plain); w > v.termWidth {
+					t.Errorf("first line visual width %d exceeds termWidth %d; plain=%q", w, v.termWidth, plain)
+				}
+			}
+		})
 	}
 }
