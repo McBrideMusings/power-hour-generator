@@ -822,10 +822,25 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyBackspace:
-		if m.editCursor > 0 && len(m.editValue) > 0 {
-			_, size := utf8.DecodeLastRuneInString(m.editValue[:m.editCursor])
-			m.editValue = m.editValue[:m.editCursor-size] + m.editValue[m.editCursor:]
-			m.editCursor -= size
+		if msg.Alt {
+			// Alt+Backspace: delete word backward, preserving trailing spaces
+			if m.editCursor > 0 && len(m.editValue) > 0 {
+				startPos := deleteWordBackward(m.editValue, m.editCursor)
+				// Find where trailing spaces start to avoid deleting them
+				endPos := m.editCursor
+				for endPos > startPos && (m.editValue[endPos-1] == ' ' || m.editValue[endPos-1] == '\t') {
+					endPos--
+				}
+				m.editValue = m.editValue[:startPos] + m.editValue[endPos:]
+				m.editCursor = startPos
+			}
+		} else {
+			// Regular backspace: delete single character
+			if m.editCursor > 0 && len(m.editValue) > 0 {
+				_, size := utf8.DecodeLastRuneInString(m.editValue[:m.editCursor])
+				m.editValue = m.editValue[:m.editCursor-size] + m.editValue[m.editCursor:]
+				m.editCursor -= size
+			}
 		}
 		m.collectionViews[cvIdx].editValue = m.editValue
 		m.collectionViews[cvIdx].editCursor = m.editCursor
@@ -872,6 +887,16 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.loadInlineEditField(cvIdx)
 		m = m.refreshInlineEditHint(cvIdx)
 		return m, cmd
+
+	case tea.KeyHome, tea.KeyCtrlA:
+		m.editCursor = 0
+		m.collectionViews[cvIdx].editCursor = 0
+		return m, nil
+
+	case tea.KeyEnd, tea.KeyCtrlE:
+		m.editCursor = len(m.editValue)
+		m.collectionViews[cvIdx].editCursor = m.editCursor
+		return m, nil
 	}
 
 	if msg.String() == "ctrl+r" {
@@ -3501,4 +3526,51 @@ func checkFileExists(path, root string) bool {
 	}
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// deleteWordBackward returns the position where word deletion should start.
+// It also returns the end position (where to stop deleting) to preserve trailing spaces.
+// This supports both space-separated and camelCase words.
+func deleteWordBackward(value string, cursor int) int {
+	if cursor <= 0 {
+		return 0
+	}
+
+	pos := cursor - 1
+
+	// Skip trailing spaces (to preserve them in the output)
+	for pos >= 0 && (value[pos] == ' ' || value[pos] == '\t' || value[pos] == '\n') {
+		pos--
+	}
+
+	if pos < 0 {
+		return 0
+	}
+
+	// Skip back over word characters
+	for pos >= 0 {
+		ch := value[pos]
+		if !isWordChar(ch) {
+			break
+		}
+
+		// Stop at camelCase boundaries (uppercase letter preceded by lowercase)
+		if pos > 0 && (ch >= 'A' && ch <= 'Z') {
+			prevChar := value[pos-1]
+			if (prevChar >= 'a' && prevChar <= 'z') || (prevChar >= '0' && prevChar <= '9') || prevChar == '_' {
+				// This is a camelCase boundary; return pos to include this uppercase letter
+				return pos
+			}
+		}
+
+		pos--
+	}
+
+	return pos + 1
+}
+
+// isWordChar returns true if the byte is part of a word (alphanumeric or underscore)
+func isWordChar(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9') || b == '_'
 }

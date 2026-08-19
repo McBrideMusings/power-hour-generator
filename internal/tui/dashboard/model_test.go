@@ -391,6 +391,138 @@ func TestInlineEditInsertAndBackspaceAtCaret(t *testing.T) {
 	}
 }
 
+func TestInlineEditHomeMovesToStart(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song"
+	m.editOriginal = "First Song"
+	m.editCursor = len("First Song")
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song"
+	m.collectionViews[0].editCursor = len("First Song")
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyHome})
+	got := gotModel.(Model)
+
+	if got.editCursor != 0 {
+		t.Fatalf("editCursor after Home = %d, want 0", got.editCursor)
+	}
+	if got.editValue != "First Song" {
+		t.Fatalf("editValue should not change, got %q", got.editValue)
+	}
+}
+
+func TestInlineEditEndMovesToEnd(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song"
+	m.editOriginal = "First Song"
+	m.editCursor = 0
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song"
+	m.collectionViews[0].editCursor = 0
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyEnd})
+	got := gotModel.(Model)
+
+	if got.editCursor != len("First Song") {
+		t.Fatalf("editCursor after End = %d, want %d", got.editCursor, len("First Song"))
+	}
+	if got.editValue != "First Song" {
+		t.Fatalf("editValue should not change, got %q", got.editValue)
+	}
+}
+
+func TestInlineEditCtrlAMovesToStart(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song"
+	m.editOriginal = "First Song"
+	m.editCursor = len("First Song")
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song"
+	m.collectionViews[0].editCursor = len("First Song")
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := gotModel.(Model)
+
+	if got.editCursor != 0 {
+		t.Fatalf("editCursor after Ctrl+A = %d, want 0", got.editCursor)
+	}
+}
+
+func TestInlineEditCtrlEMovesToEnd(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song"
+	m.editOriginal = "First Song"
+	m.editCursor = 0
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song"
+	m.collectionViews[0].editCursor = 0
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyCtrlE})
+	got := gotModel.(Model)
+
+	if got.editCursor != len("First Song") {
+		t.Fatalf("editCursor after Ctrl+E = %d, want %d", got.editCursor, len("First Song"))
+	}
+}
+
+func TestInlineEditOptionBackspaceDeletesWord(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song Name"
+	m.editOriginal = "First Song Name"
+	m.editCursor = len("First Song ")
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song Name"
+	m.collectionViews[0].editCursor = len("First Song ")
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+	got := gotModel.(Model)
+
+	if got.editValue != "First  Name" {
+		t.Fatalf("editValue after Option+Backspace = %q, want 'First  Name'", got.editValue)
+	}
+	if got.editCursor != len("First ") {
+		t.Fatalf("editCursor after Option+Backspace = %d, want %d", got.editCursor, len("First "))
+	}
+}
+
+func TestInlineEditOptionBackspaceAtWordBoundary(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "FirstSongName"
+	m.editOriginal = "FirstSongName"
+	m.editCursor = len("FirstSong")
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "FirstSongName"
+	m.collectionViews[0].editCursor = len("FirstSong")
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyBackspace, Alt: true})
+	got := gotModel.(Model)
+
+	if got.editValue != "FirstName" {
+		t.Fatalf("editValue after Option+Backspace = %q, want 'FirstName'", got.editValue)
+	}
+	if got.editCursor != len("First") {
+		t.Fatalf("editCursor after Option+Backspace = %d, want %d", got.editCursor, len("First"))
+	}
+}
+
 func TestProcessAddRowUsesCachedLinkMetadata(t *testing.T) {
 	m := testCollectionModel(t)
 	m.cacheIdx = &cache.Index{
