@@ -376,7 +376,7 @@ func TestConfirmDeletePromptRespectsHeightBudget(t *testing.T) {
 
 	// Sanity bound: total output must fit within the terminal height the
 	// budget was computed for (subheader + header + rows + indicators + help
-	// row all come out of termHeight-10, so the total should never exceed
+	// row all come out of termHeight-8, so the total should never exceed
 	// termHeight).
 	if withLines > base.termHeight {
 		t.Errorf("rendered line count %d exceeds termHeight %d with confirm prompt inserted:\n%s", withLines, base.termHeight, withRendered)
