@@ -33,14 +33,14 @@ func newTestDoctorOverlay(knownArtists []string, w, h int) cacheDoctorOverlay {
 		Reasons:        []string{"used track as title", "applied artist alias"},
 	}
 	items := []doctorItem{{entry: entry, finding: finding}}
-	o := newCacheDoctorOverlay(items, knownArtists, w, h, 0)
+	o := newCacheDoctorOverlay(items, []string{"title", "artist"}, knownArtists, w, h, 0)
 	// Put the ARTIST field in edit mode with a query that fuzzy-matches
 	// every "Artist X" entry in knownArtists, so artistSuggestions() is
 	// non-empty and under our control via len(knownArtists).
-	o.activeField = 1
-	o.editArtist = "art"
-	o.artistCursor = len(o.editArtist)
-	o.artistTouched = true
+	o.activeField = o.artistIdx
+	o.editValues[o.artistIdx] = "art"
+	o.editCursors[o.artistIdx] = len(o.editValues[o.artistIdx])
+	o.editTouched[o.artistIdx] = true
 	return o
 }
 
@@ -204,13 +204,13 @@ func TestDoctorOverlayForwardDelete(t *testing.T) {
 			o.activeField = tc.activeField
 
 			if tc.activeField == 0 {
-				o.editTitle = tc.initialText
-				o.titleCursor = tc.initialCursor
-				o.titleTouched = false
+				o.editValues[0] = tc.initialText
+				o.editCursors[0] = tc.initialCursor
+				o.editTouched[0] = false
 			} else {
-				o.editArtist = tc.initialText
-				o.artistCursor = tc.initialCursor
-				o.artistTouched = false
+				o.editValues[1] = tc.initialText
+				o.editCursors[1] = tc.initialCursor
+				o.editTouched[1] = false
 			}
 
 			// Simulate Delete key press
@@ -221,15 +221,15 @@ func TestDoctorOverlayForwardDelete(t *testing.T) {
 			var gotCursor int
 
 			if tc.activeField == 0 {
-				gotText = o.editTitle
-				gotCursor = o.titleCursor
-				if !o.titleTouched && tc.initialCursor < len(tc.initialText) {
+				gotText = o.editValues[0]
+				gotCursor = o.editCursors[0]
+				if !o.editTouched[0] && tc.initialCursor < len(tc.initialText) {
 					t.Errorf("titleTouched should be set when deletion occurs")
 				}
 			} else {
-				gotText = o.editArtist
-				gotCursor = o.artistCursor
-				if !o.artistTouched && tc.initialCursor < len(tc.initialText) {
+				gotText = o.editValues[1]
+				gotCursor = o.editCursors[1]
+				if !o.editTouched[1] && tc.initialCursor < len(tc.initialText) {
 					t.Errorf("artistTouched should be set when deletion occurs")
 				}
 			}
@@ -272,7 +272,7 @@ func twoItemDoctorOverlay() cacheDoctorOverlay {
 			},
 		},
 	}
-	return newCacheDoctorOverlay(items, nil, 80, 40, 0)
+	return newCacheDoctorOverlay(items, []string{"title", "artist"}, nil, 80, 40, 0)
 }
 
 // TestDoctorOverlayRequeryIgnoresStaleTarget covers the race: a requery is
@@ -292,8 +292,8 @@ func TestDoctorOverlayRequeryIgnoresStaleTarget(t *testing.T) {
 	// the async requery result arrives.
 	o.cursor = 1
 	o.loadCurrentEntry()
-	entry1TitleBefore := o.editTitle
-	entry1ArtistBefore := o.editArtist
+	entry1TitleBefore := o.editValues[o.titleIdx]
+	entry1ArtistBefore := o.editValues[o.artistIdx]
 
 	normCfg := cache.NormalizationConfig{}
 	info := cache.RemoteIDInfo{Title: "Fresh Title", Artist: "Fresh Artist"}
@@ -316,11 +316,11 @@ func TestDoctorOverlayRequeryIgnoresStaleTarget(t *testing.T) {
 	}
 
 	// The visible edit buffers (for entry 1) are unchanged by entry 0's result.
-	if o.editTitle != entry1TitleBefore {
-		t.Errorf("editTitle changed: got %q, want unchanged %q", o.editTitle, entry1TitleBefore)
+	if o.editValues[o.titleIdx] != entry1TitleBefore {
+		t.Errorf("editTitle changed: got %q, want unchanged %q", o.editValues[o.titleIdx], entry1TitleBefore)
 	}
-	if o.editArtist != entry1ArtistBefore {
-		t.Errorf("editArtist changed: got %q, want unchanged %q", o.editArtist, entry1ArtistBefore)
+	if o.editValues[o.artistIdx] != entry1ArtistBefore {
+		t.Errorf("editArtist changed: got %q, want unchanged %q", o.editValues[o.artistIdx], entry1ArtistBefore)
 	}
 
 	// requerying/requeryID cleared on every exit path.
@@ -385,7 +385,7 @@ func TestDoctorRequeryEmptyIdentifierNotAppliedByCursor(t *testing.T) {
 			},
 		},
 	}
-	o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+	o := newCacheDoctorOverlay(items, []string{"title", "artist"}, nil, 80, 40, 0)
 	o.requerying = true
 	o.requeryID = ""
 	o.cursor = 0
@@ -569,7 +569,7 @@ func TestSaveAndAutocompleteSamePerson(t *testing.T) {
 			},
 		},
 	}
-	o := newCacheDoctorOverlay(items, []string{}, 80, 40, 0)
+	o := newCacheDoctorOverlay(items, []string{"title", "artist"}, []string{}, 80, 40, 0)
 
 	// Simulate saving "Radiohead" on entry 0.
 	o.cursor = 0
@@ -582,10 +582,10 @@ func TestSaveAndAutocompleteSamePerson(t *testing.T) {
 	// Move to entry 1 and set up for autocomplete.
 	o.cursor = 1
 	o.loadCurrentEntry()
-	o.activeField = 1
-	o.editArtist = "rad"
-	o.artistCursor = len(o.editArtist)
-	o.artistTouched = true
+	o.activeField = o.artistIdx
+	o.editValues[o.artistIdx] = "rad"
+	o.editCursors[o.artistIdx] = len(o.editValues[o.artistIdx])
+	o.editTouched[o.artistIdx] = true
 
 	// Query for "rad" should match "Radiohead" from the pool.
 	suggestions := o.artistSuggestions()
@@ -641,7 +641,7 @@ func TestDoctorFooterRequeryNamesTargetEntry(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			items := []doctorItem{{entry: tc.entry, finding: tc.finding}}
-			o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+			o := newCacheDoctorOverlay(items, []string{"title", "artist"}, nil, 80, 40, 0)
 			o.requerying = true
 			o.requeryID = "id-0"
 
@@ -662,7 +662,7 @@ func TestDoctorFooterRequeryTruncatesLongLabel(t *testing.T) {
 		entry:   cache.Entry{Identifier: "id-0", Title: longTitle},
 		finding: cachedoctor.Finding{Identifier: "id-0"},
 	}}
-	o := newCacheDoctorOverlay(items, nil, 40, 40, 0)
+	o := newCacheDoctorOverlay(items, []string{"title", "artist"}, nil, 40, 40, 0)
 	o.requerying = true
 	o.requeryID = "id-0"
 
@@ -681,7 +681,7 @@ func TestDoctorFooterRequeryUnresolvableTargetFallsBackToPlainMessage(t *testing
 		entry:   cache.Entry{Identifier: "id-0", Title: "Song A"},
 		finding: cachedoctor.Finding{Identifier: "id-0"},
 	}}
-	o := newCacheDoctorOverlay(items, nil, 80, 40, 0)
+	o := newCacheDoctorOverlay(items, []string{"title", "artist"}, nil, 80, 40, 0)
 	o.requerying = true
 	o.requeryID = "id-gone" // no longer present in findings
 
