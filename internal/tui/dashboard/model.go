@@ -3302,6 +3302,19 @@ func (m Model) refreshFromDisk() Model {
 
 // saveConfigAndReResolve writes the config and re-resolves the timeline.
 func saveConfigAndReResolve(m Model) Model {
+	// Validate config before writing.
+	validations := m.cfg.ValidateStrict(m.pp.Root, render.ValidSegmentTokens())
+	var errs []string
+	for _, v := range validations {
+		if v.Level == "error" {
+			errs = append(errs, v.Message)
+		}
+	}
+	if len(errs) > 0 {
+		m.statusMsg = fmt.Sprintf("Config validation error: %s", strings.Join(errs, "; "))
+		return m
+	}
+
 	if err := config.Save(m.pp.ConfigFile, m.cfg); err != nil {
 		m.statusMsg = fmt.Sprintf("Config write error: %v", err)
 		return m
