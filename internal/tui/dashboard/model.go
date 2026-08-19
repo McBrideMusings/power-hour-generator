@@ -54,6 +54,7 @@ const (
 	modeCacheInlineEdit                 // editing a cache entry's fields inline
 	modeAddClip                         // add-clip slot focused (paste link/path/CSV)
 	modeAddSeq                          // timeline add-slot focused (collection name or file path)
+	modeAddCache                        // cache add-slot focused (paste URL, YouTube ID, or local path)
 )
 
 // Model is the top-level bubbletea model for the dashboard.
@@ -591,6 +592,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleAddClipKey(msg)
 	case modeAddSeq:
 		return m.handleAddSeqKey(msg)
+	case modeAddCache:
+		return m.handleAddCacheKey(msg)
 	}
 
 	if m.job.active {
@@ -1257,6 +1260,232 @@ func (m Model) cancelAddSeq() Model {
 	return m
 }
 
+// handleAddCacheKey drives the cache view's persistent add-slot. It mirrors
+// handleAddSeqKey's simpler shape — no suggestions or cache-lookup machinery,
+// since the cache view IS the cache — but classifies the trimmed buffer as a
+// URL, a bare YouTube ID, or a local file path and dispatches a background
+// job through the same job-channel machinery fetch/render already use.
+func (m Model) handleAddCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	v := m.cacheView
+
+	switch msg.Type {
+	case tea.KeyEscape:
+		return m.cancelAddCache(), nil
+
+	case tea.KeyEnter:
+		trimmed := strings.TrimSpace(v.addBuffer)
+		if trimmed == "" {
+			return m, nil
+		}
+		return m.dispatchAddCacheBuffer(trimmed)
+
+	case tea.KeyRight:
+		if v.addCursor < len(v.addBuffer) {
+			v.addCursor++
+		}
+		m.cacheView = v
+		return m, nil
+
+	case tea.KeyLeft:
+		if v.addCursor > 0 {
+			v.addCursor--
+		}
+		m.cacheView = v
+		return m, nil
+
+	case tea.KeyBackspace:
+		if v.addCursor > 0 && len(v.addBuffer) > 0 {
+			v.addBuffer = v.addBuffer[:v.addCursor-1] + v.addBuffer[v.addCursor:]
+			v.addCursor--
+		}
+		m.cacheView = v
+		m = m.refreshAddCacheHint()
+		return m, nil
+
+	case tea.KeyRunes:
+		ch := string(msg.Runes)
+		v.addBuffer = v.addBuffer[:v.addCursor] + ch + v.addBuffer[v.addCursor:]
+		v.addCursor += len(ch)
+		m.cacheView = v
+		m = m.refreshAddCacheHint()
+		return m, nil
+
+	case tea.KeySpace:
+		v.addBuffer = v.addBuffer[:v.addCursor] + " " + v.addBuffer[v.addCursor:]
+		v.addCursor++
+		m.cacheView = v
+		m = m.refreshAddCacheHint()
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// refreshAddCacheHint updates the cache add-slot's trailing hint to reflect
+// how the current buffer will be classified on Enter.
+func (m Model) refreshAddCacheHint() Model {
+	v := m.cacheView
+	trimmed := strings.TrimSpace(v.addBuffer)
+	switch {
+	case trimmed == "":
+		v.addHint = ""
+	case isURL(trimmed):
+		v.addHint = "Enter downloads and caches this URL."
+	case cache.LooksLikeYouTubeID(trimmed):
+		v.addHint = "Enter downloads this YouTube ID."
+	case isLocalVideoFile(trimmed):
+		v.addHint = "Enter registers this local file into the cache."
+	default:
+		v.addHint = "Not a URL, YouTube ID, or existing local file."
+	}
+	m.cacheView = v
+	return m
+}
+
+// resetCacheAddInput clears the cache add-slot buffer, optionally keeping it
+// focused so another entry can be typed immediately.
+func (m *Model) resetCacheAddInput(keepFocus bool) {
+	m.cacheView.addFocus = keepFocus
+	m.cacheView.addBuffer = ""
+	m.cacheView.addCursor = 0
+	m.cacheView.addHint = ""
+}
+
+// cancelAddCache returns to normal mode, clearing the cache add-slot focus.
+func (m Model) cancelAddCache() Model {
+	m.resetCacheAddInput(false)
+	m.mode = modeNormal
+	return m
+}
+
+// dispatchAddCacheBuffer classifies the trimmed add-slot buffer and starts
+// the matching background registration job. An unrecognized value stays in
+// the add slot with an inline error so the user can correct it.
+func (m Model) dispatchAddCacheBuffer(value string) (tea.Model, tea.Cmd) {
+	switch {
+	case isURL(value):
+		m.mode = modeNormal
+		m.resetCacheAddInput(false)
+		return m.startCacheAddJob(cleanYouTubeURL(value), ""), nil
+	case cache.LooksLikeYouTubeID(value):
+		m.mode = modeNormal
+		m.resetCacheAddInput(false)
+		return m.startCacheAddJob("https://www.youtube.com/watch?v="+value, ""), nil
+	case isLocalVideoFile(value):
+		m.mode = modeNormal
+		m.resetCacheAddInput(false)
+		return m.startCacheAddJob("", value), nil
+	default:
+		v := m.cacheView
+		v.addHint = fmt.Sprintf("not a URL, YouTube ID, or existing local file: %s", value)
+		m.cacheView = v
+		return m, nil
+	}
+}
+
+// startCacheAddJob dispatches a background job that registers a source into
+// the project cache — either fetching rawURL (a URL or a YouTube-ID-derived
+// watch URL) via cache.Service.Resolve, or registering filePath (a local
+// video file) via cache.RegisterLocalFile. Exactly one of rawURL/filePath is
+// set by the caller.
+func (m Model) startCacheAddJob(rawURL, filePath string) Model {
+	if m.job.active {
+		return m
+	}
+	label := "Add to cache"
+	m.cacheView.activity = "adding..."
+	m.statusMsg = label + "..."
+	events := make(chan dashboardJobEvent, 16)
+	m.job = dashboardJobState{active: true, label: label, events: events}
+	go runCacheAddJob(m.pp, rawURL, filePath, events)
+	return m
+}
+
+func runCacheAddJob(pp paths.ProjectPaths, rawURL, filePath string, events chan<- dashboardJobEvent) {
+	defer close(events)
+	ctx := context.Background()
+	logger := log.New(io.Discard, "", 0)
+
+	svc, err := cache.NewService(ctx, pp, logger, nil)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Add to cache", err: err}
+		return
+	}
+	idx, err := cache.Load(pp)
+	if err != nil {
+		events <- jobCompletedEvent{label: "Add to cache", err: err}
+		return
+	}
+
+	if filePath != "" {
+		sourceURL := rawURL
+		if sourceURL == "" {
+			if id := cache.ExtractVideoIDFromFilename(filepath.Base(filePath)); id != "" {
+				sourceURL = "https://www.youtube.com/watch?v=" + id
+			}
+		}
+		if sourceURL == "" {
+			events <- jobCompletedEvent{label: "Add to cache", err: fmt.Errorf("could not determine a source URL for %s — filename has no YouTube ID", filepath.Base(filePath))}
+			return
+		}
+
+		events <- jobCacheStatusEvent{status: "registering " + filepath.Base(filePath) + "..."}
+		result, err := cache.RegisterLocalFile(ctx, svc, pp, idx, cache.RegisterLocalFileParams{
+			FilePath:  filePath,
+			SourceURL: sourceURL,
+			StatusFn:  func(s string) { events <- jobCacheStatusEvent{status: s} },
+		})
+		if err != nil {
+			events <- jobCompletedEvent{label: "Add to cache", err: err}
+			return
+		}
+		if result.AlreadyCached {
+			events <- jobCompletedEvent{label: "Already cached: " + labelForCacheEntry(result.Entry), err: nil}
+			return
+		}
+		events <- jobCacheRowStatusEvent{identifier: result.Entry.Identifier, status: "added"}
+		events <- jobCompletedEvent{label: "Cached: " + labelForCacheEntry(result.Entry), err: nil}
+		return
+	}
+
+	events <- jobCacheStatusEvent{status: "downloading..."}
+	row := csvplan.Row{Index: 1, Link: rawURL}
+	result, err := svc.Resolve(ctx, idx, row, cache.ResolveOptions{})
+	if err != nil {
+		events <- jobCompletedEvent{label: "Add to cache", err: err}
+		return
+	}
+	if result.Updated {
+		if err := cache.Save(pp, idx); err != nil {
+			events <- jobCompletedEvent{label: "Add to cache", err: err}
+			return
+		}
+	}
+	if result.Status == cache.ResolveStatusCached || result.Status == cache.ResolveStatusMatched {
+		events <- jobCompletedEvent{label: "Already cached: " + labelForCacheEntry(result.Entry), err: nil}
+		return
+	}
+	events <- jobCacheRowStatusEvent{identifier: result.Entry.Identifier, status: "added"}
+	events <- jobCompletedEvent{label: "Cached: " + labelForCacheEntry(result.Entry), err: nil}
+}
+
+// labelForCacheEntry returns a short human-readable label for a status
+// message: the first non-empty of title/artist combo, title, or ID.
+func labelForCacheEntry(e cache.Entry) string {
+	title := strings.TrimSpace(e.Title)
+	artist := strings.TrimSpace(e.Artist)
+	switch {
+	case title != "" && artist != "":
+		return artist + " - " + title
+	case title != "":
+		return title
+	case e.ID != "":
+		return e.ID
+	default:
+		return filepath.Base(e.CachedPath)
+	}
+}
+
 // dispatchAddBuffer inspects the buffered text and routes it to the appropriate
 // import path: multi-line / CSV-ish → batch import; single URL or single line → one new row.
 func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
@@ -1895,6 +2124,14 @@ func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "f":
 		v.toggle()
+	case "a":
+		m.mode = modeAddCache
+		v.addFocus = true
+		v.addBuffer = ""
+		v.addCursor = 0
+		v.addHint = ""
+		m.cacheView = v
+		return m, nil
 	case "e":
 		if len(entries) == 0 || v.cursor >= len(entries) || len(v.columns) == 0 {
 			m.cacheView = v
@@ -2401,6 +2638,8 @@ func (m Model) View() string {
 		case modeAddClip:
 			b.WriteString("")
 		case modeAddSeq:
+			b.WriteString("")
+		case modeAddCache:
 			b.WriteString("")
 		default:
 			b.WriteString(renderFooter(m))

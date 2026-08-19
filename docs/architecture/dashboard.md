@@ -29,7 +29,7 @@ This is a different layer from the progress display covered on the [TUI System](
 
 - **`timeline_view.go`** — the configured sequence entries plus the resolved preview (what `concat` would actually produce), and the concat output path/status.
 - **`collection_view.go`** — one table per collection with dynamic columns discovered from the plan data, row-state color coding (rendered / not-rendered / not-cached), and a persistent "add clip" slot at the bottom.
-- **`cache_view.go`** — the yt-dlp cache index, with a filtered/all toggle and configurable columns driven by `cache.view.columns` in config.
+- **`cache_view.go`** — the yt-dlp cache index, with a filtered/all toggle, configurable columns driven by `cache.view.columns` in config, and a persistent "add" slot for registering a URL, YouTube ID, or local file directly into the cache.
 - **`tools_view.go`** — detected tool versions, install methods, and update status.
 
 Shared chrome lives in `header.go`, `footer.go`, `help_row.go`, `overlay.go`, and `styles.go`. `row_render.go` provides `renderCell`/`renderEditCell`/`renderEditField` — the low-level helpers every view uses to truncate, pad, and (during inline edit) cursor-highlight a table cell without letting ANSI styling bytes break column alignment.
@@ -46,6 +46,8 @@ Shared chrome lives in `header.go`, `footer.go`, `help_row.go`, `overlay.go`, an
 | `modeInlineEdit` | editing a collection row's field in place | save (advances field or exits) or cancel | `handleInlineEditKey` |
 | `modeCacheInlineEdit` | editing a cache entry's field in place | save or cancel | `handleCacheInlineEditKey` |
 | `modeAddClip` | focusing the collection's add-clip slot | add + stay (ready for another paste), enter inline-edit on an empty required field, or cancel | `handleAddClipKey` |
+| `modeAddSeq` | focusing the timeline's add-slot (collection name or file path) | add or cancel | `handleAddSeqKey` |
+| `modeAddCache` | focusing the cache view's add-slot (URL, YouTube ID, or local file path) | dispatch a background registration job or cancel | `handleAddCacheKey` |
 
 Every mode transition is local, synchronous state on `Model` — there is no separate router package. The mode value alone determines which handler `handleKey` calls; view code never re-checks it. This is state describing what the user is doing, not a keybinding table — see `.claude/CLAUDE.md`'s "TUI Dashboard" section for the actual key surface, which is out of scope for this page.
 

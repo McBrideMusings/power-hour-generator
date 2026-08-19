@@ -248,3 +248,70 @@ func TestCacheConfirmDeletePromptRoutesThroughFooterInConfirmStyle(t *testing.T)
 		t.Errorf("footer does not carry the confirmStyle-rendered prompt.\nwant substring: %q\ngot view:\n%s", wantFooter, withRendered)
 	}
 }
+
+// TestCacheAddSlotRendersInPlaceOfHelpRow verifies the focused add-slot
+// replaces the default help row without adding a line — mirroring
+// timelineView.renderAddSlot's contract (asserted the same way by
+// TestCacheConfirmDeletePromptRoutesThroughFooterInConfirmStyle above).
+func TestCacheAddSlotRendersInPlaceOfHelpRow(t *testing.T) {
+	entries := []cacheEntry{
+		{Identifier: "vid1", Source: "http://example.com/vid1", CachedPath: "/cache/vid1.mp4", Values: []string{"My Song", "Some Artist"}},
+	}
+
+	base := cacheView{
+		columns:         []string{"title", "artist"},
+		allEntries:      entries,
+		filteredEntries: entries,
+		cursor:          0,
+		termWidth:       100,
+		termHeight:      40,
+		rowStatus:       make(map[string]string),
+	}
+
+	without := base
+	withoutRendered := without.view()
+	withoutLines := strings.Count(withoutRendered, "\n")
+
+	with := base
+	with.addFocus = true
+	with.addBuffer = "HWl1Tu9oZmY"
+	with.addCursor = len(with.addBuffer)
+	withRendered := with.view()
+	withLines := strings.Count(withRendered, "\n")
+
+	if withLines != withoutLines {
+		t.Errorf("expected total line count to stay unchanged (add-slot replaces the footer, not adds a row): without=%d with=%d\nwith:\n%s", withoutLines, withLines, withRendered)
+	}
+	if !strings.Contains(withRendered, "HWl1Tu9oZmY") {
+		t.Errorf("rendered view does not contain the add-slot buffer text.\ngot view:\n%s", withRendered)
+	}
+}
+
+// TestCacheAddSlotShowsClassificationHint verifies the add-slot's trailing
+// hint (set by refreshAddCacheHint) is rendered when the buffer classifies
+// as a recognized input, falling back to the default keys hint otherwise.
+func TestCacheAddSlotShowsClassificationHint(t *testing.T) {
+	base := cacheView{
+		columns:    []string{"title", "artist"},
+		termWidth:  120,
+		termHeight: 40,
+		rowStatus:  make(map[string]string),
+	}
+
+	withHint := base
+	withHint.addFocus = true
+	withHint.addBuffer = "https://example.com/watch?v=abc"
+	withHint.addCursor = len(withHint.addBuffer)
+	withHint.addHint = "Enter downloads and caches this URL."
+	gotWithHint := withHint.renderAddSlot()
+	if !strings.Contains(gotWithHint, "Enter downloads and caches this URL.") {
+		t.Errorf("renderAddSlot did not include the classification hint.\ngot: %q", gotWithHint)
+	}
+
+	withoutHint := base
+	withoutHint.addFocus = true
+	gotDefault := withoutHint.renderAddSlot()
+	if !strings.Contains(gotDefault, "Enter add") {
+		t.Errorf("renderAddSlot did not fall back to the default keys hint when addHint is empty.\ngot: %q", gotDefault)
+	}
+}

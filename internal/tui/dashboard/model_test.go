@@ -2415,3 +2415,97 @@ func TestSaveConfigAndReResolveSavesValidConfig(t *testing.T) {
 		t.Fatalf("saved config sequence[0].Collection = %q, want %q", cfgFromDisk.Timeline.Sequence[0].Collection, "songs")
 	}
 }
+
+func TestCacheAKeyFocusesAddSlot(t *testing.T) {
+	root := t.TempDir()
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	m := newTestCacheModel(t, root, idx, nil)
+
+	gotModel, _ := m.handleCacheKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	got := gotModel.(Model)
+
+	if got.mode != modeAddCache {
+		t.Fatalf("mode = %v, want modeAddCache", got.mode)
+	}
+	if !got.cacheView.addFocus {
+		t.Fatal("cacheView.addFocus = false, want true")
+	}
+}
+
+func TestHandleAddCacheKeyTypesIntoBuffer(t *testing.T) {
+	root := t.TempDir()
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	m := newTestCacheModel(t, root, idx, nil)
+	m.mode = modeAddCache
+	m.cacheView.addFocus = true
+
+	for _, ch := range "HWl1Tu9oZmY" {
+		gotModel, _ := m.handleAddCacheKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
+		m = gotModel.(Model)
+	}
+	if m.cacheView.addBuffer != "HWl1Tu9oZmY" {
+		t.Fatalf("addBuffer = %q, want %q", m.cacheView.addBuffer, "HWl1Tu9oZmY")
+	}
+	if m.cacheView.addHint == "" {
+		t.Fatal("addHint = \"\", want a classification hint for a recognized YouTube ID")
+	}
+}
+
+func TestHandleAddCacheKeyEscCancels(t *testing.T) {
+	root := t.TempDir()
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	m := newTestCacheModel(t, root, idx, nil)
+	m.mode = modeAddCache
+	m.cacheView.addFocus = true
+	m.cacheView.addBuffer = "partial"
+	m.cacheView.addCursor = len(m.cacheView.addBuffer)
+
+	gotModel, _ := m.handleAddCacheKey(tea.KeyMsg{Type: tea.KeyEscape})
+	got := gotModel.(Model)
+
+	if got.mode != modeNormal {
+		t.Fatalf("mode = %v, want modeNormal", got.mode)
+	}
+	if got.cacheView.addFocus {
+		t.Fatal("addFocus = true, want false after Esc")
+	}
+	if got.cacheView.addBuffer != "" {
+		t.Fatalf("addBuffer = %q, want empty after Esc", got.cacheView.addBuffer)
+	}
+}
+
+func TestHandleAddCacheKeyEnterUnrecognizedValueStaysFocused(t *testing.T) {
+	root := t.TempDir()
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	m := newTestCacheModel(t, root, idx, nil)
+	m.mode = modeAddCache
+	m.cacheView.addFocus = true
+	m.cacheView.addBuffer = "not a url or id"
+	m.cacheView.addCursor = len(m.cacheView.addBuffer)
+
+	gotModel, _ := m.handleAddCacheKey(tea.KeyMsg{Type: tea.KeyEnter})
+	got := gotModel.(Model)
+
+	if got.mode != modeAddCache {
+		t.Fatalf("mode = %v, want modeAddCache (unrecognized input should not exit the add slot)", got.mode)
+	}
+	if !got.cacheView.addFocus {
+		t.Fatal("addFocus = false, want true (should remain focused)")
+	}
+	if got.job.active {
+		t.Fatal("job.active = true, want false — no job should start for unrecognized input")
+	}
+	if got.cacheView.addHint == "" {
+		t.Fatal("addHint = \"\", want an inline error describing the unrecognized input")
+	}
+}
+
+// A test exercising a real local-file dispatch through handleAddCacheKey's
+// Enter path is deliberately not included here: startCacheAddJob's goroutine
+// calls cache.NewService, which does real tool detection and (via
+// QueryRemoteID) a real network call — the same reason the existing
+// startCollectionFetchJob/startCollectionRenderJob paths have no dispatch
+// test in this file either. dispatchAddCacheBuffer's classification and
+// mode/focus routing are covered above; RegisterLocalFile's registration
+// logic is covered without any of that machinery by
+// internal/cache/add_test.go.
