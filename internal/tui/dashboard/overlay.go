@@ -32,61 +32,82 @@ type ToolStatus struct {
 	UpdateAvail   string // empty if up to date
 }
 
-func renderHelpOverlay(activeView int, width, height int) string {
+func renderHelpOverlay(viewKind string, width, height int) string {
 	var b strings.Builder
+
+	section := func(title string, lines ...string) {
+		b.WriteString(bold.Render(title))
+		b.WriteByte('\n')
+		for _, line := range lines {
+			b.WriteString("  " + line + "\n")
+		}
+		b.WriteByte('\n')
+	}
 
 	b.WriteString(bold.Render("Keyboard Shortcuts"))
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 
-	b.WriteString(bold.Render("Global"))
-	b.WriteByte('\n')
-	b.WriteString("  ←/→ or h/l   Switch views\n")
-	b.WriteString("  1-9           Jump to view\n")
-	b.WriteString("  r            Render all segments\n")
-	b.WriteString("  c            Concatenate final video\n")
-	b.WriteString("  o            Open project in file manager\n")
-	b.WriteString("  u / Ctrl+R   Refresh from disk\n")
-	b.WriteString("  ?            This help\n")
-	b.WriteString("  q / Esc / Ctrl+C Quit\n")
-	b.WriteByte('\n')
+	section("Global (any view)",
+		"←/→, h/l, or 1-9    Switch views",
+		"↑/↓ or j/k          Move cursor",
+		"?                   Toggle this help",
+		"u or Ctrl+R         Refresh from disk",
+		"c                   Concatenate the full timeline into the final video",
+		"o                   Open the project folder in the file manager",
+		"q, Esc, or Ctrl+C   Quit",
+	)
 
-	b.WriteString(bold.Render("Navigation"))
-	b.WriteByte('\n')
-	b.WriteString("  ↑/↓ or j/k       Move cursor\n")
-	b.WriteString("  J/K              Reorder item\n")
-	b.WriteString("  a                Focus Add Clip slot (paste link/path/CSV)\n")
-	if activeView == 0 {
-		b.WriteString("  e/E              Open selected output or project config\n")
-		b.WriteString("  x                Delete selected timeline entry or output\n")
+	switch viewKind {
+	case "timeline":
+		section("Timeline View",
+			"r            Render all segments (runs powerhour render)",
+			"a            Add a sequence entry (collection or file)",
+			"J/K          Reorder the selected entry",
+			"x            Delete the selected entry, or the output row",
+			"e            On an entry row: open powerhour.yaml (press u after editing)",
+			"E            On the output row: open the rendered concat file",
+			"v            Play the selected entry (or output) in VLC",
+			"V            Play the whole timeline as a VLC playlist",
+		)
+	case "cache":
+		section("Cache View",
+			"e            Inline-edit the selected entry (Tab saves + next field, Enter saves + exits)",
+			"f            Toggle filtered / all entries",
+			"D            Review entries needing attention (cache doctor)",
+			"x            Remove the selected cache entry",
+			"v            Play the selected entry in VLC",
+			"V            Play all visible entries as a VLC playlist",
+		)
+	case "tools":
+		section("Tools View",
+			"(browse only — no actions yet; see issue #60 to add update actions)",
+		)
+	default:
+		section("Collection View",
+			"a            Focus the Add Clip slot (paste a link/path, or CSV/TSV/YAML)",
+			"Tab/Enter    Add slot: accept the highlighted cache match (Enter falls back to raw URL/batch)",
+			"d            Duplicate the selected row",
+			"J/K          Reorder the selected row",
+			"x            Delete the selected row",
+			"e            Inline-edit the selected row (Tab saves + next field, Enter saves + exits)",
+			"Ctrl+R       While inline-editing a link: probe metadata for the current URL",
+			"E            Open the collection's plan file in the OS default app",
+			"f/F          Fetch the selected row / all rows",
+			"r/R          Render the selected row / all rows",
+			"v            Play the selected row in VLC",
+			"Alt+V        Play the full untrimmed source (for finding a clip's start time)",
+			"V            Play all rows as a VLC playlist",
+		)
 	}
-	b.WriteString("  v                Play in vlc\n")
-	b.WriteString("  V                Play vlc/all playlist\n")
-	b.WriteString("                   (shown when vlc is detected)\n")
 
-	if activeView != 0 && activeView <= 10 { // collection views
-		b.WriteByte('\n')
-		b.WriteString(bold.Render("Collection"))
-		b.WriteByte('\n')
-		b.WriteString("  d            Duplicate row to bottom\n")
-		b.WriteString("  x            Delete selected row\n")
-		b.WriteString("  e/E          Edit/ext\n")
-		b.WriteString("  a            Add slot: paste link or fuzzy-search cache\n")
-		b.WriteString("  Tab/Enter    Add slot: add selected cache match (Enter falls back to URL/batch)\n")
-		b.WriteString("  Tab          Inline edit: accept cache match / next field\n")
-		b.WriteString("  Ctrl+R       Inline link edit: probe metadata for the current URL\n")
-		b.WriteString("  f/F          Fetch selected/all\n")
-		b.WriteString("  r/R          Render selected/all\n")
-	}
+	section("While editing (input, inline-edit, add-clip, confirm-delete)",
+		"Tab          Save and move to the next field (or accept a suggestion)",
+		"Enter        Save and exit the field",
+		"Esc          Cancel",
+		"y / Enter    Confirm a pending delete",
+	)
 
-	b.WriteByte('\n')
-	b.WriteString(bold.Render("Cache View"))
-	b.WriteByte('\n')
-	b.WriteString("  x            Remove selected cache entry\n")
-	b.WriteString("  d            Doctor selected entry (interactive)\n")
-	b.WriteString("  D            Doctor all visible entries (interactive)\n")
-
-	b.WriteByte('\n')
 	b.WriteString(faint.Render("[?] Close  [q/Esc] Quit"))
 
 	content := overlayBorder.Render(b.String())

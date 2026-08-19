@@ -2235,7 +2235,7 @@ func (m Model) View() string {
 
 	// Full-screen overlays render on top.
 	if m.overlay == overlayHelp {
-		return renderHelpOverlay(m.activeView, m.termWidth, m.termHeight)
+		return renderHelpOverlay(m.viewKind(m.activeView), m.termWidth, m.termHeight)
 	}
 
 	return result

@@ -929,9 +929,19 @@ func TestRenderFooterCacheDescribesHandledKeys(t *testing.T) {
 }
 
 func TestRenderHelpOverlayTimelineIncludesEditShortcuts(t *testing.T) {
-	help := renderHelpOverlay(0, 120, 40)
-	if !strings.Contains(help, "Open selected output or project config") {
+	help := renderHelpOverlay("timeline", 120, 40)
+	if !strings.Contains(help, "open powerhour.yaml") {
 		t.Fatalf("help overlay missing timeline edit shortcut text: %q", help)
+	}
+}
+
+func TestRenderHelpOverlayCacheDoesNotAdvertiseUnboundDoctorKey(t *testing.T) {
+	help := renderHelpOverlay("cache", 120, 40)
+	if strings.Contains(help, "d            Doctor") {
+		t.Fatalf("help overlay advertises unbound d doctor key: %q", help)
+	}
+	if !strings.Contains(help, "D            Review entries needing attention") {
+		t.Fatalf("help overlay missing D doctor shortcut: %q", help)
 	}
 }
 
