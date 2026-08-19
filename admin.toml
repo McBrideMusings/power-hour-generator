@@ -9,5 +9,12 @@ desc = "Build and install powerhour CLI to PATH"
 [commands.test]
 desc = "Run Go test suite"
 
+[commands.audit]
+desc = "Check for known vulnerabilities in dependencies"
+steps = ["govulncheck"]
+
+[actions.govulncheck]
+run = "govulncheck ./..."
+
 [go]
 main = "./cmd/powerhour"
