@@ -195,7 +195,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 	}
 
 	// Build summaries and cache status.
-	summaries := buildSummaries(collections, names, idx, pp)
+	summaries := buildSummaries(collections, names, idx, pp, cfg, rs)
 	cacheStatus := buildCacheStatus(collections, idx, pp)
 
 	m := Model{
@@ -3104,7 +3104,7 @@ func reResolve(m Model) Model {
 		m.timelineView.resolved = timeline
 	}
 
-	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp)
+	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.renderState)
 	m.cacheStatus = buildCacheStatus(m.collections, m.cacheIdx, m.pp)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
 	oldShowAll := m.cacheView.showAll
@@ -3161,7 +3161,7 @@ func reloadState(m Model) Model {
 	m.cacheView.termWidth = oldW
 	m.cacheView.termHeight = oldH
 	m.cacheView.showAll = oldShowAll
-	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp)
+	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, rs)
 	m.cacheStatus = buildCacheStatus(m.collections, idx, m.pp)
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
@@ -3310,7 +3310,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 }
 
 // buildSummaries computes per-collection cache/render counts.
-func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths) map[string]collectionSummary {
+func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths, cfg config.Config, rs *state.RenderState) map[string]collectionSummary {
 	summaries := make(map[string]collectionSummary, len(names))
 	for _, name := range names {
 		coll := collections[name]
@@ -3335,7 +3335,13 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 			}
 		}
 
-		s.Rendered = 0 // Simplified for Phase 1; full render state analysis comes later.
+		// Count rendered segments using the same state classification as collectionView.
+		states := computeRowStates(coll, pp, cfg, idx, rs)
+		for _, state := range states {
+			if state == rowRendered {
+				s.Rendered++
+			}
+		}
 		s.Missing = s.Total - s.Rendered
 
 		summaries[name] = s

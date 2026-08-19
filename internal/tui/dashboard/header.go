@@ -55,6 +55,9 @@ func renderHeader(m Model) string {
 		segments = append(segments, headerSegment{fmt.Sprintf("%s: ", name), lipgloss.NewStyle()})
 		segments = append(segments, headerSegment{fmt.Sprintf("%d", s.Cached), countGreen})
 		segments = append(segments, headerSegment{fmt.Sprintf("/%d", s.Total), lipgloss.NewStyle()})
+		segments = append(segments, headerSegment{" rendered: ", lipgloss.NewStyle()})
+		segments = append(segments, headerSegment{fmt.Sprintf("%d", s.Rendered), countCyan})
+		segments = append(segments, headerSegment{fmt.Sprintf("/%d", s.Total), lipgloss.NewStyle()})
 	}
 
 	// Tool health badge.

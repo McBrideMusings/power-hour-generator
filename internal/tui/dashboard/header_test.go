@@ -17,7 +17,7 @@ func TestRenderHeaderTruncatesToTerminalWidth(t *testing.T) {
 	}
 	summaries := map[string]collectionSummary{}
 	for _, name := range collectionNames {
-		summaries[name] = collectionSummary{Total: 20, Cached: 18}
+		summaries[name] = collectionSummary{Total: 20, Cached: 18, Rendered: 15}
 	}
 
 	m := Model{
@@ -41,8 +41,8 @@ func TestRenderHeaderTruncatesToTerminalWidth(t *testing.T) {
 func TestRenderHeaderUnchangedAtWideTerminal(t *testing.T) {
 	collectionNames := []string{"songs", "intros"}
 	summaries := map[string]collectionSummary{
-		"songs":  {Total: 20, Cached: 18},
-		"intros": {Total: 5, Cached: 5},
+		"songs":  {Total: 20, Cached: 18, Rendered: 15},
+		"intros": {Total: 5, Cached: 5, Rendered: 3},
 	}
 
 	m := Model{
@@ -65,9 +65,12 @@ func TestRenderHeaderUnchangedAtWideTerminal(t *testing.T) {
 		"songs: ",
 		"18",
 		"/20",
+		"rendered: ",
+		"15",
 		"intros: ",
 		"5",
 		"/5",
+		"3",
 		"⚠ yt-dlp is out of date",
 		"/full/project/path",
 	} {
@@ -112,7 +115,7 @@ func TestRenderHeaderZeroWidthDoesNotPanic(t *testing.T) {
 		viewNames:       []string{"Timeline", "Songs"},
 		activeView:      0,
 		collectionNames: []string{"songs"},
-		summaries:       map[string]collectionSummary{"songs": {Total: 1, Cached: 1}},
+		summaries:       map[string]collectionSummary{"songs": {Total: 1, Cached: 1, Rendered: 1}},
 		termWidth:       0,
 	}
 
