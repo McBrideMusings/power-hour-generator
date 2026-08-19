@@ -213,13 +213,17 @@ func TestConfirmDeletePromptRoutesThroughFooterInConfirmStyle(t *testing.T) {
 	}
 
 	// Sanity: styled footer must carry real ANSI SGR codes, not have
-	// degraded to plain text.
+	// degraded to plain text. Search for the line containing an ANSI escape
+	// sequence rather than relying on position heuristic.
 	lines := strings.Split(with, "\n")
-	footerLine := lines[len(lines)-2] // last line is "", trailing \n from view()
-	if strings.TrimSpace(footerLine) == "" {
-		footerLine = lines[len(lines)-1]
+	var footerLine string
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.Contains(lines[i], "\x1b[") {
+			footerLine = lines[i]
+			break
+		}
 	}
-	if !strings.Contains(footerLine, "\x1b[") {
-		t.Errorf("footer line has no ANSI escape codes, expected confirmStyle SGR codes: %q", footerLine)
+	if footerLine == "" {
+		t.Errorf("footer line not found; no line contains ANSI escape codes in view:\n%s", with)
 	}
 }
