@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
+	"powerhour/internal/tui"
 )
 
 // cacheHeaderLines is the cache view's own chrome on top of
@@ -59,6 +61,15 @@ type cacheView struct {
 	editValue    string
 	editCursor   int
 	editHint     string
+
+	// Add-slot state (set by model when modeAddCache is active). Mirrors
+	// timelineView's addFocus/addBuffer/addCursor/addHint — a cache add-slot
+	// entry is a URL, a bare YouTube ID, or a local file path, so there's no
+	// suggestions machinery to carry alongside it.
+	addFocus  bool
+	addBuffer string
+	addCursor int
+	addHint   string
 
 	termWidth  int
 	termHeight int
@@ -179,7 +190,7 @@ func (v cacheView) renderHelpRow() string {
 		sources = append(sources, helpRowSource{inlineRowNote(v.rowStatus[entries[v.cursor].Identifier], 0), editStyle})
 	}
 
-	defaultText := "e edit · d doctor all · D doctor problematic · f toggle filter · x remove"
+	defaultText := "a add · e edit · d doctor all · D doctor problematic · f toggle filter · x remove"
 	if len(entries) == 0 {
 		if v.showAll {
 			defaultText = "no cached sources — run 'fetch' to populate"
@@ -187,9 +198,62 @@ func (v cacheView) renderHelpRow() string {
 			defaultText = "no cached sources for this project — press f to show all"
 		}
 	}
-	sources = append(sources, helpRowSource{defaultText, faint})
 
-	return resolveHelpRow(v.termWidth, nil, sources...)
+	// The focused add-slot can render more than helpRowText's single line
+	// (input + trailing hint), so it can't be a plain source — it's the
+	// fallback, exactly like collectionView.renderHelpRow. confirmDelete,
+	// editing, and addFocus are set by mutually exclusive interaction modes
+	// (modeConfirmDelete / modeCacheInlineEdit / modeAddCache), so whenever
+	// addFocus is true every source above is already empty and this always
+	// wins the fallback slot rather than needing to jump the ladder.
+	fallback := func() string { return helpRowText(defaultText, faint, v.termWidth) }
+	if v.addFocus {
+		fallback = v.renderAddSlot
+	}
+
+	return resolveHelpRow(v.termWidth, fallback, sources...)
+}
+
+// renderAddSlot renders the focused cache add-slot footer: the rendered
+// input with its cursor, plus a trailing hint on the same line — either the
+// classification hint (URL / YouTube ID / local file) or the default keys
+// hint when the buffer is empty. Mirrors timelineView.renderAddSlot.
+func (v cacheView) renderAddSlot() string {
+	cursor := cursorStyle.Render("▸ ")
+	keysHint := "Enter add · Esc cancel · URL, YouTube ID, or local file path"
+	if hint := strings.TrimSpace(v.addHint); hint != "" {
+		keysHint = hint
+	}
+
+	// renderEditField appends a trailing cursor glyph (one visual column)
+	// when the cursor sits at or past the end of the buffer; account for
+	// that here so the budget matches what it actually renders.
+	cursorGlyphWidth := 0
+	if v.addCursor >= len(v.addBuffer) {
+		cursorGlyphWidth = 1
+	}
+
+	avail := max(v.termWidth-len(helpRowPrefix), 12)
+	remaining := avail - runewidth.StringWidth(v.addBuffer) - cursorGlyphWidth
+
+	const gapWidth = 2 // "  " separator before the trailing hint
+	keysWidth := gapWidth + runewidth.StringWidth(keysHint)
+
+	fittedKeys := ""
+	switch {
+	case remaining <= 0:
+		// No room for the hint; the buffer alone fills (or exceeds) the budget.
+	case keysWidth <= remaining:
+		fittedKeys = keysHint
+	default:
+		fittedKeys = tui.TruncateWithEllipsis(keysHint, remaining-gapWidth)
+	}
+
+	line := cursor + "+ " + renderEditField(v.addBuffer, v.addCursor)
+	if fittedKeys != "" {
+		line += "  " + faint.Render(fittedKeys)
+	}
+	return line
 }
 
 func (v cacheView) currentEditField() string {

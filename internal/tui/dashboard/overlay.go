@@ -72,6 +72,7 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 		)
 	case "cache":
 		section("Cache View",
+			"a            Focus the Add slot (paste a URL, YouTube ID, or local file path)",
 			"e            Inline-edit the selected entry (Tab saves + next field, Enter saves + exits)",
 			"f            Toggle filtered / all entries",
 			"D            Review entries needing attention (cache doctor)",

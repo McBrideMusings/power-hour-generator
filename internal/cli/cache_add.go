@@ -3,11 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -62,12 +60,12 @@ Examples:
 			}
 
 			// Not a file — treat as a YouTube ID if it looks like one
-			if looksLikeYouTubeID(arg) {
+			if cache.LooksLikeYouTubeID(arg) {
 				return runCacheDownload(cmd.Context(), arg, titleFlag, artistFlag, dryRun)
 			}
 
 			// Also try extracting ID from a filename-like string that doesn't exist on disk
-			if id := extractVideoIDFromFilename(arg); id != "" {
+			if id := cache.ExtractVideoIDFromFilename(arg); id != "" {
 				return runCacheDownload(cmd.Context(), id, titleFlag, artistFlag, dryRun)
 			}
 
@@ -180,18 +178,6 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 	glogf, closer := logx.StartCommand("cache")
 	defer closer.Close()
 
-	absFile, err := filepath.Abs(filePath)
-	if err != nil {
-		return fmt.Errorf("resolve file path: %w", err)
-	}
-	info, err := os.Stat(absFile)
-	if err != nil {
-		return fmt.Errorf("file not found: %w", err)
-	}
-	if info.IsDir() {
-		return fmt.Errorf("%s is a directory, not a file", absFile)
-	}
-
 	// Resolve URL and plan metadata
 	rawURL := urlFlag
 	var planTitle, planArtist string
@@ -204,13 +190,6 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 		planTitle = match.Title
 		planArtist = match.Artist
 	}
-
-	u, err := url.Parse(rawURL)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("invalid URL: %s", rawURL)
-	}
-
-	glogf("cache file url=%s file=%s", rawURL, absFile)
 
 	status := tui.NewStatusWriter(os.Stderr)
 	defer status.Stop()
@@ -234,162 +213,54 @@ func runCacheFile(ctx context.Context, filePath, urlFlag, titleFlag, artistFlag 
 		return err
 	}
 
-	// Resolve identity
-	status.Update("Querying video metadata...")
-	var (
-		identifier, extractor, videoID, title, artist string
-		remoteInfo                                    cache.RemoteIDInfo
-	)
-
-	remoteInfo, queryErr := svc.QueryRemoteID(ctx, rawURL)
-	if queryErr == nil {
-		glogf("yt-dlp metadata: id=%s extractor=%s title=%s", remoteInfo.ID, remoteInfo.Extractor, remoteInfo.Title)
-		extractor = remoteInfo.Extractor
-		videoID = remoteInfo.ID
-		identifier = cache.CanonicalRemoteIdentifier(rawURL, extractor, videoID)
-		title = remoteInfo.Title
-		artist = remoteInfo.Artist
-	} else {
-		glogf("yt-dlp metadata query failed: %v", queryErr)
-
-		if ytID := cache.ExtractYouTubeID(rawURL); ytID != "" {
-			extractor = "youtube"
-			videoID = ytID
-		} else {
-			host := u.Hostname()
-			pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
-			if len(pathParts) > 0 && pathParts[len(pathParts)-1] != "" {
-				videoID = pathParts[len(pathParts)-1]
-				extractor = extractPlatformFromHost(host)
-			}
-		}
-
-		if videoID == "" {
-			return fmt.Errorf("could not determine video ID from URL: %s", rawURL)
-		}
-
-		identifier = cache.CanonicalRemoteIdentifier(rawURL, extractor, videoID)
-	}
-
-	// Check if already cached
-	if existing, ok := idx.GetByIdentifier(identifier); ok {
-		status.Stop()
-		printCacheEntry("Already cached.", existing)
-		return nil
-	}
-
-	// Apply metadata: flags > yt-dlp > plan data
-	if titleFlag != "" {
-		title = titleFlag
-	} else if title == "" {
+	// Flag overrides fall back to plan-derived metadata; RegisterLocalFile
+	// itself only knows about flag-level overrides vs. yt-dlp metadata.
+	title := titleFlag
+	if title == "" {
 		title = planTitle
 	}
-
-	if artistFlag != "" {
-		artist = artistFlag
-	} else if artist == "" {
+	artist := artistFlag
+	if artist == "" {
 		artist = planArtist
 	}
 
-	normalized := cache.NormalizeMetadata(cache.LoadNormalizationConfig(), cache.NormalizationInput{
-		Title:    title,
-		Artist:   artist,
-		Track:    remoteInfo.Track,
-		Album:    remoteInfo.Album,
-		Uploader: remoteInfo.Uploader,
-		Channel:  remoteInfo.Channel,
+	result, err := cache.RegisterLocalFile(ctx, svc, pp, idx, cache.RegisterLocalFileParams{
+		FilePath:  filePath,
+		SourceURL: rawURL,
+		Title:     title,
+		Artist:    artist,
+		NoProbe:   noProbe,
+		DryRun:    dryRun,
+		StatusFn:  status.Update,
+		Logf:      glogf,
 	})
-	title = normalized.Title
-	artist = normalized.Artist
-
-	// Determine cache filename
-	baseName := cache.SanitizeSegment(videoID)
-	if baseName == "" {
-		baseName = cache.SanitizeSegment(cache.HashIdentifier(rawURL)[:12])
+	if err != nil {
+		return err
 	}
-	ext := filepath.Ext(absFile)
-	targetPath := filepath.Join(pp.CacheDir, baseName+ext)
 
-	if dryRun {
-		status.Stop()
+	status.Stop()
+
+	if result.AlreadyCached {
+		printCacheEntry("Already cached.", result.Entry)
+		return nil
+	}
+
+	if result.DryRun {
 		fmt.Fprintln(os.Stderr, "Dry run — no changes made.")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintf(os.Stderr, "  Source:  %s\n", rawURL)
-		fmt.Fprintf(os.Stderr, "  File:    %s\n", absFile)
-		fmt.Fprintf(os.Stderr, "  Cache:   %s\n", targetPath)
-		if title != "" {
-			fmt.Fprintf(os.Stderr, "  Title:   %s\n", title)
+		fmt.Fprintf(os.Stderr, "  Source:  %s\n", result.Entry.Source)
+		fmt.Fprintf(os.Stderr, "  File:    %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "  Cache:   %s\n", result.TargetPath)
+		if result.Entry.Title != "" {
+			fmt.Fprintf(os.Stderr, "  Title:   %s\n", result.Entry.Title)
 		}
-		if artist != "" {
-			fmt.Fprintf(os.Stderr, "  Artist:  %s\n", artist)
+		if result.Entry.Artist != "" {
+			fmt.Fprintf(os.Stderr, "  Artist:  %s\n", result.Entry.Artist)
 		}
 		return nil
 	}
 
-	// Copy file to cache
-	status = tui.NewStatusWriter(os.Stderr)
-	defer status.Stop()
-	status.Update("Copying file to cache...")
-
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-		return fmt.Errorf("ensure cache dir: %w", err)
-	}
-	if err := os.Remove(targetPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove existing cache file: %w", err)
-	}
-
-	_, err = cache.TryLinkOrCopy(absFile, targetPath)
-	if err != nil {
-		return fmt.Errorf("copy to cache: %w", err)
-	}
-
-	// Probe
-	var probe *cache.ProbeMetadata
-	if !noProbe {
-		status.Update("Running ffprobe...")
-		probe, err = svc.ProbeFile(ctx, targetPath)
-		if err != nil {
-			glogf("ffprobe failed: %v", err)
-		}
-	}
-
-	// Build and save entry
-	now := time.Now()
-	entry := cache.Entry{
-		Key:         cache.HashIdentifier(identifier),
-		Identifier:  identifier,
-		ID:          videoID,
-		Extractor:   extractor,
-		Source:      rawURL,
-		SourceType:  cache.SourceTypeURL,
-		CachedPath:  targetPath,
-		RetrievedAt: now,
-		SizeBytes:   info.Size(),
-		Probe:       probe,
-		Title:       title,
-		Artist:      artist,
-		Uploader:    remoteInfo.Uploader,
-		Channel:     remoteInfo.Channel,
-		Track:       remoteInfo.Track,
-		Album:       remoteInfo.Album,
-		Notes:       []string{"manually cached"},
-		Links:       []string{rawURL},
-		LastUsedAt:  now,
-	}
-	if probe != nil {
-		entry.LastProbeAt = now
-	}
-
-	idx.SetEntry(entry)
-	idx.SetLink(rawURL, identifier)
-
-	status.Update("Saving index...")
-	if err := cache.Save(pp, idx); err != nil {
-		return fmt.Errorf("save index: %w", err)
-	}
-
-	status.Stop()
-	printCacheEntry("Cached.", entry)
+	printCacheEntry("Cached.", result.Entry)
 	return nil
 }
 
@@ -406,45 +277,6 @@ func printCacheEntry(header string, entry cache.Entry) {
 	}
 }
 
-// extractVideoIDFromFilename extracts a YouTube video ID from a filename.
-// Handles two patterns:
-//   - Bare ID: "HWl1Tu9oZmY.webm"
-//   - yt-dlp default: "Artist - Title [HWl1Tu9oZmY].webm"
-func extractVideoIDFromFilename(filename string) string {
-	base := strings.TrimSuffix(filename, filepath.Ext(filename))
-
-	// Try bracket suffix: "... [ID]"
-	if i := strings.LastIndex(base, "["); i >= 0 {
-		if j := strings.LastIndex(base, "]"); j > i {
-			candidate := base[i+1 : j]
-			if looksLikeYouTubeID(candidate) {
-				return candidate
-			}
-		}
-	}
-
-	// Try bare filename as ID
-	if looksLikeYouTubeID(base) {
-		return base
-	}
-
-	return ""
-}
-
-// looksLikeYouTubeID checks if a string matches YouTube's video ID format:
-// 11 characters, alphanumeric plus - and _
-func looksLikeYouTubeID(s string) bool {
-	if len(s) != 11 {
-		return false
-	}
-	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
-
 // planMatch holds a URL and optional metadata resolved from a collection plan.
 type planMatch struct {
 	URL    string
@@ -453,7 +285,7 @@ type planMatch struct {
 }
 
 func resolveFromPlans(filePath string) (*planMatch, error) {
-	videoID := extractVideoIDFromFilename(filepath.Base(filePath))
+	videoID := cache.ExtractVideoIDFromFilename(filepath.Base(filePath))
 
 	// Try matching against collection plans
 	pp, err := paths.Resolve(projectDir)
@@ -512,28 +344,6 @@ func resolveFromPlans(filePath string) (*planMatch, error) {
 	}
 
 	return nil, fmt.Errorf("could not resolve a URL for %q\n\nUsage: powerhour cache <file-path> [--url <url>]\n\nProvide the URL explicitly, or ensure the filename contains a YouTube video ID.", filepath.Base(filePath))
-}
-
-func extractPlatformFromHost(host string) string {
-	host = strings.ToLower(host)
-	host = strings.TrimPrefix(host, "www.")
-
-	switch {
-	case strings.Contains(host, "youtube"):
-		return "youtube"
-	case strings.Contains(host, "vimeo"):
-		return "vimeo"
-	case strings.Contains(host, "dailymotion"):
-		return "dailymotion"
-	case strings.Contains(host, "twitch"):
-		return "twitch"
-	default:
-		parts := strings.Split(host, ".")
-		if len(parts) >= 2 {
-			return parts[0]
-		}
-		return "unknown"
-	}
 }
 
 func formatProbeSeconds(s float64) string {
