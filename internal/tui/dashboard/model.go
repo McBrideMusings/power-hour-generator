@@ -121,6 +121,12 @@ type Model struct {
 	doctorOverlay     *cacheDoctorOverlay
 	doctorInstanceSeq int // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
 
+	// Tool update queue. `U` fills it; each toolUpdateDoneMsg pops the next
+	// one, so package managers never run two at a time on the same terminal.
+	toolUpdateQueue  []ToolStatus
+	toolUpdateOK     []string
+	toolUpdateFailed []string
+
 	job dashboardJobState
 
 	// pendingAutoRerenders holds rows that went stale from an edit while a
@@ -444,6 +450,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.timelineView.concatPath, m.timelineView.concatExists, m.timelineView.concatSize, m.timelineView.concatModTime = findConcatOutput(m.pp.Root)
 		return m, nil
 
+	case toolUpdateDoneMsg:
+		return m.advanceToolUpdates(msg)
+
+	case toolsRefreshedMsg:
+		if msg.statuses != nil {
+			m.toolStatuses = msg.statuses
+			m.toolWarning = msg.warning
+			m.toolsView.tools = msg.statuses
+			if m.toolsView.cursor >= len(msg.statuses) {
+				m.toolsView.cursor = max(len(msg.statuses)-1, 0)
+			}
+			if m.toolsView.note == "Refreshing tool status…" {
+				m.toolsView.note = ""
+			}
+		}
+		return m, nil
+
 	case fetchDoneMsg:
 		if msg.err != nil {
 			m.statusMsg = fmt.Sprintf("Fetch error: %v", msg.err)
@@ -607,6 +630,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	key := msg.String()
+
+	// The tools view claims r/u/U and cursor movement before the global
+	// bindings, because `u` updates a tool here and refreshes from disk
+	// everywhere else.
+	if m.viewKind(m.activeView) == "tools" {
+		switch key {
+		case "r", "u", "U", "up", "down", "j", "k":
+			return m.handleToolsKey(key)
+		}
+	}
 
 	// Global keys.
 	switch key {

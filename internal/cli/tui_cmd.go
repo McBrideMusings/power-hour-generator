@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,7 +12,6 @@ import (
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
 	"powerhour/internal/render/state"
-	"powerhour/internal/tools"
 	"powerhour/internal/tui"
 	"powerhour/internal/tui/dashboard"
 )
@@ -82,7 +80,7 @@ func runTui(cmd *cobra.Command, _ []string) error {
 	}
 
 	sw.Update("Detecting tools...")
-	toolStatuses, toolWarning := detectToolStatuses(cmd.Context())
+	toolStatuses, toolWarning := dashboard.DetectToolStatuses(cmd.Context())
 
 	sw.Stop()
 
@@ -94,56 +92,4 @@ func runTui(cmd *cobra.Command, _ []string) error {
 	}
 
 	return nil
-}
-
-func detectToolStatuses(ctx context.Context) ([]dashboard.ToolStatus, string) {
-	statuses, err := tools.Detect(ctx)
-	if err != nil {
-		return nil, ""
-	}
-
-	statusByName := make(map[string]tools.Status, len(statuses))
-	for _, status := range statuses {
-		statusByName[status.Tool] = status
-	}
-
-	result := make([]dashboard.ToolStatus, 0, len(tools.KnownTools()))
-	var warning string
-
-	for _, name := range tools.KnownTools() {
-		s, ok := statusByName[name]
-		if !ok {
-			continue
-		}
-		ts := dashboard.ToolStatus{
-			Name:          s.Tool,
-			Optional:      s.Optional,
-			Available:     s.Path != "",
-			Version:       s.Version,
-			Path:          s.Path,
-			InstallMethod: s.InstallMethod,
-		}
-		if !s.Optional && !s.Satisfied {
-			ts.UpdateAvail = "not satisfied"
-			if warning == "" {
-				warning = s.Tool
-			}
-		}
-		result = append(result, ts)
-	}
-
-	// Check for update notices.
-	notices := tools.CheckForUpdates(ctx, statuses)
-	for _, n := range notices {
-		if warning == "" {
-			warning = n.Tool + " update"
-		}
-		for i := range result {
-			if result[i].Name == n.Tool {
-				result[i].UpdateAvail = n.CurrentVersion + " → " + n.LatestVersion
-			}
-		}
-	}
-
-	return result, warning
 }

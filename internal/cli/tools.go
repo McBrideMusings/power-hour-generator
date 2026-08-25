@@ -142,6 +142,10 @@ func runToolsInstall(cmd *cobra.Command, args []string) error {
 		status, err := tools.Install(ctx, name, installVersion, tools.InstallOptions{Force: installForce, Version: installVersion})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		} else {
+			// The cached notice is now stale — drop it so the next run
+			// re-checks instead of re-reporting the version just installed.
+			tools.ClearUpdateNotice(name)
 		}
 		statuses = append(statuses, status)
 	}
@@ -392,11 +396,9 @@ func promptToolUpdates(cmd *cobra.Command, updatable []tools.Status) {
 	// For externally-managed tools (homebrew, apt, etc.), run the appropriate
 	// package manager command directly.
 	for _, st := range external {
-		notice := tools.UpdateNotice{Tool: st.Tool, InstallMethod: st.InstallMethod}
-		updateCmd := notice.UpdateCommand()
 		fmt.Fprintf(out, "Updating %s via %s...\n", st.Tool, tools.InstallMethodLabel(st.InstallMethod))
-		parts := strings.Fields(updateCmd)
-		c := exec.CommandContext(cmd.Context(), parts[0], parts[1:]...)
+		argv := tools.UpdateArgv(st.Tool, st.InstallMethod, projectDir)
+		c := exec.CommandContext(cmd.Context(), argv[0], argv[1:]...)
 		c.Stdout = out
 		c.Stderr = os.Stderr
 		if err := c.Run(); err != nil {

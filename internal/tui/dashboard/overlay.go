@@ -52,7 +52,7 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 		"←/→, h/l, or 1-9    Switch views",
 		"↑/↓ or j/k          Move cursor",
 		"?                   Toggle this help",
-		"u or Ctrl+R         Refresh from disk",
+		"u or Ctrl+R         Refresh from disk (tools view rebinds u; use Ctrl+R there)",
 		"c                   Concatenate the full timeline into the final video",
 		"o                   Open the project folder in the file manager",
 		"q, Esc, or Ctrl+C   Quit",
@@ -82,7 +82,10 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 		)
 	case "tools":
 		section("Tools View",
-			"(browse only — no actions yet; see issue #60 to add update actions)",
+			"↑/↓ or j/k   Move the cursor between tools",
+			"r            Re-detect tools and re-check for updates",
+			"u            Update the selected tool",
+			"U            Update every tool with a pending update",
 		)
 	default:
 		section("Collection View",

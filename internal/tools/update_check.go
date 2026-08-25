@@ -119,11 +119,30 @@ func saveUpdateCheckCache(cache UpdateCheckCache) {
 }
 
 // CheckForUpdates checks whether newer versions of detected tools are
-// available. It uses a 24-hour cache to avoid hitting the network on every
-// run; a failed check uses a shorter backoff (updateCheckFailedTTL) so a
-// persistently-failing check retries on a schedule instead of on every
-// invocation. All errors are swallowed — this never blocks the CLI.
+// available and returns the ones the user has not already been told about.
+// It uses a 24-hour cache to avoid hitting the network on every run; a failed
+// check uses a shorter backoff (updateCheckFailedTTL) so a persistently-failing
+// check retries on a schedule instead of on every invocation. All errors are
+// swallowed — this never blocks the CLI.
+//
+// Use this for printing a one-off notice. A surface that *displays* update
+// state — the dashboard's tools tab — wants PendingUpdates instead, since
+// suppressing an already-announced version there would report a stale
+// "up to date".
 func CheckForUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
+	return checkUpdates(ctx, statuses, true)
+}
+
+// PendingUpdates returns every tool with a newer version available, whether or
+// not a notice for that version has already been shown. Same cache and network
+// behaviour as CheckForUpdates.
+func PendingUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
+	return checkUpdates(ctx, statuses, false)
+}
+
+// checkUpdates is the shared body. skipNotified drops a tool whose pending
+// version has already been announced via MarkNotified.
+func checkUpdates(ctx context.Context, statuses []Status, skipNotified bool) []UpdateNotice {
 	cache := loadUpdateCheckCache()
 	var notices []UpdateNotice
 	changed := false
@@ -138,7 +157,7 @@ func CheckForUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
 
 		if fresh {
 			if entry.LatestVersion != "" &&
-				entry.LatestVersion != entry.NotifiedVersion &&
+				!(skipNotified && entry.LatestVersion == entry.NotifiedVersion) &&
 				versionNewer(entry.LatestVersion, st.Version) {
 				notices = append(notices, UpdateNotice{
 					Tool:           st.Tool,
@@ -166,7 +185,7 @@ func CheckForUpdates(ctx context.Context, statuses []Status) []UpdateNotice {
 		changed = true
 
 		if checkOK && latest != "" &&
-			latest != newEntry.NotifiedVersion &&
+			!(skipNotified && latest == newEntry.NotifiedVersion) &&
 			versionNewer(latest, st.Version) {
 			notices = append(notices, UpdateNotice{
 				Tool:           st.Tool,

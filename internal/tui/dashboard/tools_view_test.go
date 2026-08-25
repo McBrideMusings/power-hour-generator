@@ -160,8 +160,9 @@ func TestToolsViewNoticeLineCountIsExact(t *testing.T) {
 	}
 }
 
-func TestToolsViewNoticeAlwaysAtEnd(t *testing.T) {
-	// Verify that when a notice is rendered, it's always the last non-empty line.
+func TestToolsViewNoticeSitsAboveHelpRow(t *testing.T) {
+	// The truncation notice is the last line of the tool blocks; the inline
+	// help row is rendered beneath it, same as every other dashboard view.
 	numTools := 3
 	termHeight := 17 // Small budget to force truncation.
 
@@ -173,17 +174,63 @@ func TestToolsViewNoticeAlwaysAtEnd(t *testing.T) {
 
 	output := v.view()
 
-	if strings.Contains(output, "… and") {
-		// Find the last non-empty line.
-		lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
-		lastLine := lines[len(lines)-1]
+	if !strings.Contains(output, "… and") {
+		t.Fatalf("expected a truncation notice, output:\n%s", output)
+	}
 
-		// Remove ANSI codes for checking.
-		lastLineClean := stripANSI(lastLine)
+	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least a notice and a help row, got %d lines", len(lines))
+	}
 
-		if !strings.Contains(lastLineClean, "…") {
-			t.Errorf("notice should be the last line, got: %q", lastLineClean)
-		}
+	helpRow := stripANSI(lines[len(lines)-1])
+	if !strings.HasPrefix(helpRow, helpRowPrefix) {
+		t.Errorf("last line should be the inline help row, got: %q", helpRow)
+	}
+
+	notice := stripANSI(lines[len(lines)-2])
+	if !strings.Contains(notice, "…") {
+		t.Errorf("notice should sit directly above the help row, got: %q", notice)
+	}
+}
+
+func TestToolsViewCursorScrollsIntoWindow(t *testing.T) {
+	// A cursor past the visible window scrolls the view down and swaps the
+	// "… and N more" notice for an "↑ N more above" one.
+	v := toolsView{
+		tools:      makeTestTools(4),
+		cursor:     3,
+		termHeight: 17, // budget fits a single 6-line block
+	}
+
+	output := stripANSI(v.view())
+
+	if !strings.Contains(output, "Tool 4") {
+		t.Errorf("cursor tool should be visible, output:\n%s", output)
+	}
+	if strings.Contains(output, "Tool 1") {
+		t.Errorf("Tool 1 should have scrolled out of view, output:\n%s", output)
+	}
+	if !strings.Contains(output, "more above") {
+		t.Errorf("expected an above-notice, output:\n%s", output)
+	}
+}
+
+func TestToolsViewHelpRowNamesSelectedTool(t *testing.T) {
+	v := toolsView{
+		tools:      makeTestTools(2),
+		cursor:     1,
+		termWidth:  120,
+		termHeight: 100,
+	}
+
+	output := stripANSI(v.view())
+
+	if !strings.Contains(output, "u update Tool 2") {
+		t.Errorf("help row should name the cursor tool, output:\n%s", output)
+	}
+	if !strings.Contains(output, "r refresh") {
+		t.Errorf("help row should offer refresh, output:\n%s", output)
 	}
 }
 

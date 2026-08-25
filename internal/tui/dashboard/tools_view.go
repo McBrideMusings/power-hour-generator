@@ -3,11 +3,25 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+
+	"powerhour/internal/tools"
 )
 
-// toolsView shows tool status information as a full tab view.
+// toolsHelpLines is the single inline help row every non-empty tools view
+// reserves at the bottom, matching the collection/cache/timeline views.
+const toolsHelpLines = 1
+
+// toolsBlockLines is the number of lines one tool's block occupies: name,
+// version, path, install method, update state, and a trailing blank.
+const toolsBlockLines = 6
+
+// toolsView shows tool status information as a full tab view. The cursor
+// selects the tool that `u` acts on; the view scrolls to keep it visible.
 type toolsView struct {
 	tools      []ToolStatus
+	cursor     int
+	note       string
+	noteIsErr  bool
 	termWidth  int
 	termHeight int
 }
@@ -16,122 +30,195 @@ func newToolsView(tools []ToolStatus) toolsView {
 	return toolsView{tools: tools}
 }
 
+// selected returns the tool under the cursor.
+func (v toolsView) selected() (ToolStatus, bool) {
+	if v.cursor < 0 || v.cursor >= len(v.tools) {
+		return ToolStatus{}, false
+	}
+	return v.tools[v.cursor], true
+}
+
+// outdated returns every tool with a pending update that powerhour knows how
+// to apply. `U` acts on exactly this list.
+func (v toolsView) outdated() []ToolStatus {
+	var out []ToolStatus
+	for _, t := range v.tools {
+		if t.UpdateAvail == "" {
+			continue
+		}
+		if !tools.UpdateSupported(t.Name, t.InstallMethod) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// renderBlock renders one tool's detail block, marking it when it is under
+// the cursor.
+func (v toolsView) renderBlock(t ToolStatus, selected bool) string {
+	var b strings.Builder
+
+	marker := "  "
+	if selected {
+		marker = "> "
+	}
+	name := t.Name
+	if selected {
+		name = cursorStyle.Render(name)
+	} else {
+		name = bold.Render(name)
+	}
+	b.WriteString(marker + name)
+	b.WriteByte('\n')
+
+	b.WriteString(fmt.Sprintf("    Version:  %s\n", nonEmptyOrDash(t.Version)))
+	b.WriteString(fmt.Sprintf("    Path:     %s\n", faint.Render(nonEmptyOrDash(t.Path))))
+	b.WriteString(fmt.Sprintf("    Install:  %s\n", faint.Render(nonEmptyOrDash(t.InstallMethod))))
+
+	switch {
+	case t.Optional && !t.Available:
+		b.WriteString(fmt.Sprintf("    Update:   %s\n", faint.Render("optional, not found")))
+	case t.UpdateAvail != "":
+		b.WriteString(fmt.Sprintf("    Update:   %s\n", countYellow.Render(t.UpdateAvail)))
+	default:
+		b.WriteString(fmt.Sprintf("    Update:   %s\n", countGreen.Render("up to date")))
+	}
+	b.WriteByte('\n')
+
+	return b.String()
+}
+
+// renderHelpRow follows the shared priority ladder: a transient note from the
+// last action wins, otherwise the default action hint for the cursor row.
+func (v toolsView) renderHelpRow() string {
+	noteStyle := editStyle
+	if v.noteIsErr {
+		noteStyle = errorNoteStyle
+	}
+	return resolveHelpRow(v.termWidth, nil,
+		helpRowSource{text: v.note, style: noteStyle},
+		helpRowSource{text: v.defaultHint(), style: footerStyle},
+	)
+}
+
+func (v toolsView) defaultHint() string {
+	parts := []string{"r refresh"}
+
+	if t, ok := v.selected(); ok {
+		if tools.UpdateSupported(t.Name, t.InstallMethod) {
+			parts = append(parts, "u update "+t.Name)
+		} else {
+			parts = append(parts, "no update path for "+t.Name)
+		}
+	}
+
+	if n := len(v.outdated()); n > 0 {
+		parts = append(parts, fmt.Sprintf("U update all (%d outdated)", n))
+	}
+
+	return strings.Join(parts, " · ")
+}
+
 func (v toolsView) view() string {
 	var b strings.Builder
 
-	// Render header (2 lines).
 	b.WriteString(sectionLabel.Render("TOOLS"))
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 	headerLines := 2
 
-	// Handle empty tools list.
 	if len(v.tools) == 0 {
 		b.WriteString(faint.Render("  No tool information available."))
 		b.WriteByte('\n')
 		return b.String()
 	}
 
-	// Render each tool into a block with its line count.
-	type toolBlock struct {
-		content string
-		lines   int
-	}
-	var blocks []toolBlock
-
-	for _, t := range v.tools {
-		var toolB strings.Builder
-
-		toolB.WriteString(bold.Render("  " + t.Name))
-		toolB.WriteByte('\n')
-
-		toolB.WriteString(fmt.Sprintf("    Version:  %s\n", nonEmptyOrDash(t.Version)))
-		toolB.WriteString(fmt.Sprintf("    Path:     %s\n", faint.Render(nonEmptyOrDash(t.Path))))
-		toolB.WriteString(fmt.Sprintf("    Install:  %s\n", faint.Render(nonEmptyOrDash(t.InstallMethod))))
-
-		if t.Optional && !t.Available {
-			toolB.WriteString(fmt.Sprintf("    Update:   %s\n", faint.Render("optional, not found")))
-		} else if t.UpdateAvail != "" {
-			toolB.WriteString(fmt.Sprintf("    Update:   %s\n", countYellow.Render(t.UpdateAvail)))
-		} else {
-			toolB.WriteString(fmt.Sprintf("    Update:   %s\n", countGreen.Render("up to date")))
-		}
-		toolB.WriteByte('\n')
-
-		blockContent := toolB.String()
-		blockLines := strings.Count(blockContent, "\n")
-		blocks = append(blocks, toolBlock{content: blockContent, lines: blockLines})
+	blocks := make([]string, len(v.tools))
+	for i, t := range v.tools {
+		blocks[i] = v.renderBlock(t, i == v.cursor)
 	}
 
-	// Determine if we need to truncate based on termHeight budget.
 	maxLines := 0
 	if v.termHeight > 0 {
 		maxLines = v.termHeight - dashboardChromeLines
 	}
 
-	// If no budget or budget is zero/negative, emit all blocks (no truncation).
+	// No budget: emit everything.
 	if maxLines <= 0 {
 		for _, block := range blocks {
-			b.WriteString(block.content)
+			b.WriteString(block)
 		}
+		b.WriteString(v.renderHelpRow())
+		b.WriteByte('\n')
 		return b.String()
 	}
 
-	// Check if all blocks fit in the budget.
-	totalLines := headerLines
-	for _, block := range blocks {
-		totalLines += block.lines
-	}
+	budget := maxLines - headerLines - toolsHelpLines
 
-	if totalLines <= maxLines {
-		// All blocks fit; emit them all without notice.
+	// Budget too small for even the chrome: fall back to blunt truncation so
+	// the view never overflows its allotment.
+	if budget < toolsBlockLines {
 		for _, block := range blocks {
-			b.WriteString(block.content)
+			b.WriteString(block)
 		}
-		return b.String()
+		return clampLines(b.String(), maxLines)
 	}
 
-	// Not all blocks fit; reserve one line for the notice.
-	budget := maxLines - 1
+	start, end := v.window(len(blocks), budget)
 
-	// If budget is too small to fit the notice line alongside the header,
-	// fall back to blunt truncation (no notice).
-	if budget <= headerLines {
-		for _, block := range blocks {
-			b.WriteString(block.content)
-		}
-		output := b.String()
-		parts := strings.SplitN(output, "\n", maxLines+1)
-		return strings.Join(parts[:maxLines], "\n") + "\n"
+	if start > 0 {
+		b.WriteString(faint.Render(fmt.Sprintf("  ↑ %d more above", start)))
+		b.WriteByte('\n')
+	}
+	for _, block := range blocks[start:end] {
+		b.WriteString(block)
+	}
+	if notShown := len(blocks) - end; notShown > 0 {
+		b.WriteString(faint.Render(fmt.Sprintf("  … and %d more", notShown)))
+		b.WriteByte('\n')
 	}
 
-	// Greedily accept blocks while fitting in the budget.
-	accumulatedLines := headerLines
-	shown := 0
-	for i, block := range blocks {
-		if accumulatedLines+block.lines <= budget {
-			b.WriteString(block.content)
-			accumulatedLines += block.lines
-			shown = i + 1
-		} else {
-			break
-		}
-	}
-
-	// Append the notice with the correct count.
-	notShown := len(v.tools) - shown
-	b.WriteString(faint.Render(fmt.Sprintf("  … and %d more", notShown)))
+	b.WriteString(v.renderHelpRow())
 	b.WriteByte('\n')
 
-	output := b.String()
+	return clampLines(b.String(), maxLines)
+}
 
-	// Defensive clamp to ensure output never exceeds maxLines newlines.
-	if strings.Count(output, "\n") > maxLines {
-		parts := strings.SplitN(output, "\n", maxLines+1)
-		output = strings.Join(parts[:maxLines], "\n") + "\n"
+// window picks the slice of blocks to display: the largest run that fits the
+// budget while still containing the cursor. Reserved lines for the
+// above/below truncation notices are charged against the same budget.
+func (v toolsView) window(count, budget int) (int, int) {
+	for start := 0; start < count; start++ {
+		avail := budget
+		if start > 0 {
+			avail-- // "↑ N more above"
+		}
+
+		fit := avail / toolsBlockLines
+		if start+fit < count {
+			// A "… and N more" line is needed; charge it and refit.
+			fit = (avail - 1) / toolsBlockLines
+		}
+		if fit < 1 {
+			fit = 1
+		}
+
+		end := min(start+fit, count)
+		if v.cursor < end {
+			return start, end
+		}
 	}
+	return count - 1, count
+}
 
-	return output
+// clampLines trims text so it never carries more than max newlines.
+func clampLines(text string, max int) string {
+	if max <= 0 || strings.Count(text, "\n") <= max {
+		return text
+	}
+	parts := strings.SplitN(text, "\n", max+1)
+	return strings.Join(parts[:max], "\n") + "\n"
 }
 
 func nonEmptyOrDash(s string) string {
