@@ -7,10 +7,6 @@ import (
 	"powerhour/internal/tools"
 )
 
-// toolsHelpLines is the single inline help row every non-empty tools view
-// reserves at the bottom, matching the collection/cache/timeline views.
-const toolsHelpLines = 1
-
 // toolsBlockLines is the number of lines one tool's block occupies: name,
 // version, path, install method, update state, and a trailing blank.
 const toolsBlockLines = 6
@@ -89,35 +85,23 @@ func (v toolsView) renderBlock(t ToolStatus, selected bool) string {
 	return b.String()
 }
 
-// renderHelpRow follows the shared priority ladder: a transient note from the
-// last action wins, otherwise the default action hint for the cursor row.
-func (v toolsView) renderHelpRow() string {
-	noteStyle := editStyle
+// renderNote renders the result of the last action as a row directly beneath
+// the tool it is about. Hotkeys are not rendered here — every view's key
+// reference lives in the one footer built by renderFooter.
+func (v toolsView) renderNote() string {
+	style := editStyle
 	if v.noteIsErr {
-		noteStyle = errorNoteStyle
+		style = errorNoteStyle
 	}
-	return resolveHelpRow(v.termWidth, nil,
-		helpRowSource{text: v.note, style: noteStyle},
-		helpRowSource{text: v.defaultHint(), style: footerStyle},
-	)
+	return helpRowText(v.note, style, v.termWidth)
 }
 
-func (v toolsView) defaultHint() string {
-	parts := []string{"r refresh"}
-
-	if t, ok := v.selected(); ok {
-		if tools.UpdateSupported(t.Name, t.InstallMethod) {
-			parts = append(parts, "u update "+t.Name)
-		} else {
-			parts = append(parts, "no update path for "+t.Name)
-		}
+// noteLines is the vertical budget the note claims, if any.
+func (v toolsView) noteLines() int {
+	if strings.TrimSpace(v.note) == "" {
+		return 0
 	}
-
-	if n := len(v.outdated()); n > 0 {
-		parts = append(parts, fmt.Sprintf("U update all (%d outdated)", n))
-	}
-
-	return strings.Join(parts, " · ")
+	return 1
 }
 
 func (v toolsView) view() string {
@@ -144,24 +128,30 @@ func (v toolsView) view() string {
 		maxLines = v.termHeight - dashboardChromeLines
 	}
 
+	// writeBlocks emits blocks[from:to], slipping the action note in directly
+	// beneath the tool it reports on.
+	writeBlocks := func(from, to int) {
+		for i := from; i < to; i++ {
+			b.WriteString(blocks[i])
+			if i == v.cursor && v.noteLines() > 0 {
+				b.WriteString(v.renderNote())
+				b.WriteByte('\n')
+			}
+		}
+	}
+
 	// No budget: emit everything.
 	if maxLines <= 0 {
-		for _, block := range blocks {
-			b.WriteString(block)
-		}
-		b.WriteString(v.renderHelpRow())
-		b.WriteByte('\n')
+		writeBlocks(0, len(blocks))
 		return b.String()
 	}
 
-	budget := maxLines - headerLines - toolsHelpLines
+	budget := maxLines - headerLines - v.noteLines()
 
 	// Budget too small for even the chrome: fall back to blunt truncation so
 	// the view never overflows its allotment.
 	if budget < toolsBlockLines {
-		for _, block := range blocks {
-			b.WriteString(block)
-		}
+		writeBlocks(0, len(blocks))
 		return clampLines(b.String(), maxLines)
 	}
 
@@ -171,16 +161,11 @@ func (v toolsView) view() string {
 		b.WriteString(faint.Render(fmt.Sprintf("  ↑ %d more above", start)))
 		b.WriteByte('\n')
 	}
-	for _, block := range blocks[start:end] {
-		b.WriteString(block)
-	}
+	writeBlocks(start, end)
 	if notShown := len(blocks) - end; notShown > 0 {
 		b.WriteString(faint.Render(fmt.Sprintf("  … and %d more", notShown)))
 		b.WriteByte('\n')
 	}
-
-	b.WriteString(v.renderHelpRow())
-	b.WriteByte('\n')
 
 	return clampLines(b.String(), maxLines)
 }

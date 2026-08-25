@@ -24,7 +24,9 @@ func renderFooter(m Model) string {
 	case "cache":
 		return footerStyle.Render("←/→ views  ↑/↓ move  f filter  e edit  x del  D doctor  u refresh") + vlc + footerStyle.Render("  o open  ? help  q/Esc quit")
 	case "tools":
-		return footerStyle.Render("←/→ views  u refresh  o open  ? help  q/Esc quit")
+		// No "u refresh" here: the tools view rebinds u to update the
+		// selected tool, and r re-detects instead.
+		return footerStyle.Render("←/→ views  ↑/↓ move  r refresh  u update  U update all  o open  ? help  q/Esc quit")
 	}
 	return footerStyle.Render("←/→ views  u refresh  o open  ? help  q/Esc quit")
 }

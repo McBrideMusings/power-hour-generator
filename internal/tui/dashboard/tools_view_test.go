@@ -160,9 +160,9 @@ func TestToolsViewNoticeLineCountIsExact(t *testing.T) {
 	}
 }
 
-func TestToolsViewNoticeSitsAboveHelpRow(t *testing.T) {
-	// The truncation notice is the last line of the tool blocks; the inline
-	// help row is rendered beneath it, same as every other dashboard view.
+func TestToolsViewNoticeIsLastLine(t *testing.T) {
+	// The truncation notice closes the view. Hotkeys are not rendered here —
+	// renderFooter owns the whole key reference.
 	numTools := 3
 	termHeight := 17 // Small budget to force truncation.
 
@@ -174,23 +174,17 @@ func TestToolsViewNoticeSitsAboveHelpRow(t *testing.T) {
 
 	output := v.view()
 
-	if !strings.Contains(output, "… and") {
+	if !strings.Contains(output, "\u2026 and") {
 		t.Fatalf("expected a truncation notice, output:\n%s", output)
 	}
 
 	lines := strings.Split(strings.TrimSuffix(output, "\n"), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least a notice and a help row, got %d lines", len(lines))
+	last := stripANSI(lines[len(lines)-1])
+	if !strings.Contains(last, "\u2026") {
+		t.Errorf("notice should be the last line, got: %q", last)
 	}
-
-	helpRow := stripANSI(lines[len(lines)-1])
-	if !strings.HasPrefix(helpRow, helpRowPrefix) {
-		t.Errorf("last line should be the inline help row, got: %q", helpRow)
-	}
-
-	notice := stripANSI(lines[len(lines)-2])
-	if !strings.Contains(notice, "…") {
-		t.Errorf("notice should sit directly above the help row, got: %q", notice)
+	if strings.Contains(output, "refresh") || strings.Contains(output, "update all") {
+		t.Errorf("tools view must not render hotkeys; that is renderFooter's job:\n%s", output)
 	}
 }
 
@@ -216,21 +210,32 @@ func TestToolsViewCursorScrollsIntoWindow(t *testing.T) {
 	}
 }
 
-func TestToolsViewHelpRowNamesSelectedTool(t *testing.T) {
+func TestToolsViewNoteSitsUnderItsTool(t *testing.T) {
 	v := toolsView{
 		tools:      makeTestTools(2),
-		cursor:     1,
+		cursor:     0,
+		note:       "Updated Tool 1.",
 		termWidth:  120,
 		termHeight: 100,
 	}
 
-	output := stripANSI(v.view())
+	lines := strings.Split(stripANSI(v.view()), "\n")
 
-	if !strings.Contains(output, "u update Tool 2") {
-		t.Errorf("help row should name the cursor tool, output:\n%s", output)
+	noteIdx, toolTwoIdx := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "Updated Tool 1.") {
+			noteIdx = i
+		}
+		if strings.Contains(line, "Tool 2") {
+			toolTwoIdx = i
+		}
 	}
-	if !strings.Contains(output, "r refresh") {
-		t.Errorf("help row should offer refresh, output:\n%s", output)
+
+	if noteIdx < 0 {
+		t.Fatalf("note missing from output:\n%s", strings.Join(lines, "\n"))
+	}
+	if toolTwoIdx < 0 || noteIdx > toolTwoIdx {
+		t.Errorf("note at line %d should sit above Tool 2 at line %d", noteIdx, toolTwoIdx)
 	}
 }
 

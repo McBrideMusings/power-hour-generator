@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"powerhour/internal/tools"
@@ -104,5 +105,21 @@ func TestToolsViewOutdatedSkipsUnsupported(t *testing.T) {
 	got := v.outdated()
 	if len(got) != 1 || got[0].Name != "ffmpeg" {
 		t.Errorf("outdated = %+v, want just ffmpeg", got)
+	}
+}
+
+func TestRenderFooterToolsListsUpdateKeys(t *testing.T) {
+	m := testTimelineModel(t)
+	m.activeView = len(m.collectionNames) + 2 // tools tab
+
+	footer := renderFooter(m)
+
+	for _, want := range []string{"r refresh", "u update", "U update all"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer = %q, want it to list %q", footer, want)
+		}
+	}
+	if strings.Contains(footer, "u refresh") {
+		t.Errorf("footer = %q, but u updates in the tools view", footer)
 	}
 }
