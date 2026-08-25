@@ -123,9 +123,7 @@ type Model struct {
 
 	// Tool update queue. `U` fills it; each toolUpdateDoneMsg pops the next
 	// one, so package managers never run two at a time on the same terminal.
-	toolUpdateQueue  []ToolStatus
-	toolUpdateOK     []string
-	toolUpdateFailed []string
+	toolUpdateQueue []ToolStatus
 
 	job dashboardJobState
 
@@ -354,6 +352,25 @@ func (m Model) setTimelineSequenceNote(seqIdx int, note string) Model {
 	return m
 }
 
+// setToolNote attaches a transient note to one tool by name, so it renders
+// beneath that tool regardless of where the cursor is or how a re-detect
+// reorders the list. Pass an empty tool name to fall back to the status line.
+func (m Model) setToolNote(tool, note string) Model {
+	if strings.TrimSpace(tool) == "" {
+		m.statusMsg = note
+		return m
+	}
+	if m.toolsView.rowStatus == nil {
+		m.toolsView.rowStatus = make(map[string]string)
+	}
+	if m.toolsView.rowStatusUntil == nil {
+		m.toolsView.rowStatusUntil = make(map[string]int)
+	}
+	m.toolsView.rowStatus[tool] = "note:" + note
+	m.toolsView.rowStatusUntil[tool] = m.tick + 14
+	return m
+}
+
 func (m Model) expireTransientRowNotes() Model {
 	for seqIdx, until := range m.timelineView.seqStatusUntil {
 		if until > m.tick {
@@ -383,6 +400,15 @@ func (m Model) expireTransientRowNotes() Model {
 			delete(m.cacheView.rowStatus, identifier)
 		}
 		delete(m.cacheView.rowStatusUntil, identifier)
+	}
+	for tool, until := range m.toolsView.rowStatusUntil {
+		if until > m.tick {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(m.toolsView.rowStatus[tool]), "note:") {
+			delete(m.toolsView.rowStatus, tool)
+		}
+		delete(m.toolsView.rowStatusUntil, tool)
 	}
 	return m
 }
@@ -426,6 +452,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for i := range m.collectionViews {
 			m.collectionViews[i].tick = m.tick
 		}
+		m.toolsView.tick = m.tick
 		if m.doctorOverlay != nil {
 			m.doctorOverlay.tick = m.tick
 		}
@@ -461,8 +488,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.toolsView.cursor >= len(msg.statuses) {
 				m.toolsView.cursor = max(len(msg.statuses)-1, 0)
 			}
-			if m.toolsView.note == "Refreshing tool status…" {
-				m.toolsView.note = ""
+			if m.statusMsg == "Refreshing tool status…" {
+				m.statusMsg = ""
 			}
 		}
 		return m, nil

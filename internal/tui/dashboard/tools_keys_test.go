@@ -43,19 +43,39 @@ func TestAdvanceToolUpdatesDrainsThenRefreshes(t *testing.T) {
 	if len(m.toolUpdateQueue) != 0 {
 		t.Fatalf("queue = %+v, want it drained", m.toolUpdateQueue)
 	}
-	if m.toolsView.note != "" {
-		t.Errorf("note = %q, want no summary while updates are still running", m.toolsView.note)
-	}
 
 	m, cmd = m.advanceToolUpdates(toolUpdateDoneMsg{tool: "yt-dlp"})
 	if cmd == nil {
 		t.Fatal("expected a re-detect once the queue drained")
 	}
-	if want := "Updated ffmpeg, yt-dlp."; m.toolsView.note != want {
-		t.Errorf("note = %q, want %q", m.toolsView.note, want)
+
+	// Each note lands on the tool it is about, never on the cursor row.
+	if got := m.toolsView.rowStatus["ffmpeg"]; got != "note:Updated." {
+		t.Errorf("ffmpeg note = %q, want %q", got, "note:Updated.")
 	}
-	if m.toolsView.noteIsErr {
-		t.Error("a clean run should not flag the note as an error")
+	if got := m.toolsView.rowStatus["yt-dlp"]; got != "note:Updated." {
+		t.Errorf("yt-dlp note = %q, want %q", got, "note:Updated.")
+	}
+}
+
+func TestToolNotesExpire(t *testing.T) {
+	var m Model
+	m.toolsView = newToolsView(toolTargets())
+	m = m.setToolNote("yt-dlp", "Updated.")
+
+	if m.toolsView.rowStatus["yt-dlp"] == "" {
+		t.Fatal("note should be set")
+	}
+
+	m = m.expireTransientRowNotes()
+	if m.toolsView.rowStatus["yt-dlp"] == "" {
+		t.Error("note should survive while its deadline is in the future")
+	}
+
+	m.tick += 15
+	m = m.expireTransientRowNotes()
+	if got := m.toolsView.rowStatus["yt-dlp"]; got != "" {
+		t.Errorf("note = %q, want it expired", got)
 	}
 }
 
@@ -67,11 +87,12 @@ func TestAdvanceToolUpdatesReportsFailures(t *testing.T) {
 
 	m, _ = m.advanceToolUpdates(toolUpdateDoneMsg{tool: "ffmpeg", err: errors.New("exit status 1")})
 
-	if !m.toolsView.noteIsErr {
-		t.Error("a failed update should flag the note as an error")
+	got := m.toolsView.rowStatus["ffmpeg"]
+	if !strings.Contains(got, "ERROR - update failed") {
+		t.Errorf("ffmpeg note = %q, want an ERROR note", got)
 	}
-	if want := "ffmpeg failed to update — run it by hand to see why."; m.toolsView.note != want {
-		t.Errorf("note = %q, want %q", m.toolsView.note, want)
+	if !isErrorRowNote(got) {
+		t.Error("a failed update should style as an error note")
 	}
 }
 
@@ -87,11 +108,9 @@ func TestStartToolUpdatesRefusesToolWithNoUpdatePath(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no command for a tool powerhour cannot update")
 	}
-	if !m.toolsView.noteIsErr {
-		t.Error("expected the refusal to be flagged as an error note")
-	}
-	if m.toolsView.note == "" {
-		t.Error("expected an explanatory note")
+	got := m.toolsView.rowStatus["vlc"]
+	if !strings.Contains(got, "no update path") {
+		t.Errorf("vlc note = %q, want an explanation on the vlc row", got)
 	}
 }
 

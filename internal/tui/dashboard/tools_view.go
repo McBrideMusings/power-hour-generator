@@ -14,10 +14,17 @@ const toolsBlockLines = 6
 // toolsView shows tool status information as a full tab view. The cursor
 // selects the tool that `u` acts on; the view scrolls to keep it visible.
 type toolsView struct {
-	tools      []ToolStatus
-	cursor     int
-	note       string
-	noteIsErr  bool
+	tools  []ToolStatus
+	cursor int
+
+	// rowStatus holds transient per-tool notes keyed by tool name, expired by
+	// rowStatusUntil the same way every other view's row notes are. Keying by
+	// name rather than cursor position is what keeps "Updated yt-dlp." under
+	// yt-dlp when a re-detect reorders the list or moves the cursor.
+	rowStatus      map[string]string
+	rowStatusUntil map[string]int
+
+	tick       int
 	termWidth  int
 	termHeight int
 }
@@ -85,23 +92,27 @@ func (v toolsView) renderBlock(t ToolStatus, selected bool) string {
 	return b.String()
 }
 
-// renderNote renders the result of the last action as a row directly beneath
-// the tool it is about. Hotkeys are not rendered here — every view's key
-// reference lives in the one footer built by renderFooter.
-func (v toolsView) renderNote() string {
-	style := editStyle
-	if v.noteIsErr {
-		style = errorNoteStyle
+// renderNote renders one tool's transient note as a row directly beneath that
+// tool. Hotkeys are not rendered here — every view's key reference lives in
+// the one footer built by renderFooter.
+func (v toolsView) renderNote(tool string) string {
+	raw := v.rowStatus[tool]
+	note := inlineRowNote(raw, v.tick)
+	if note == "" {
+		return ""
 	}
-	return helpRowText(v.note, style, v.termWidth)
+	return helpRowText(note, noteStyleFor(raw), v.termWidth)
 }
 
-// noteLines is the vertical budget the note claims, if any.
+// noteLines is the vertical budget the notes claim across the whole list.
 func (v toolsView) noteLines() int {
-	if strings.TrimSpace(v.note) == "" {
-		return 0
+	n := 0
+	for _, t := range v.tools {
+		if inlineRowNote(v.rowStatus[t.Name], v.tick) != "" {
+			n++
+		}
 	}
-	return 1
+	return n
 }
 
 func (v toolsView) view() string {
@@ -128,13 +139,13 @@ func (v toolsView) view() string {
 		maxLines = v.termHeight - dashboardChromeLines
 	}
 
-	// writeBlocks emits blocks[from:to], slipping the action note in directly
-	// beneath the tool it reports on.
+	// writeBlocks emits blocks[from:to], slipping each tool's transient note
+	// in directly beneath the tool it reports on.
 	writeBlocks := func(from, to int) {
 		for i := from; i < to; i++ {
 			b.WriteString(blocks[i])
-			if i == v.cursor && v.noteLines() > 0 {
-				b.WriteString(v.renderNote())
+			if note := v.renderNote(v.tools[i].Name); note != "" {
+				b.WriteString(note)
 				b.WriteByte('\n')
 			}
 		}

@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -36,21 +35,16 @@ func (m Model) handleToolsKey(key string) (tea.Model, tea.Cmd) {
 		if m.toolsView.cursor > 0 {
 			m.toolsView.cursor--
 		}
-		m.toolsView.note = ""
-		m.toolsView.noteIsErr = false
 		return m, nil
 
 	case "down", "j":
 		if m.toolsView.cursor < len(m.toolsView.tools)-1 {
 			m.toolsView.cursor++
 		}
-		m.toolsView.note = ""
-		m.toolsView.noteIsErr = false
 		return m, nil
 
 	case "r":
-		m.toolsView.note = "Refreshing tool status…"
-		m.toolsView.noteIsErr = false
+		m.statusMsg = "Refreshing tool status…"
 		return m, detectToolsCmd()
 
 	case "u":
@@ -63,8 +57,7 @@ func (m Model) handleToolsKey(key string) (tea.Model, tea.Cmd) {
 	case "U":
 		outdated := m.toolsView.outdated()
 		if len(outdated) == 0 {
-			m.toolsView.note = "Every tool is up to date."
-			m.toolsView.noteIsErr = false
+			m.statusMsg = "Every tool is up to date."
 			return m, nil
 		}
 		return m.startToolUpdates(outdated)
@@ -94,16 +87,14 @@ func (m Model) startToolUpdates(targets []ToolStatus) (tea.Model, tea.Cmd) {
 	}
 
 	if len(queue) == 0 {
-		m.toolsView.note = fmt.Sprintf("No update path for %s (installed outside powerhour).", joinNames(skipped))
-		m.toolsView.noteIsErr = true
+		note := "ERROR - no update path (installed outside powerhour)"
+		for _, name := range skipped {
+			m = m.setToolNote(name, note)
+		}
 		return m, nil
 	}
 
 	m.toolUpdateQueue = queue[1:]
-	m.toolUpdateFailed = nil
-	m.toolUpdateOK = nil
-	m.toolsView.note = ""
-	m.toolsView.noteIsErr = false
 
 	return m, updateToolCmd(queue[0], m.pp.Root)
 }
@@ -111,30 +102,18 @@ func (m Model) startToolUpdates(targets []ToolStatus) (tea.Model, tea.Cmd) {
 // advanceToolUpdates records one finished update and starts the next queued
 // one, falling through to a re-detect when the queue drains.
 func (m Model) advanceToolUpdates(msg toolUpdateDoneMsg) (Model, tea.Cmd) {
+	// The note lands on the tool it is about, not on whatever the cursor
+	// happens to be sitting on.
 	if msg.err != nil {
-		m.toolUpdateFailed = append(m.toolUpdateFailed, msg.tool)
+		m = m.setToolNote(msg.tool, fmt.Sprintf("ERROR - update failed: %v", msg.err))
 	} else {
-		m.toolUpdateOK = append(m.toolUpdateOK, msg.tool)
+		m = m.setToolNote(msg.tool, "Updated.")
 	}
 
 	if len(m.toolUpdateQueue) > 0 {
 		next := m.toolUpdateQueue[0]
 		m.toolUpdateQueue = m.toolUpdateQueue[1:]
 		return m, updateToolCmd(next, m.pp.Root)
-	}
-
-	switch {
-	case len(m.toolUpdateFailed) > 0 && len(m.toolUpdateOK) > 0:
-		m.toolsView.note = fmt.Sprintf("Updated %s; %s failed.",
-			strings.Join(m.toolUpdateOK, ", "), strings.Join(m.toolUpdateFailed, ", "))
-		m.toolsView.noteIsErr = true
-	case len(m.toolUpdateFailed) > 0:
-		m.toolsView.note = fmt.Sprintf("%s failed to update — run it by hand to see why.",
-			strings.Join(m.toolUpdateFailed, ", "))
-		m.toolsView.noteIsErr = true
-	default:
-		m.toolsView.note = "Updated " + strings.Join(m.toolUpdateOK, ", ") + "."
-		m.toolsView.noteIsErr = false
 	}
 
 	return m, detectToolsCmd()
@@ -159,16 +138,5 @@ func detectToolsCmd() tea.Cmd {
 		defer cancel()
 		statuses, warning := DetectToolStatuses(ctx)
 		return toolsRefreshedMsg{statuses: statuses, warning: warning}
-	}
-}
-
-func joinNames(names []string) string {
-	switch len(names) {
-	case 0:
-		return "that tool"
-	case 1:
-		return names[0]
-	default:
-		return fmt.Sprintf("%s and %d more", names[0], len(names)-1)
 	}
 }

@@ -210,32 +210,36 @@ func TestToolsViewCursorScrollsIntoWindow(t *testing.T) {
 	}
 }
 
-func TestToolsViewNoteSitsUnderItsTool(t *testing.T) {
+func TestToolsViewNoteSitsUnderItsOwnTool(t *testing.T) {
+	// The cursor is on Tool 1 but the note belongs to Tool 2: it must render
+	// under Tool 2, not under the cursor.
 	v := toolsView{
-		tools:      makeTestTools(2),
+		tools:      makeTestTools(3),
 		cursor:     0,
-		note:       "Updated Tool 1.",
+		rowStatus:  map[string]string{"Tool 2": "note:Updated."},
 		termWidth:  120,
 		termHeight: 100,
 	}
 
 	lines := strings.Split(stripANSI(v.view()), "\n")
 
-	noteIdx, toolTwoIdx := -1, -1
+	noteIdx, toolTwoIdx, toolThreeIdx := -1, -1, -1
 	for i, line := range lines {
-		if strings.Contains(line, "Updated Tool 1.") {
+		switch {
+		case strings.Contains(line, "Updated."):
 			noteIdx = i
-		}
-		if strings.Contains(line, "Tool 2") {
+		case strings.Contains(line, "Tool 2"):
 			toolTwoIdx = i
+		case strings.Contains(line, "Tool 3"):
+			toolThreeIdx = i
 		}
 	}
 
 	if noteIdx < 0 {
 		t.Fatalf("note missing from output:\n%s", strings.Join(lines, "\n"))
 	}
-	if toolTwoIdx < 0 || noteIdx > toolTwoIdx {
-		t.Errorf("note at line %d should sit above Tool 2 at line %d", noteIdx, toolTwoIdx)
+	if noteIdx < toolTwoIdx || noteIdx > toolThreeIdx {
+		t.Errorf("note at line %d should sit between Tool 2 (%d) and Tool 3 (%d)", noteIdx, toolTwoIdx, toolThreeIdx)
 	}
 }
 
