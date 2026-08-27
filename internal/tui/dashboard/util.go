@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,22 +30,100 @@ var videoFileExtensions = map[string]bool{
 	".ts": true, ".m2ts": true,
 }
 
-// isLocalVideoFile reports whether s is a path to an existing, readable video
-// file on disk (not a URL). Used to let the Add Clip slot accept any local
-// video path — not just ones under the project root — without routing it
-// through the cache-suggestion search.
-func isLocalVideoFile(s string) bool {
-	if s == "" || isURL(s) {
-		return false
+// normalizeLocalPath undoes the decorations a terminal paste puts around a
+// file path: surrounding quotes (Finder "Copy as Pathname" into a quoted
+// context), backslash escapes (dragging a file into a terminal escapes spaces,
+// brackets and parentheses), a file:// scheme, and a leading ~. It is purely
+// textual — the caller still stats the result.
+func normalizeLocalPath(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
 	}
-	if !videoFileExtensions[strings.ToLower(filepath.Ext(s))] {
-		return false
+
+	for len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+			s = strings.TrimSpace(s[1 : len(s)-1])
+			continue
+		}
+		break
 	}
-	info, err := os.Stat(s)
+
+	if rest, ok := strings.CutPrefix(s, "file://"); ok {
+		if decoded, err := url.PathUnescape(rest); err == nil {
+			s = decoded
+		} else {
+			s = rest
+		}
+	}
+
+	if strings.Contains(s, `\`) {
+		var b strings.Builder
+		b.Grow(len(s))
+		for i := 0; i < len(s); i++ {
+			if s[i] == '\\' && i+1 < len(s) {
+				i++
+				b.WriteByte(s[i])
+				continue
+			}
+			b.WriteByte(s[i])
+		}
+		s = b.String()
+	}
+
+	if s == "~" || strings.HasPrefix(s, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			s = filepath.Join(home, strings.TrimPrefix(s, "~"))
+		}
+	}
+
+	return s
+}
+
+// resolveLocalVideoFile normalizes s as a pasted path and reports the cleaned
+// path when it names an existing, readable video file on disk (not a URL).
+// Used to let the Add Clip slot accept any local video path — not just ones
+// under the project root — without routing it through the cache-suggestion
+// search or the CSV import heuristic.
+func resolveLocalVideoFile(s string) (string, bool) {
+	if isURL(strings.TrimSpace(s)) {
+		return "", false
+	}
+	path := normalizeLocalPath(s)
+	if path == "" || isURL(path) {
+		return "", false
+	}
+	if !videoFileExtensions[strings.ToLower(filepath.Ext(path))] {
+		return "", false
+	}
+	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return path, true
+}
+
+// looksLikeMissingPath reports whether s reads as a filesystem path that does
+// not resolve to a video file, so the add slot can say "no such video file"
+// instead of telling the user their path had no cached match.
+func looksLikeMissingPath(s string) bool {
+	if _, ok := resolveLocalVideoFile(s); ok {
 		return false
 	}
-	return true
+	path := normalizeLocalPath(s)
+	if path == "" || isURL(path) {
+		return false
+	}
+	return strings.HasPrefix(path, "/") || strings.HasPrefix(path, "./") ||
+		strings.HasPrefix(path, "../") || strings.HasPrefix(path, "~") ||
+		videoFileExtensions[strings.ToLower(filepath.Ext(path))]
+}
+
+// isLocalVideoFile reports whether s resolves to an existing local video file.
+func isLocalVideoFile(s string) bool {
+	_, ok := resolveLocalVideoFile(s)
+	return ok
 }
 
 // probeLocalVideoFile runs ffprobe against path and reports whether it

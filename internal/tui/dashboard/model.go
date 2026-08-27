@@ -1097,22 +1097,30 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyEnter:
 		trimmed := strings.TrimSpace(m.addBuffer)
-		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) && !isLocalVideoFile(trimmed) {
+		// A local video path wins over every other interpretation: it is neither
+		// a cache-suggestion query nor CSV, even when the filename contains a
+		// comma or the paste arrived quoted or backslash-escaped.
+		if path, ok := resolveLocalVideoFile(trimmed); ok {
+			if err := probeLocalVideoFile(path); err != nil {
+				m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("%s: %v", path, err))
+				m.resetAddClipInput(cvIdx, true)
+				return m, nil
+			}
+			return m.addSingleCollectionRow(cvIdx, path)
+		}
+		if trimmed != "" && !isURL(trimmed) && !looksLikeBatchImport(trimmed) {
 			lookup := m.cacheLookupFor(cvIdx)
 			if suggestion, matched := m.selectedAddClipSuggestion(cvIdx, trimmed, lookup); matched {
 				return m.addSuggestedCollectionRow(cvIdx, suggestion)
 			}
-			m = m.setCollectionCursorNote(cvIdx,
-				fmt.Sprintf("no cached match for %q — paste a URL or pick a suggestion", trimmed))
+			if looksLikeMissingPath(trimmed) {
+				m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("no such video file: %s", normalizeLocalPath(trimmed)))
+			} else {
+				m = m.setCollectionCursorNote(cvIdx,
+					fmt.Sprintf("no cached match for %q — paste a URL, a local video path, or pick a suggestion", trimmed))
+			}
 			m.resetAddClipInput(cvIdx, true)
 			return m, nil
-		}
-		if isLocalVideoFile(trimmed) {
-			if err := probeLocalVideoFile(trimmed); err != nil {
-				m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("%s: %v", trimmed, err))
-				m.resetAddClipInput(cvIdx, true)
-				return m, nil
-			}
 		}
 		return m.dispatchAddBuffer(cvIdx, m.addBuffer)
 
@@ -1422,6 +1430,11 @@ func (m Model) cancelAddCache() Model {
 // the matching background registration job. An unrecognized value stays in
 // the add slot with an inline error so the user can correct it.
 func (m Model) dispatchAddCacheBuffer(value string) (tea.Model, tea.Cmd) {
+	if path, ok := resolveLocalVideoFile(value); ok {
+		m.mode = modeNormal
+		m.resetCacheAddInput(false)
+		return m.startCacheAddJob("", path), nil
+	}
 	switch {
 	case isURL(value):
 		m.mode = modeNormal
@@ -1431,10 +1444,6 @@ func (m Model) dispatchAddCacheBuffer(value string) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.resetCacheAddInput(false)
 		return m.startCacheAddJob("https://www.youtube.com/watch?v="+value, ""), nil
-	case isLocalVideoFile(value):
-		m.mode = modeNormal
-		m.resetCacheAddInput(false)
-		return m.startCacheAddJob("", value), nil
 	default:
 		v := m.cacheView
 		v.addHint = fmt.Sprintf("not a URL, YouTube ID, or existing local file: %s", value)
@@ -1556,6 +1565,12 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 
 	collName := m.collectionNames[cvIdx]
 	coll := m.collections[collName]
+
+	// A local video path is never a batch import, even when the filename
+	// contains a comma.
+	if path, ok := resolveLocalVideoFile(value); ok {
+		return m.addSingleCollectionRow(cvIdx, path)
+	}
 
 	// Multi-line or CSV/TSV/YAML batch import.
 	if looksLikeBatchImport(value) {
@@ -3163,6 +3178,10 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 	collName := m.collectionNames[cvIdx]
 	coll := m.collections[collName]
 
+	if path, ok := resolveLocalVideoFile(value); ok {
+		return m.addSingleCollectionRow(cvIdx, path)
+	}
+
 	if looksLikeBatchImport(value) {
 		rows, format, err := csvplan.ImportCollectionText(value, project.CollectionOptionsForConfig(coll))
 		if err != nil {
@@ -3201,7 +3220,11 @@ func (m Model) addSingleCollectionRow(cvIdx int, value string) (tea.Model, tea.C
 		return m, nil
 	}
 
-	value = cleanYouTubeURL(strings.TrimSpace(value))
+	if path, ok := resolveLocalVideoFile(value); ok {
+		value = path
+	} else {
+		value = cleanYouTubeURL(strings.TrimSpace(value))
+	}
 	if value == "" {
 		return m, nil
 	}

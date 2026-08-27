@@ -1,0 +1,1314 @@
+- generic [active] [ref=f1e1]:
+  - button "Toggle light or dark theme" [ref=f1e2] [cursor=pointer]: ◑
+  - main [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - heading "Improvement survey — power-hour-generator" [level=1] [ref=f1e5]
+      - paragraph [ref=f1e6]:
+        - text: 2026-08-15 · 10 aspects · 47 findings returned · 24 survived scoring (≥75) · 12 dropped · 4 sent to
+        - code [ref=f1e7]: /review
+      - generic [ref=f1e8]:
+        - generic [ref=f1e9]:
+          - generic [ref=f1e10]: Strong
+          - text: — citation confirmed, fix shaped, leverage named
+        - generic [ref=f1e11]:
+          - generic [ref=f1e12]: Worth exploring
+          - text: — real, some judgement left
+        - generic [ref=f1e13]: Score = grounding confidence, not size. Effort was never a scoring or ranking input.
+    - generic [ref=f1e14]:
+      - heading "Coverage" [level=2] [ref=f1e15]
+      - table [ref=f1e16]:
+        - rowgroup [ref=f1e17]:
+          - row [ref=f1e18]:
+            - columnheader "Aspect" [ref=f1e19]
+            - columnheader "Result" [ref=f1e20]
+            - columnheader "Survived" [ref=f1e21]
+        - rowgroup [ref=f1e22]:
+          - row [ref=f1e23]:
+            - cell [ref=f1e24]:
+              - code [ref=f1e25]: architecture
+            - cell "3 findings" [ref=f1e26]
+            - cell "1" [ref=f1e27]
+          - row [ref=f1e28]:
+            - cell [ref=f1e29]:
+              - code [ref=f1e30]: interface-safety
+            - cell "2 findings" [ref=f1e31]
+            - cell "2" [ref=f1e32]
+          - row [ref=f1e33]:
+            - cell [ref=f1e34]:
+              - code [ref=f1e35]: security
+            - cell "4 findings" [ref=f1e36]
+            - cell "4" [ref=f1e37]
+          - row [ref=f1e38]:
+            - cell [ref=f1e39]:
+              - code [ref=f1e40]: claude-md
+            - cell "5 findings" [ref=f1e41]
+            - cell "3 (2 merged into layout)" [ref=f1e42]
+          - row [ref=f1e43]:
+            - cell [ref=f1e44]:
+              - code [ref=f1e45]: tests
+            - cell "5 findings" [ref=f1e46]
+            - cell "5" [ref=f1e47]
+          - row [ref=f1e48]:
+            - cell [ref=f1e49]:
+              - code [ref=f1e50]: gui
+            - cell "4 findings" [ref=f1e51]
+            - cell "1" [ref=f1e52]
+          - row [ref=f1e53]:
+            - cell [ref=f1e54]:
+              - code [ref=f1e55]: product
+            - cell "4 findings" [ref=f1e56]
+            - cell "2 (1 merged into docs)" [ref=f1e57]
+          - row [ref=f1e58]:
+            - cell [ref=f1e59]:
+              - code [ref=f1e60]: performance
+            - cell "2 findings" [ref=f1e61]
+            - cell "2" [ref=f1e62]
+          - row [ref=f1e63]:
+            - cell [ref=f1e64]:
+              - code [ref=f1e65]: docs
+            - cell "5 findings" [ref=f1e66]
+            - cell "4" [ref=f1e67]
+          - row [ref=f1e68]:
+            - cell [ref=f1e69]:
+              - code [ref=f1e70]: layout
+            - cell "5 findings" [ref=f1e71]
+            - cell "3" [ref=f1e72]
+          - row [ref=f1e73]:
+            - cell [ref=f1e74]:
+              - code [ref=f1e75]: game
+            - cell [ref=f1e76]:
+              - text: not applicable — no
+              - code [ref=f1e77]: .claude/domain
+              - text: marker; classified as tool/CLI
+      - generic [ref=f1e78]:
+        - paragraph [ref=f1e79]:
+          - generic [ref=f1e80]:
+            - text: 4 defects surfaced during the survey — run
+            - code [ref=f1e81]: /review
+            - text: to develop them.
+          - text: They are not cards here; improve does not report defects.
+        - list [ref=f1e82]:
+          - listitem [ref=f1e83]:
+            - code [ref=f1e84]: internal/cli/status.go:213
+            - text: vs
+            - code [ref=f1e85]: internal/tui/dashboard/collection_view.go:157
+            - text: —
+            - code [ref=f1e86]: computeRowStates
+            - text: folds sequence-entry fade overrides into the segment hash via
+            - code [ref=f1e87]: effectiveFadesForCollection
+            - text: ;
+            - code [ref=f1e88]: buildRowStatuses
+            - text: does not.
+            - code [ref=f1e89]: powerhour status
+            - text: and the TUI disagree on whether a row is stale.
+          - listitem [ref=f1e90]:
+            - code [ref=f1e91]: internal/tui/dashboard/footer.go:25
+            - text: — cache footer prints
+            - code [ref=f1e92]: "\"f filter x del d doctor D all u refresh\""
+            - text: . There is no
+            - code [ref=f1e93]: case "d"
+            - text: in the cache switch (
+            - code [ref=f1e94]: model.go:1761-1801
+            - text: ),
+            - code [ref=f1e95]: D
+            - text: is not "all", and the real edit key
+            - code [ref=f1e96]: e
+            - text: (
+            - code [ref=f1e97]: model.go:1763
+            - text: ) is unlisted.
+          - listitem [ref=f1e98]:
+            - code [ref=f1e99]: .claude/CLAUDE.md
+            - text: "\"Project resolver\" — says"
+            - code [ref=f1e100]: SequenceEntry
+            - text: takes
+            - code [ref=f1e101]: count
+            - text: .
+            - code [ref=f1e102]: internal/config/config.go:50
+            - text: has
+            - code [ref=f1e103]: Slice string
+            - text: ;
+            - code [ref=f1e104]: README.md:176
+            - text: says "Collection entries now use
+            - code [ref=f1e105]: slice
+            - text: ranges instead of
+            - code [ref=f1e106]: count
+            - text: ."
+          - listitem [ref=f1e107]:
+            - code [ref=f1e108]: README.md:3,7
+            - text: +
+            - code [ref=f1e109]: ROADMAP.md
+            - text: — README still says "initial release focuses on generating discrete per-clip files that you can assemble in an editor of your choice"; ROADMAP leaves Phase 3 (Concatenation) and Phase 7 (Lifecycle) unchecked while
+            - code [ref=f1e110]: concat.go
+            - text: ","
+            - code [ref=f1e111]: clean.go
+            - text: ","
+            - code [ref=f1e112]: doctor.go
+            - text: ","
+            - code [ref=f1e113]: export.go
+            - text: all ship.
+      - paragraph [ref=f1e114]:
+        - text: "Not verified: the VitePress site build."
+        - code [ref=f1e115]: docs/node_modules
+        - text: is absent and
+        - code [ref=f1e116]: npm install
+        - text: was outside the read-only contract — Unknown.
+    - generic [ref=f1e117]:
+      - heading "Findings" [level=2] [ref=f1e118]
+      - heading "Performance" [level=3] [ref=f1e119]
+      - article [ref=f1e120]:
+        - heading "Persist a checksum for system-located binaries so VLC skips its version shell-out" [level=4] [ref=f1e121]
+        - paragraph [ref=f1e122]:
+          - text: Strong · 92 ·
+          - code [ref=f1e123]: performance
+        - paragraph [ref=f1e124]:
+          - code [ref=f1e125]: internal/tools/detect.go:59
+          - text: ·
+          - code [ref=f1e126]: detect.go:74
+          - text: ·
+          - code [ref=f1e127]: detect.go:145-150
+          - text: ·
+          - code [ref=f1e128]: detect.go:198-213
+          - text: ·
+          - code [ref=f1e129]: internal/tools/defs.go:28
+        - img "Detect fast path taken by cache-sourced tools, missed by system-located tools" [ref=f1e131]:
+          - generic [ref=f1e132]: DETECT() PER TOOL
+          - generic [ref=f1e134]: cache-source branch
+          - generic [ref=f1e135]: detect.go:145 sets Checksum
+          - generic [ref=f1e137]: fast path hits
+          - generic [ref=f1e138]: Version != "" && Checksum != ""
+          - generic [ref=f1e139]: 0 ms
+          - generic [ref=f1e141]: system-fallback branch
+          - generic [ref=f1e142]: detect.go:198 — no Checksum
+          - generic [ref=f1e144]: readVersion shells out
+          - generic [ref=f1e145]: VLC --version
+          - generic [ref=f1e146]: 1.97 s
+        - paragraph [ref=f1e147]:
+          - text: Problem.
+          - code [ref=f1e148]: Detect()
+          - text: loops every known tool including
+          - code [ref=f1e149]: vlc
+          - text: ; the manifest entry for a system-located binary never gets a
+          - code [ref=f1e150]: Checksum
+          - text: ", so the trust fast path at"
+          - code [ref=f1e151]: detect.go:74
+          - text: can never fire and
+          - code [ref=f1e152]: VLC --version
+          - text: runs on every call.
+        - paragraph [ref=f1e153]:
+          - text: Solution. In
+          - code [ref=f1e154]: detectOne
+          - text: ", compute and persist"
+          - code [ref=f1e155]: entry.Checksum
+          - text: in the system-fallback branch (
+          - code [ref=f1e156]: detect.go:198-213
+          - text: ) the same way the cache-source branch already does at
+          - code [ref=f1e157]: detect.go:145-150
+          - text: .
+        - list [ref=f1e158]:
+          - listitem [ref=f1e159]:
+            - text: "Measured:"
+            - code [ref=f1e160]: VLC --version
+            - text: = 1.97 s
+          - listitem [ref=f1e161]:
+            - code [ref=f1e162]: powerhour check
+            - text: /
+            - code [ref=f1e163]: doctor
+            - text: /
+            - code [ref=f1e164]: tools list
+            - text: = 2.3–2.4 s
+          - listitem [ref=f1e165]: This one subprocess is ~85% of that
+          - listitem [ref=f1e166]:
+            - code [ref=f1e167]: status
+            - text: (never calls
+            - code [ref=f1e168]: Detect
+            - text: ) = 0.37 s
+          - listitem [ref=f1e169]: Reuses the skip yt-dlp already gets
+      - article [ref=f1e170]:
+        - heading "Give a failed update-check the same TTL as a successful one" [level=4] [ref=f1e171]
+        - paragraph [ref=f1e172]:
+          - text: Strong · 91 ·
+          - code [ref=f1e173]: performance
+        - paragraph [ref=f1e174]:
+          - code [ref=f1e175]: internal/tools/update_check.go:104
+          - text: ·
+          - code [ref=f1e176]: update_check.go:115
+          - text: ·
+          - code [ref=f1e177]: update_check.go:211
+          - text: ·
+          - code [ref=f1e178]: internal/cli/notices.go:33-39
+          - text: ·
+          - code [ref=f1e179]: internal/cli/root.go
+          - text: PersistentPostRun
+        - code [ref=f1e181]: // update_check.go:115 — a failed entry is never fresh, so it retries every run fresh := ok && !entry.CheckFailed && time.Since(entry.CheckedAt) < updateCheckTTL // ^^^^^^^^^^^^^^^^^^^
+        - paragraph [ref=f1e182]:
+          - text: Problem.
+          - code [ref=f1e183]: ~/.powerhour/update_check.json
+          - text: currently holds
+          - code [ref=f1e184]: "\"check_failed\": true"
+          - text: for ffmpeg. Because
+          - code [ref=f1e185]: "!entry.CheckFailed"
+          - text: gates freshness,
+          - code [ref=f1e186]: checkHomebrewLatest
+          - text: re-shells
+          - code [ref=f1e187]: brew info --json=v2 ffmpeg
+          - text: on the next invocation, and every one after.
+          - code [ref=f1e188]: printUpdateNotices
+          - text: runs from
+          - code [ref=f1e189]: PersistentPostRun
+          - text: ", so this fires for"
+          - code [ref=f1e190]: status
+          - text: too.
+        - paragraph [ref=f1e191]:
+          - text: Solution. In
+          - code [ref=f1e192]: CheckForUpdates
+          - text: ", drop"
+          - code [ref=f1e193]: "!entry.CheckFailed"
+          - text: from the
+          - code [ref=f1e194]: fresh
+          - text: condition, or give failed entries a shorter nonzero backoff (1 h) so a persistently-failing
+          - code [ref=f1e195]: brew info
+          - text: is retried on a schedule.
+        - list [ref=f1e196]:
+          - listitem [ref=f1e197]:
+            - text: "Measured:"
+            - code [ref=f1e198]: brew info
+            - text: = 0.40 s
+          - listitem [ref=f1e199]:
+            - text: 0.40 s on
+            - emphasis [ref=f1e200]: every
+            - text: CLI invocation, permanently
+          - listitem [ref=f1e201]: Failure state is self-sustaining today
+      - heading "Security — posture" [level=3] [ref=f1e202]
+      - article [ref=f1e203]:
+        - heading "Redact proxy userinfo before writing the fetch log banner" [level=4] [ref=f1e204]
+        - paragraph [ref=f1e205]:
+          - text: Strong · 92 ·
+          - code [ref=f1e206]: security
+        - paragraph [ref=f1e207]:
+          - code [ref=f1e208]: internal/cache/fetch.go:138
+          - text: ·
+          - code [ref=f1e209]: fetch.go:34
+          - text: ·
+          - code [ref=f1e210]: fetch.go:174
+        - code [ref=f1e212]: "// fetch.go:138 — writeProxyBanner, into logs/fetch_%03d.log opened 0o644 fmt.Fprintf(w, \"[powerhour] yt-dlp proxy: %s\\n\", proxy)"
+        - paragraph [ref=f1e213]:
+          - text: Problem. A proxy URL commonly carries inline auth (
+          - code [ref=f1e214]: http://user:pass@host:port
+          - text: ). The raw string is written in cleartext into a world-readable log retained under the project's
+          - code [ref=f1e215]: logs/
+          - text: — exactly the files a user pastes into a bug report.
+        - paragraph [ref=f1e216]:
+          - text: Solution. In
+          - code [ref=f1e217]: writeProxyBanner
+          - text: ", parse with"
+          - code [ref=f1e218]: net/url
+          - text: (already imported at
+          - code [ref=f1e219]: fetch.go:174
+          - text: for
+          - code [ref=f1e220]: fetchProxyLocation
+          - text: ) and print
+          - code [ref=f1e221]: proxyURL.Redacted()
+          - text: instead of
+          - code [ref=f1e222]: proxy
+          - text: .
+        - list [ref=f1e223]:
+          - listitem [ref=f1e224]: Secret stops leaving config
+          - listitem [ref=f1e225]:
+            - text: One
+            - code [ref=f1e226]: Fprintf
+            - text: ", one call site"
+          - listitem [ref=f1e227]: Stdlib already imported in the file
+      - article [ref=f1e228]:
+        - heading "Pin publisher checksums for downloaded tool binaries" [level=4] [ref=f1e229]
+        - paragraph [ref=f1e230]:
+          - text: Strong · 90 ·
+          - code [ref=f1e231]: security
+        - paragraph [ref=f1e232]:
+          - code [ref=f1e233]: internal/tools/releases.go:26-68
+          - text: ·
+          - code [ref=f1e234]: internal/tools/install.go:405-462
+          - text: ·
+          - code [ref=f1e235]: internal/tools/release_dynamic.go:127
+          - text: ·
+          - code [ref=f1e236]: internal/tools/detect.go:74-116
+        - img "Download path with no upstream integrity gate" [ref=f1e238]:
+          - generic [ref=f1e240]: GitHub release
+          - generic [ref=f1e241]: yt-dlp / ffmpeg
+          - generic [ref=f1e243]: ensureDownload
+          - generic [ref=f1e244]: checksum == "" → skip
+          - generic [ref=f1e246]: executed binary
+          - generic [ref=f1e247]: SHA256 computed after, locally
+          - generic [ref=f1e248]: no gate between publisher and execution
+        - paragraph [ref=f1e249]:
+          - text: Problem. Every
+          - code [ref=f1e250]: releaseSpec.Checksum
+          - text: in
+          - code [ref=f1e251]: releases.go
+          - text: is hardcoded
+          - code [ref=f1e252]: "\"\""
+          - text: ", with the comment \"populate them as part of the release process when the authoritative SHA256 values are available.\""
+          - code [ref=f1e253]: ensureDownload
+          - text: skips verification entirely when the checksum is empty. The SHA256 in
+          - code [ref=f1e254]: detect.go
+          - text: is computed
+          - emphasis [ref=f1e255]: after
+          - text: download, for local change-detection only — never against a published value.
+        - paragraph [ref=f1e256]:
+          - text: Solution. Populate
+          - code [ref=f1e257]: releaseSpec.Checksum
+          - text: from yt-dlp's published
+          - code [ref=f1e258]: SHA2-256SUMS
+          - text: asset at release-pinning time, and thread the same field through
+          - code [ref=f1e259]: release_dynamic.go
+          - text: "'s resolution path so"
+          - code [ref=f1e260]: ensureDownload
+          - text: always has a value to check.
+        - list [ref=f1e261]:
+          - listitem [ref=f1e262]: Closes supply-chain gap on auto-executed binaries
+          - listitem [ref=f1e263]: Verification code already exists — only the value is missing
+      - article [ref=f1e264]:
+        - heading [level=4] [ref=f1e265]:
+          - text: Write
+          - code [ref=f1e266]: ~/.powerhour/config.yaml
+          - text: at 0600
+        - paragraph [ref=f1e267]:
+          - text: Worth exploring · 80 ·
+          - code [ref=f1e268]: security
+        - paragraph [ref=f1e269]:
+          - code [ref=f1e270]: internal/tools/encoding.go:287-299
+          - text: ·
+          - code [ref=f1e271]: encoding.go:26
+          - text: ·
+          - code [ref=f1e272]: internal/cache/index.go:111
+          - text: ·
+          - code [ref=f1e273]: internal/cache/fetch.go:276
+        - paragraph [ref=f1e274]:
+          - text: Problem.
+          - code [ref=f1e275]: SaveGlobalConfig
+          - text: writes
+          - code [ref=f1e276]: "0o644"
+          - text: — world-readable — and the file holds
+          - code [ref=f1e277]: downloads.proxy
+          - text: ", which commonly embeds"
+          - code [ref=f1e278]: user:pass@
+          - text: . The same
+          - code [ref=f1e279]: "0o644"
+          - text: is used for the non-sensitive cache index, so one mode is doing two jobs.
+        - paragraph [ref=f1e280]:
+          - text: Solution. Write the global config with
+          - code [ref=f1e281]: "0o600"
+          - text: and its directory
+          - code [ref=f1e282]: "0o700"
+          - text: in
+          - code [ref=f1e283]: SaveGlobalConfig
+          - text: ", leaving"
+          - code [ref=f1e284]: "0o644"
+          - text: for the genuinely non-sensitive cache files.
+        - list [ref=f1e285]:
+          - listitem [ref=f1e286]: Credential unreadable by other local users
+          - listitem [ref=f1e287]: Separates credential-bearing from cache files
+          - listitem [ref=f1e288]: Pairs with the log-redaction card
+      - article [ref=f1e289]:
+        - heading "Add a dependency vulnerability gate" [level=4] [ref=f1e290]
+        - paragraph [ref=f1e291]:
+          - text: Worth exploring · 75 ·
+          - code [ref=f1e292]: security
+        - paragraph [ref=f1e293]:
+          - code [ref=f1e294]: .github/
+          - text: (only
+          - code [ref=f1e295]: ISSUE_TEMPLATE/
+          - text: ) ·
+          - code [ref=f1e296]: go.mod:3
+          - text: ·
+          - code [ref=f1e297]: go.sum
+        - paragraph [ref=f1e298]:
+          - text: Problem. No workflow files, no
+          - code [ref=f1e299]: dependabot.yml
+          - text: ", no"
+          - code [ref=f1e300]: renovate.json
+          - text: .
+          - code [ref=f1e301]: go.sum
+          - text: pins 26 dependencies, which buys reproducibility but not currency — nothing would ever surface a CVE in
+          - code [ref=f1e302]: golang.org/x/*
+          - text: or
+          - code [ref=f1e303]: gopkg.in/yaml.v3
+          - text: .
+        - paragraph [ref=f1e304]:
+          - text: Solution. Add
+          - code [ref=f1e305]: .github/workflows/govulncheck.yml
+          - text: running
+          - code [ref=f1e306]: govulncheck ./...
+          - text: on push, or wire it as an
+          - code [ref=f1e307]: admin.toml
+          - text: task alongside
+          - code [ref=f1e308]: deploy
+          - text: .
+        - list [ref=f1e309]:
+          - listitem [ref=f1e310]: Transitive CVEs become visible
+          - listitem [ref=f1e311]:
+            - text: Pairs with the
+            - code [ref=f1e312]: admin test
+            - text: task card
+      - heading "Docs & product surface" [level=3] [ref=f1e313]
+      - article [ref=f1e314]:
+        - heading [level=4] [ref=f1e315]:
+          - text: Document
+          - code [ref=f1e316]: tui
+          - text: ","
+          - code [ref=f1e317]: library
+          - text: ","
+          - code [ref=f1e318]: clean
+          - text: ","
+          - code [ref=f1e319]: doctor
+          - text: ","
+          - code [ref=f1e320]: export
+          - text: ","
+          - code [ref=f1e321]: cache remove|doctor
+          - text: in the CLI reference
+        - paragraph [ref=f1e322]:
+          - text: Strong · 92 ·
+          - code [ref=f1e323]: docs
+          - text: +
+          - code [ref=f1e324]: product
+          - text: — two lenses landed here independently
+        - paragraph [ref=f1e325]:
+          - code [ref=f1e326]: docs/cli.md
+          - text: ·
+          - code [ref=f1e327]: docs/index.md
+          - text: ·
+          - code [ref=f1e328]: docs/guide/getting-started.md
+          - text: ·
+          - code [ref=f1e329]: internal/cli/tui_cmd.go
+          - text: ·
+          - code [ref=f1e330]: clean.go
+          - text: ·
+          - code [ref=f1e331]: doctor.go
+          - text: ·
+          - code [ref=f1e332]: export.go
+          - text: ·
+          - code [ref=f1e333]: library*.go
+          - text: ·
+          - code [ref=f1e334]: cache_remove.go
+          - text: ·
+          - code [ref=f1e335]: cache_doctor.go
+        - paragraph [ref=f1e336]:
+          - text: Problem.
+          - code [ref=f1e337]: docs/cli.md
+          - text: "'s headings stop at"
+          - code [ref=f1e338]: cache add
+          - text: .
+          - code [ref=f1e339]: powerhour tui
+          - text: — the full-screen dashboard with inline edit, VLC preview, cache doctor overlay, and render/concat triggers — has zero entry anywhere in the docs site, and
+          - code [ref=f1e340]: docs/index.md
+          - text: never mentions it. The onboarding path therefore steers users back to hand-editing
+          - code [ref=f1e341]: songs.yaml
+          - text: .
+        - paragraph [ref=f1e342]:
+          - text: Solution. Add
+          - code [ref=f1e343]: "### powerhour tui"
+          - text: plus sections for
+          - code [ref=f1e344]: library
+          - text: ","
+          - code [ref=f1e345]: clean
+          - text: ","
+          - code [ref=f1e346]: doctor
+          - text: ","
+          - code [ref=f1e347]: export
+          - text: and
+          - code [ref=f1e348]: "## Cache Management"
+          - text: entries for
+          - code [ref=f1e349]: cache remove
+          - text: /
+          - code [ref=f1e350]: cache doctor
+          - text: ", mirroring the existing"
+          - code [ref=f1e351]: "### powerhour <cmd>"
+          - text: + flag-table format; add
+          - code [ref=f1e352]: tui
+          - text: as a
+          - code [ref=f1e353]: "theme: alt"
+          - text: hero action on
+          - code [ref=f1e354]: docs/index.md
+          - text: ; insert a step between getting-started steps 3 and 4 pointing at it.
+        - list [ref=f1e355]:
+          - listitem [ref=f1e356]: The primary interface becomes discoverable
+          - listitem [ref=f1e357]: 7 shipped commands stop being invisible
+          - listitem [ref=f1e358]: One file carries most of the change
+      - article [ref=f1e359]:
+        - heading [level=4] [ref=f1e360]:
+          - text: Add
+          - code [ref=f1e361]: docs/architecture/tui-dashboard.md
+        - paragraph [ref=f1e362]:
+          - text: Strong · 90 ·
+          - code [ref=f1e363]: docs
+        - paragraph [ref=f1e364]:
+          - code [ref=f1e365]: docs/architecture/tui.md
+          - text: (71 lines) ·
+          - code [ref=f1e366]: docs/.vitepress/config.ts
+          - text: ·
+          - code [ref=f1e367]: internal/tui/dashboard/
+          - text: (18 files)
+        - paragraph [ref=f1e368]:
+          - text: Problem.
+          - code [ref=f1e369]: docs/architecture/tui.md
+          - text: covers only
+          - code [ref=f1e370]: internal/tui/
+          - text: —
+          - code [ref=f1e371]: StatusWriter
+          - text: ","
+          - code [ref=f1e372]: ProgressModel
+          - text: ","
+          - code [ref=f1e373]: RunWithWork
+          - text: . Grepping
+          - code [ref=f1e374]: dashboard
+          - text: across
+          - code [ref=f1e375]: docs/architecture/*.md
+          - text: and
+          - code [ref=f1e376]: docs/cli.md
+          - text: returns nothing. The 18-file subpackage carrying the five most recent commits has no page on the site.
+        - paragraph [ref=f1e377]:
+          - text: Solution. Add
+          - code [ref=f1e378]: docs/architecture/tui-dashboard.md
+          - text: with a new
+          - code [ref=f1e379]: /architecture/
+          - text: sidebar entry, covering
+          - code [ref=f1e380]: Model
+          - text: ", the four views, the interaction modes, and mutation write-back."
+        - list [ref=f1e381]:
+          - listitem [ref=f1e382]: Newest subsystem stops being oral tradition
+          - listitem [ref=f1e383]:
+            - text: Splits the
+            - code [ref=f1e384]: .claude/CLAUDE.md
+            - text: wall of prose
+      - article [ref=f1e385]:
+        - heading [level=4] [ref=f1e386]:
+          - text: Delete the
+          - code [ref=f1e387]: powerhour migrate
+          - text: section and fix the
+          - code [ref=f1e388]: cache add
+          - text: signature in cli.md
+        - paragraph [ref=f1e389]:
+          - text: Strong · 88 ·
+          - code [ref=f1e390]: docs
+        - paragraph [ref=f1e391]:
+          - code [ref=f1e392]: docs/cli.md:223-236
+          - text: ·
+          - code [ref=f1e393]: docs/cli.md:199-206
+          - text: ·
+          - code [ref=f1e394]: internal/cli/cache_migrate.go
+          - text: ·
+          - code [ref=f1e395]: internal/cli/cache_add.go:45
+        - paragraph [ref=f1e396]:
+          - text: Problem.
+          - code [ref=f1e397]: docs/cli.md:223-236
+          - text: documents
+          - code [ref=f1e398]: powerhour migrate --project <dir>
+          - text: moving files into a global cache. No
+          - code [ref=f1e399]: "Use: \"migrate\""
+          - text: exists anywhere in
+          - code [ref=f1e400]: internal/cli/
+          - text: —
+          - code [ref=f1e401]: cache_migrate.go
+          - text: holds only helpers. The global cache is unbuilt Roadmap Phase 6. Separately, cli.md shows
+          - code [ref=f1e402]: cache add <url> <file-path>
+          - text: as two positional args;
+          - code [ref=f1e403]: cache_add.go:45
+          - text: is
+          - code [ref=f1e404]: "Use: \"add <file-or-id>\""
+          - text: ", one arg, URL via"
+          - code [ref=f1e405]: "--url"
+          - text: .
+        - paragraph [ref=f1e406]:
+          - text: Solution. Delete lines 223-236; rewrite the
+          - code [ref=f1e407]: cache add
+          - text: usage block to the one-arg form with
+          - code [ref=f1e408]: "--url"
+          - text: .
+        - list [ref=f1e409]:
+          - listitem [ref=f1e410]: Documented command that fails outright goes away
+          - listitem [ref=f1e411]:
+            - text: Reference matches
+            - code [ref=f1e412]: cobra.Command
+            - text: definitions
+      - article [ref=f1e413]:
+        - heading [level=4] [ref=f1e414]:
+          - text: Reach
+          - code [ref=f1e415]: docs/specs/concat-time-index.md
+          - text: from the site
+        - paragraph [ref=f1e416]:
+          - text: Worth exploring · 88 ·
+          - code [ref=f1e417]: docs
+        - paragraph [ref=f1e418]:
+          - code [ref=f1e419]: docs/.vitepress/config.ts
+          - text: ·
+          - code [ref=f1e420]: docs/specs/concat-time-index.md
+        - paragraph [ref=f1e421]:
+          - text: Problem. The sidebar has
+          - code [ref=f1e422]: /guide/
+          - text: ","
+          - code [ref=f1e423]: /architecture/
+          - text: ","
+          - code [ref=f1e424]: /development/
+          - text: keys and no
+          - code [ref=f1e425]: /specs/
+          - text: key. No page links to the spec. It builds into the site and nothing reaches it.
+        - paragraph [ref=f1e426]:
+          - text: Solution. Add a
+          - code [ref=f1e427]: /specs/
+          - text: sidebar section in
+          - code [ref=f1e428]: config.ts
+          - text: pointing at
+          - code [ref=f1e429]: concat-time-index.md
+          - text: ", or link it from"
+          - code [ref=f1e430]: docs/architecture/render.md
+          - text: where concat is already discussed.
+        - list [ref=f1e431]:
+          - listitem [ref=f1e432]: Written spec becomes reachable
+      - article [ref=f1e433]:
+        - heading [level=4] [ref=f1e434]:
+          - text: Surface the one-command
+          - code [ref=f1e435]: concat
+          - text: cascade in getting-started
+        - paragraph [ref=f1e436]:
+          - text: Worth exploring · 80 ·
+          - code [ref=f1e437]: product
+        - paragraph [ref=f1e438]:
+          - code [ref=f1e439]: docs/guide/getting-started.md
+          - text: steps 4-7 ·
+          - code [ref=f1e440]: .claude/CLAUDE.md
+          - text: "\"Concat auto-render cascade\""
+        - paragraph [ref=f1e441]:
+          - text: Problem. Getting-started walks
+          - code [ref=f1e442]: fetch
+          - text: →
+          - code [ref=f1e443]: render
+          - text: →
+          - code [ref=f1e444]: tools encoding
+          - text: →
+          - code [ref=f1e445]: concat
+          - text: as four sequential manual commands. The cascade already implemented means
+          - code [ref=f1e446]: concat
+          - text: alone auto-renders, which auto-fetches — a fresh project with only config and plans produces the final video in one command. Nothing in the onboarding path says so.
+        - paragraph [ref=f1e447]:
+          - text: "Solution. Add a callout after step 3: \"or skip straight to"
+          - code [ref=f1e448]: powerhour concat --project my-power-hour
+          - text: — it fetches and renders anything missing first", keeping the manual steps below for per-stage control.
+        - list [ref=f1e449]:
+          - listitem [ref=f1e450]: Shipped fast path becomes findable
+          - listitem [ref=f1e451]: "Job story shortens: 4 commands → 1"
+      - heading "Tests" [level=3] [ref=f1e452]
+      - article [ref=f1e453]:
+        - heading [level=4] [ref=f1e454]:
+          - text: Pin
+          - code [ref=f1e455]: ImportFromCSV
+          - text: "'s heuristics with a table-driven test"
+        - paragraph [ref=f1e456]:
+          - text: Strong · 88 ·
+          - code [ref=f1e457]: tests
+        - paragraph [ref=f1e458]:
+          - code [ref=f1e459]: pkg/csvplan/permissive_import.go:34
+          - text: ·
+          - code [ref=f1e460]: :270
+          - text: heuristicRoles ·
+          - code [ref=f1e461]: :415
+          - text: majorityDelim
+        - paragraph [ref=f1e462]:
+          - text: Problem. Grep across every
+          - code [ref=f1e463]: "*_test.go"
+          - text: returns no match for
+          - code [ref=f1e464]: ImportFromCSV
+          - text: ","
+          - code [ref=f1e465]: heuristicRoles
+          - text: ", or"
+          - code [ref=f1e466]: majorityDelim
+          - text: . These decide column roles and delimiter for pasted or imported CSV/TSV — the correctness of every batch "Add Clip" import. Zero behaviours pinned. (
+          - code [ref=f1e467]: import_text_test.go
+          - text: exercises a different file.)
+        - paragraph [ref=f1e468]:
+          - text: Solution. Add
+          - code [ref=f1e469]: pkg/csvplan/permissive_import_test.go
+          - text: ", table-driven, feeding"
+          - code [ref=f1e470]: ImportFromCSV
+          - text: raw text (CSV, TSV, header-present, header-absent, mixed quoting) and asserting the returned
+          - code [ref=f1e471]: "[]CollectionRow"
+          - text: . Crosses the existing public seam — no new interface.
+        - list [ref=f1e472]:
+          - listitem [ref=f1e473]: Coverage on the batch-import path
+          - listitem [ref=f1e474]: Public seam already exists
+      - article [ref=f1e475]:
+        - heading [level=4] [ref=f1e476]:
+          - text: Test
+          - code [ref=f1e477]: render.Service
+          - text: "'s skip decision at the service level"
+        - paragraph [ref=f1e478]:
+          - text: Strong · 87 ·
+          - code [ref=f1e479]: tests
+        - paragraph [ref=f1e480]:
+          - code [ref=f1e481]: internal/render/service.go:122
+          - text: Render ·
+          - code [ref=f1e482]: :165
+          - text: renderOne ·
+          - code [ref=f1e483]: internal/render/test_helpers_test.go:9
+        - paragraph [ref=f1e484]:
+          - text: Problem.
+          - code [ref=f1e485]: Render
+          - text: /
+          - code [ref=f1e486]: renderOne
+          - text: compare
+          - code [ref=f1e487]: Segment.StoredHash
+          - text: against the computed hash and check output-file existence to decide skip-vs-render. Only
+          - code [ref=f1e488]: render/state
+          - text: "'s hash/detect/store are tested — never"
+          - code [ref=f1e489]: Service
+          - text: consuming them.
+          - code [ref=f1e490]: newTestSegment
+          - text: and an injectable
+          - code [ref=f1e491]: cache.Runner
+          - text: already exist; the seam is built and unused at this level.
+        - paragraph [ref=f1e492]:
+          - text: Solution. Add
+          - code [ref=f1e493]: internal/render/service_test.go
+          - text: using
+          - code [ref=f1e494]: newTestSegment
+          - text: plus a fake
+          - code [ref=f1e495]: cache.Runner
+          - text: ", asserting"
+          - code [ref=f1e496]: Render
+          - text: skips when
+          - code [ref=f1e497]: StoredHash
+          - text: matches
+          - emphasis [ref=f1e498]: and
+          - text: the output exists, and re-renders when either is false.
+        - list [ref=f1e499]:
+          - listitem [ref=f1e500]: The decision that avoids re-encoding gets pinned
+          - listitem [ref=f1e501]: Injection seam already present
+      - article [ref=f1e502]:
+        - heading [level=4] [ref=f1e503]:
+          - text: Test the
+          - code [ref=f1e504]: ResolveEncoding
+          - text: cascade
+        - paragraph [ref=f1e505]:
+          - text: Strong · 86 ·
+          - code [ref=f1e506]: tests
+        - paragraph [ref=f1e507]:
+          - code [ref=f1e508]: internal/tools/encoding.go:358
+        - code [ref=f1e510]: func ResolveEncoding(profile *EncodingProfile, global, project EncodingDefaults) ResolvedEncoding
+        - paragraph [ref=f1e511]:
+          - text: Problem. No
+          - code [ref=f1e512]: "*_test.go"
+          - text: references
+          - code [ref=f1e513]: ResolveEncoding
+          - text: . It implements the documented chain — built-in defaults → global
+          - code [ref=f1e514]: ~/.powerhour/config.yaml
+          - text: → project
+          - code [ref=f1e515]: powerhour.yaml
+          - text: — that decides the codec, CRF, and bitrate of every render. A merge-precedence bug silently changes output quality.
+        - paragraph [ref=f1e516]:
+          - text: Solution. Table-driven
+          - code [ref=f1e517]: internal/tools/encoding_test.go
+          - text: calling
+          - code [ref=f1e518]: ResolveEncoding
+          - text: with partially-populated
+          - code [ref=f1e519]: global
+          - text: /
+          - code [ref=f1e520]: project
+          - text: structs, asserting field-by-field that project beats global beats profile defaults. Pure function, no mocking.
+        - list [ref=f1e521]:
+          - listitem [ref=f1e522]: Precedence becomes checkable
+          - listitem [ref=f1e523]: Governs output quality of every clip
+      - article [ref=f1e524]:
+        - heading [level=4] [ref=f1e525]:
+          - text: Cover
+          - code [ref=f1e526]: NormalizeMetadata
+          - text: "'s untested branches"
+        - paragraph [ref=f1e527]:
+          - text: Worth exploring · 82 ·
+          - code [ref=f1e528]: tests
+        - paragraph [ref=f1e529]:
+          - code [ref=f1e530]: internal/cache/normalize.go:50
+          - text: ·
+          - code [ref=f1e531]: :165
+          - text: splitArtistTitle ·
+          - code [ref=f1e532]: :186
+          - text: cleanVideoTitle ·
+          - code [ref=f1e533]: internal/cache/service_test.go:177
+        - paragraph [ref=f1e534]:
+          - text: Problem.
+          - code [ref=f1e535]: TestNormalizeMetadataAppliesArtistAliasAndTrack
+          - text: is the only test touching
+          - code [ref=f1e536]: NormalizeMetadata
+          - text: ", and it covers only the alias +"
+          - code [ref=f1e537]: Track
+          - text: "-present path. The \"Artist - Title\" split, the video-suffix stripping, and the uploader fallback are reachable through the same public seam and asserted nowhere. Those are the common case for non-music-platform uploads, where"
+          - code [ref=f1e538]: Track
+          - text: is absent.
+        - paragraph [ref=f1e539]:
+          - text: Solution. Extend the same file with
+          - code [ref=f1e540]: NormalizeMetadata
+          - text: cases for
+          - code [ref=f1e541]: "\"Artist - Title (Official Video)\""
+          - text: with no
+          - code [ref=f1e542]: Track
+          - text: ", and uploader-only input — asserting"
+          - code [ref=f1e543]: Result.Title
+          - text: ","
+          - code [ref=f1e544]: .Artist
+          - text: ","
+          - code [ref=f1e545]: .Confidence
+          - text: ","
+          - code [ref=f1e546]: .Reasons
+          - text: .
+        - list [ref=f1e547]:
+          - listitem [ref=f1e548]: Common-case branches pinned
+          - listitem [ref=f1e549]: Same file, same public seam
+      - article [ref=f1e550]:
+        - heading [level=4] [ref=f1e551]:
+          - text: Give the suite an
+          - code [ref=f1e552]: admin
+          - text: entry point
+        - paragraph [ref=f1e553]:
+          - text: Worth exploring · 77 ·
+          - code [ref=f1e554]: tests
+        - paragraph [ref=f1e555]:
+          - code [ref=f1e556]: admin.toml
+          - text: (only
+          - code [ref=f1e557]: "[commands.deploy]"
+          - text: ) · no
+          - code [ref=f1e558]: .github/workflows/
+        - paragraph [ref=f1e559]:
+          - text: Problem.
+          - code [ref=f1e560]: go test ./...
+          - text: passes today, but nothing runs it except a human typing it.
+          - code [ref=f1e561]: admin.toml
+          - text: defines
+          - code [ref=f1e562]: deploy
+          - text: and nothing else, though
+          - code [ref=f1e563]: .claude/CLAUDE.md
+          - text: documents build, test, vet, and fmt commands as things typed by hand.
+        - paragraph [ref=f1e564]:
+          - text: Solution. Add
+          - code [ref=f1e565]: "[commands.test]"
+          - text: running
+          - code [ref=f1e566]: go test ./...
+          - text: ", matching the shape the repo already uses for"
+          - code [ref=f1e567]: deploy
+          - text: .
+        - list [ref=f1e568]:
+          - listitem [ref=f1e569]:
+            - text: Suite reachable the way
+            - code [ref=f1e570]: deploy
+            - text: is
+          - listitem [ref=f1e571]: Agentic control surface, not just CI
+      - heading "Repo layout & agent instructions" [level=3] [ref=f1e572]
+      - article [ref=f1e573]:
+        - heading [level=4] [ref=f1e574]:
+          - text: Rename
+          - code [ref=f1e575]: .claude/skills/verify/
+          - text: to
+          - code [ref=f1e576]: verify-project/
+          - text: and track it
+        - paragraph [ref=f1e577]:
+          - text: Strong · 95 ·
+          - code [ref=f1e578]: layout
+          - text: +
+          - code [ref=f1e579]: claude-md
+          - text: — two lenses landed here independently
+        - paragraph [ref=f1e580]:
+          - code [ref=f1e581]: .claude/skills/verify/SKILL.md:2
+          - text: (
+          - code [ref=f1e582]: "name: verify"
+          - text: ) ·
+          - code [ref=f1e583]: .gitignore:21
+          - text: ·
+          - code [ref=f1e584]: git ls-files .claude/skills/
+          - text: → only
+          - code [ref=f1e585]: read-logs.md
+        - img "Skill name collision between bundled verify and project verify" [ref=f1e587]:
+          - generic [ref=f1e588]: Skill("verify") RESOLUTION
+          - generic [ref=f1e590]: bundled verify (built-in)
+          - generic [ref=f1e592]: .claude/skills/verify/
+          - generic [ref=f1e593]: gitignored, untracked, shadowed
+          - generic [ref=f1e594]: ✕
+          - generic [ref=f1e596]: what actually runs
+          - generic [ref=f1e597]: rename to verify-project/ → no collision, project skill runs
+        - paragraph [ref=f1e598]:
+          - text: Problem. The project's verification skill declares
+          - code [ref=f1e599]: "name: verify"
+          - text: ", which collides with the bundled skill of the same name, so"
+          - code [ref=f1e600]: Skill("verify")
+          - text: can resolve to the wrong one. It is also gitignored at
+          - code [ref=f1e601]: .gitignore:21
+          - text: ", so the project's own definition of \"is this work actually done\" has no history and can't be reviewed through the repo."
+        - paragraph [ref=f1e602]:
+          - text: Solution. Move the directory to
+          - code [ref=f1e603]: .claude/skills/verify-project/
+          - text: ", update the frontmatter"
+          - code [ref=f1e604]: "name:"
+          - text: field, delete
+          - code [ref=f1e605]: .gitignore:21
+          - text: ", and track the new path."
+        - list [ref=f1e606]:
+          - listitem [ref=f1e607]: Verification resolves to the project's own skill
+          - listitem [ref=f1e608]: The verification path gains git history
+          - listitem [ref=f1e609]: Every other card on this list is checked through it
+      - article [ref=f1e610]:
+        - heading [level=4] [ref=f1e611]:
+          - text: Fold the untracked root
+          - code [ref=f1e612]: CLAUDE.md
+          - text: into
+          - code [ref=f1e613]: .claude/CLAUDE.md
+        - paragraph [ref=f1e614]:
+          - text: Strong · 90 ·
+          - code [ref=f1e615]: layout
+          - text: +
+          - code [ref=f1e616]: claude-md
+          - text: — two lenses landed here independently
+        - paragraph [ref=f1e617]:
+          - code [ref=f1e618]: CLAUDE.md
+          - text: (root,
+          - code [ref=f1e619]: "??"
+          - text: untracked) ·
+          - code [ref=f1e620]: .claude/CLAUDE.md
+          - text: (tracked)
+        - paragraph [ref=f1e621]:
+          - text: "Problem. Two instruction files describe the same project with diverging Overview/Commands/Architecture sections, and both are loaded. The root one has no git history — nothing to check a rule's origin against — and it has already drifted: it calls commit"
+          - code [ref=f1e622]: df6d05d
+          - text: (July 24 2026) "recent" while HEAD is
+          - code [ref=f1e623]: 21cf9d3
+          - text: ", five commits later."
+        - paragraph [ref=f1e624]:
+          - text: Solution. Merge the root file's non-duplicate content — the note that the
+          - code [ref=f1e625]: powerhour
+          - text: binary and
+          - code [ref=f1e626]: powerhour-1/
+          - text: at repo root are untracked scratch outputs — into
+          - code [ref=f1e627]: .claude/CLAUDE.md
+          - text: "'s Notes section, then"
+          - code [ref=f1e628]: rm CLAUDE.md
+          - text: . One tracked instruction file.
+        - list [ref=f1e629]:
+          - listitem [ref=f1e630]: Duplicate rule set collapses to one
+          - listitem [ref=f1e631]: Instruction history becomes checkable
+          - listitem [ref=f1e632]: Stale commit claim goes away
+      - article [ref=f1e633]:
+        - heading [level=4] [ref=f1e634]:
+          - text: Move the "always
+          - code [ref=f1e635]: go install
+          - text: "\" rule from two prose copies into one hook"
+        - paragraph [ref=f1e636]:
+          - text: Worth exploring · 84 ·
+          - code [ref=f1e637]: claude-md
+        - paragraph [ref=f1e638]:
+          - code [ref=f1e639]: .claude/CLAUDE.md
+          - text: Agent Behavior ·
+          - code [ref=f1e640]: CLAUDE.local.md
+        - paragraph [ref=f1e641]:
+          - text: Problem. The same behaviour is stated twice with drifting scope.
+          - code [ref=f1e642]: .claude/CLAUDE.md
+          - text: ": \"running"
+          - code [ref=f1e643]: go install ./cmd/powerhour
+          - emphasis [ref=f1e644]: before closing out the task
+          - text: unless the user explicitly says not to."
+          - code [ref=f1e645]: CLAUDE.local.md
+          - text: ": \"After"
+          - emphasis [ref=f1e646]: any
+          - text: code change ready for testing — not just 'significant' ones — run
+          - code [ref=f1e647]: go install ./cmd/powerhour
+          - text: automatically, without asking." Two enforcement points for one rule, and the emphasis language is a hook signal.
+        - paragraph [ref=f1e648]:
+          - text: Solution. A
+          - code [ref=f1e649]: PostToolUse
+          - text: hook in
+          - code [ref=f1e650]: settings.local.json
+          - text: matching
+          - code [ref=f1e651]: Edit
+          - text: /
+          - code [ref=f1e652]: Write
+          - text: "on"
+          - code [ref=f1e653]: "**/*.go"
+          - text: ", shelling"
+          - code [ref=f1e654]: go install ./cmd/powerhour
+          - text: — then delete both prose rules.
+        - list [ref=f1e655]:
+          - listitem [ref=f1e656]: Behaviour executes instead of being remembered
+          - listitem [ref=f1e657]: Two drifting copies → zero
+          - listitem [ref=f1e658]: Removes the condition rather than guarding it
+      - article [ref=f1e659]:
+        - heading [level=4] [ref=f1e660]:
+          - text: Add
+          - code [ref=f1e661]: docs/adr/
+        - paragraph [ref=f1e662]:
+          - text: Worth exploring · 75 ·
+          - code [ref=f1e663]: layout
+        - paragraph [ref=f1e664]:
+          - text: "no"
+          - code [ref=f1e665]: docs/adr/
+          - text: ","
+          - code [ref=f1e666]: docs/decisions/
+          - text: anywhere in tree ·
+          - code [ref=f1e667]: docs/architecture/smart-rerender.md
+          - text: ·
+          - code [ref=f1e668]: .claude/CLAUDE.md
+          - text: "\"Key Design Decisions\""
+        - paragraph [ref=f1e669]:
+          - text: Problem. Real architectural calls are recorded only as prose describing
+          - emphasis [ref=f1e670]: what
+          - text: — the two-hash-level re-render design, single-file-collection resolution, "no backwards compatibility" — with no dated record of
+          - emphasis [ref=f1e671]: why
+          - text: ", or what was rejected."
+        - paragraph [ref=f1e672]:
+          - text: Solution. Create
+          - code [ref=f1e673]: docs/adr/0001-…
+          - text: "onward, seeding it from decisions already made: the"
+          - code [ref=f1e674]: GlobalConfigHash
+          - text: /
+          - code [ref=f1e675]: SegmentInputHash
+          - text: split, single-file-collection resolution, and the no-backcompat policy.
+        - list [ref=f1e676]:
+          - listitem [ref=f1e677]: Decisions gain a reopening record
+      - heading "Interface safety" [level=3] [ref=f1e678]
+      - article [ref=f1e679]:
+        - heading [level=4] [ref=f1e680]:
+          - text: Merge headers inside
+          - code [ref=f1e681]: WriteCSV
+          - text: ", matching"
+          - code [ref=f1e682]: WriteYAML
+        - paragraph [ref=f1e683]:
+          - text: Strong · 87 ·
+          - code [ref=f1e684]: interface-safety
+        - paragraph [ref=f1e685]:
+          - code [ref=f1e686]: pkg/csvplan/writer.go:36-42
+          - text: ·
+          - code [ref=f1e687]: writer.go:74-75
+          - text: ·
+          - code [ref=f1e688]: internal/project/collection_mutation.go:118-132
+          - text: "· callers:"
+          - code [ref=f1e689]: internal/tui/dashboard/model.go:1152,2766,3016
+          - text: ","
+          - code [ref=f1e690]: internal/cli/add.go:73
+        - generic [ref=f1e691]:
+          - generic [ref=f1e692]:
+            - paragraph [ref=f1e693]: WriteYAML — self-healing
+            - code [ref=f1e695]: // writer.go:74 columns = mergeYAMLHeaders(columns, rows) // new CustomFields always survive
+          - generic [ref=f1e696]:
+            - paragraph [ref=f1e697]: WriteCSV — silently lossy
+            - code [ref=f1e699]: "// writer.go:36 for _, h := range headers { if val, ok := row.CustomFields[h]; ok { // keys not in headers: dropped } }"
+        - paragraph [ref=f1e700]:
+          - text: Problem. Two functions with the same shape behave oppositely. Any code path that adds a
+          - code [ref=f1e701]: CustomFields
+          - text: key without separately updating
+          - code [ref=f1e702]: coll.Headers
+          - text: loses that data on the next save — no error, no log line — for CSV collections, which is what
+          - code [ref=f1e703]: init
+          - text: generates by default. The YAML branch of the same wrapper is immune to the identical mistake.
+        - paragraph [ref=f1e704]:
+          - text: Solution. Make
+          - code [ref=f1e705]: WriteCSV
+          - text: "'s first line"
+          - code [ref=f1e706]: headers = MergeHeaders(headers, rows)
+          - text: ", mirroring"
+          - code [ref=f1e707]: WriteYAML
+          - text: . No caller needs to pre-merge.
+        - list [ref=f1e708]:
+          - listitem [ref=f1e709]: Footgun removed at the API, not at 4 call sites
+          - listitem [ref=f1e710]: Two write paths behave identically
+          - listitem [ref=f1e711]: Removes the condition rather than guarding it
+      - article [ref=f1e712]:
+        - heading [level=4] [ref=f1e713]:
+          - text: Validate inside
+          - code [ref=f1e714]: config.Save
+          - text: ", not only in"
+          - code [ref=f1e715]: doctor
+          - text: /
+          - code [ref=f1e716]: check
+        - paragraph [ref=f1e717]:
+          - text: Strong · 82 ·
+          - code [ref=f1e718]: interface-safety
+        - paragraph [ref=f1e719]:
+          - code [ref=f1e720]: internal/config/write.go:11
+          - text: ·
+          - code [ref=f1e721]: internal/config/validation.go:27
+          - text: ·
+          - code [ref=f1e722]: :215
+          - text: ·
+          - code [ref=f1e723]: :232
+          - text: ·
+          - code [ref=f1e724]: :276
+          - text: ·
+          - code [ref=f1e725]: internal/tui/dashboard/model.go:3263-3271
+        - paragraph [ref=f1e726]:
+          - text: Problem.
+          - code [ref=f1e727]: Save(path, cfg)
+          - text: marshals and atomically writes with zero validation.
+          - code [ref=f1e728]: saveConfigAndReResolve
+          - text: is the sole write path for every TUI timeline mutation.
+          - code [ref=f1e729]: ValidateStrict()
+          - text: checks exactly the invariants a sequence entry must hold —
+          - code [ref=f1e730]: collection
+          - text: and
+          - code [ref=f1e731]: file
+          - text: mutually exclusive, fades ≥ 0 — but only
+          - code [ref=f1e732]: doctor
+          - text: and
+          - code [ref=f1e733]: check
+          - text: ever call it. A mutation that violates either is persisted as-is and surfaces later, at
+          - code [ref=f1e734]: render
+          - text: or
+          - code [ref=f1e735]: concat
+          - text: .
+        - paragraph [ref=f1e736]:
+          - text: Solution.
+          - code [ref=f1e737]: Save(path string, cfg Config, projectRoot string, knownSegmentTokens []string) error
+          - text: — run
+          - code [ref=f1e738]: cfg.ValidateStrict(...)
+          - text: first, return a joined error on any error-severity result, abort the write. One call site to update at
+          - code [ref=f1e739]: model.go:3265
+          - text: .
+        - list [ref=f1e740]:
+          - listitem [ref=f1e741]: Invalid config can't reach disk
+          - listitem [ref=f1e742]: Failure moves from render-time to save-time
+          - listitem [ref=f1e743]: Future mutation features inherit the check
+        - paragraph [ref=f1e744]:
+          - text: The scorer could not confirm
+          - code [ref=f1e745]: model.go:3265
+          - text: is the only
+          - code [ref=f1e746]: config.Save
+          - text: call site globally — enumerate before changing the signature.
+      - heading "Architecture" [level=3] [ref=f1e747]
+      - article [ref=f1e748]:
+        - heading "Give the render pipeline one implementation instead of two" [level=4] [ref=f1e749]
+        - paragraph [ref=f1e750]:
+          - text: Strong · 82 ·
+          - code [ref=f1e751]: architecture
+        - paragraph [ref=f1e752]:
+          - code [ref=f1e753]: internal/cli/collections_render.go:41
+          - text: runCollectionRender ·
+          - code [ref=f1e754]: :602
+          - text: buildCollectionRenderSegment ·
+          - code [ref=f1e755]: internal/tui/dashboard/model.go:2412
+          - text: runDashboardRenderJob ·
+          - code [ref=f1e756]: :2533
+          - text: buildCollectionRenderSegmentLocal
+        - generic [ref=f1e757]:
+          - generic [ref=f1e758]:
+            - paragraph [ref=f1e759]: Before — two orchestrators
+            - img "Two parallel render orchestration paths" [ref=f1e760]:
+              - generic [ref=f1e762]: runCollectionRender
+              - generic [ref=f1e764]: runDashboardRenderJob
+              - generic [ref=f1e766]: auto-fetch missing
+              - generic [ref=f1e768]: — absent —
+              - generic [ref=f1e770]: buildSegment
+              - generic [ref=f1e772]: buildSegmentLocal
+              - generic [ref=f1e774]: applyFades
+              - generic [ref=f1e776]: applyFadesLocal
+              - generic [ref=f1e778]: hash · render · save
+              - generic [ref=f1e780]: hash · render · save
+              - generic [ref=f1e781]: already drifted at the fetch step
+          - generic [ref=f1e782]:
+            - paragraph [ref=f1e783]: After — one module, two adapters
+            - img "One render job module with two thin reporter adapters" [ref=f1e784]:
+              - generic [ref=f1e786]: CLI adapter
+              - generic [ref=f1e788]: TUI adapter
+              - generic [ref=f1e791]: Reporter
+              - generic [ref=f1e793]: render.RunCollectionJob
+              - generic [ref=f1e794]: auto-fetch missing sources
+              - generic [ref=f1e795]: build segment · apply fades
+              - generic [ref=f1e796]: hash-detect · render · save state
+              - generic [ref=f1e797]: two *Local helpers deleted
+        - paragraph [ref=f1e798]:
+          - text: Problem. Both entry points run preflight → build segment → hash-compare against
+          - code [ref=f1e799]: renderstate.RenderState
+          - text: →
+          - code [ref=f1e800]: render.Service.Render
+          - text: "→ save state, with near-identical helper bodies. They have already drifted: the CLI path auto-fetches missing sources, the dashboard path silently does not."
+        - paragraph [ref=f1e801]:
+          - text: Solution. Extract
+          - code [ref=f1e802]: render.RunCollectionJob(ctx, pp, cfg, coll, rows, reporter render.Reporter) error
+          - text: owning the whole sequence.
+          - code [ref=f1e803]: runCollectionRender
+          - text: and
+          - code [ref=f1e804]: runDashboardRenderJob
+          - text: become adapters supplying a
+          - code [ref=f1e805]: Reporter
+          - text: — progress table vs channel events. Delete
+          - code [ref=f1e806]: buildCollectionRenderSegmentLocal
+          - text: and
+          - code [ref=f1e807]: applySequenceEntryFadesLocal
+          - text: .
+        - list [ref=f1e808]:
+          - listitem [ref=f1e809]: "Locality: one module owns render orchestration"
+          - listitem [ref=f1e810]: "Leverage: one interface, two call sites"
+          - listitem [ref=f1e811]: Deletes 2 duplicated helpers
+          - listitem [ref=f1e812]: TUI inherits auto-fetch for free
+      - heading "Interface (TUI)" [level=3] [ref=f1e813]
+      - article [ref=f1e814]:
+        - heading "Route the dashboard header through the width helper every other surface uses" [level=4] [ref=f1e815]
+        - paragraph [ref=f1e816]:
+          - text: Strong · 83 ·
+          - code [ref=f1e817]: gui
+        - paragraph [ref=f1e818]:
+          - code [ref=f1e819]: internal/tui/dashboard/header.go:13-61
+          - text: renderHeader ·
+          - code [ref=f1e820]: help_row.go:28-35
+          - text: ·
+          - code [ref=f1e821]: row_render.go:14
+          - text: ·
+          - code [ref=f1e822]: model.go:83
+          - text: ","
+          - code [ref=f1e823]: :386
+        - paragraph [ref=f1e824]:
+          - text: Problem.
+          - code [ref=f1e825]: renderHeader
+          - text: concatenates the view-tab list plus every collection's
+          - code [ref=f1e826]: "name: cached/total"
+          - text: count and writes it straight out. Every other render path in the package —
+          - code [ref=f1e827]: helpRowText
+          - text: ","
+          - code [ref=f1e828]: renderCell
+          - text: — routes text through
+          - code [ref=f1e829]: tui.TruncateWithEllipsis
+          - text: keyed on
+          - code [ref=f1e830]: termWidth
+          - text: first.
+          - code [ref=f1e831]: Model
+          - text: already carries
+          - code [ref=f1e832]: termWidth
+          - text: ;
+          - code [ref=f1e833]: renderHeader
+          - text: never receives it. It is the one surface with no width discipline, in exactly the narrow-terminal case the rest of the package was built to survive.
+        - paragraph [ref=f1e834]:
+          - text: Solution. Build the tab + summary line into a local string, then
+          - code [ref=f1e835]: tui.TruncateWithEllipsis(line, m.termWidth)
+          - text: before
+          - code [ref=f1e836]: b.WriteString
+          - text: — the pattern already used for rows and help text.
+        - list [ref=f1e837]:
+          - listitem [ref=f1e838]: Last unbounded surface joins the rule
+          - listitem [ref=f1e839]:
+            - text: Helper and
+            - code [ref=f1e840]: termWidth
+            - text: both already exist
+    - generic [ref=f1e841]:
+      - heading "Top recommendation" [level=2] [ref=f1e842]
+      - article [ref=f1e843]:
+        - heading [level=3] [ref=f1e844]:
+          - link [ref=f1e845] [cursor=pointer]:
+            - /url: "#c-verify"
+            - text: Rename
+            - code [ref=f1e846]: .claude/skills/verify/
+            - text: to
+            - code [ref=f1e847]: verify-project/
+            - text: and track it
+        - paragraph [ref=f1e848]:
+          - text: Highest-scoring finding of the run at 95, and the only one two lenses reached from opposite directions —
+          - code [ref=f1e849]: layout
+          - text: from the repo standard,
+          - code [ref=f1e850]: claude-md
+          - text: "from the instruction files. It is also first in dependency order: it repairs the path every other card on this list gets checked through, and until it resolves to the project's own skill rather than the bundled one, \"verified\" means something the repo can't inspect."
+        - paragraph [ref=f1e851]:
+          - text: "Next by leverage:"
+          - link "the VLC detection skip" [ref=f1e852] [cursor=pointer]:
+            - /url: "#c-vlc"
+          - text: (2.0 s off every inspect command, measured) and
+          - link "the CLI reference gap" [ref=f1e853] [cursor=pointer]:
+            - /url: "#c-clidocs"
+          - text: (the primary interface is undocumented — two lenses).

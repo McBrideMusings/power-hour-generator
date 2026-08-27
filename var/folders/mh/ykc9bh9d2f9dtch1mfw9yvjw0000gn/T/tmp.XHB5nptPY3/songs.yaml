@@ -1,0 +1,5 @@
+columns: [title, artist, name, start_time, duration, link]
+defaults:
+    start_time: "0:00"
+    duration: "60"
+rows: []

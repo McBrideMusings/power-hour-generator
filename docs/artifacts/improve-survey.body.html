@@ -1,0 +1,502 @@
+<header class="hero">
+  <h1>Improvement survey — power-hour-generator</h1>
+  <p class="cite">2026-08-15 · 10 aspects · 47 findings returned · 24 survived scoring (≥75) · 12 dropped · 4 sent to <code>/review</code></p>
+  <div class="legend">
+    <span><b>Strong</b> — citation confirmed, fix shaped, leverage named</span>
+    <span><b>Worth exploring</b> — real, some judgement left</span>
+    <span>Score = grounding confidence, not size. Effort was never a scoring or ranking input.</span>
+  </div>
+</header>
+
+<section id="coverage">
+  <h2>Coverage</h2>
+  <table>
+    <thead><tr><th>Aspect</th><th>Result</th><th>Survived</th></tr></thead>
+    <tbody>
+      <tr><td><code>architecture</code></td><td>3 findings</td><td>1</td></tr>
+      <tr><td><code>interface-safety</code></td><td>2 findings</td><td>2</td></tr>
+      <tr><td><code>security</code></td><td>4 findings</td><td>4</td></tr>
+      <tr><td><code>claude-md</code></td><td>5 findings</td><td>3 (2 merged into layout)</td></tr>
+      <tr><td><code>tests</code></td><td>5 findings</td><td>5</td></tr>
+      <tr><td><code>gui</code></td><td>4 findings</td><td>1</td></tr>
+      <tr><td><code>product</code></td><td>4 findings</td><td>2 (1 merged into docs)</td></tr>
+      <tr><td><code>performance</code></td><td>2 findings</td><td>2</td></tr>
+      <tr><td><code>docs</code></td><td>5 findings</td><td>4</td></tr>
+      <tr><td><code>layout</code></td><td>5 findings</td><td>3</td></tr>
+      <tr><td><code>game</code></td><td colspan="2">not applicable — no <code>.claude/domain</code> marker; classified as tool/CLI</td></tr>
+    </tbody>
+  </table>
+  <div class="callout callout--warn">
+    <p><b>4 defects surfaced during the survey — run <code>/review</code> to develop them.</b> They are not cards here; improve does not report defects.</p>
+    <ul>
+      <li><code>internal/cli/status.go:213</code> vs <code>internal/tui/dashboard/collection_view.go:157</code> — <code>computeRowStates</code> folds sequence-entry fade overrides into the segment hash via <code>effectiveFadesForCollection</code>; <code>buildRowStatuses</code> does not. <code>powerhour status</code> and the TUI disagree on whether a row is stale.</li>
+      <li><code>internal/tui/dashboard/footer.go:25</code> — cache footer prints <code>"f filter  x del  d doctor  D all  u refresh"</code>. There is no <code>case "d"</code> in the cache switch (<code>model.go:1761-1801</code>), <code>D</code> is not "all", and the real edit key <code>e</code> (<code>model.go:1763</code>) is unlisted.</li>
+      <li><code>.claude/CLAUDE.md</code> "Project resolver" — says <code>SequenceEntry</code> takes <code>count</code>. <code>internal/config/config.go:50</code> has <code>Slice string</code>; <code>README.md:176</code> says "Collection entries now use <code>slice</code> ranges instead of <code>count</code>."</li>
+      <li><code>README.md:3,7</code> + <code>ROADMAP.md</code> — README still says "initial release focuses on generating discrete per-clip files that you can assemble in an editor of your choice"; ROADMAP leaves Phase 3 (Concatenation) and Phase 7 (Lifecycle) unchecked while <code>concat.go</code>, <code>clean.go</code>, <code>doctor.go</code>, <code>export.go</code> all ship.</li>
+    </ul>
+  </div>
+  <p class="cite">Not verified: the VitePress site build. <code>docs/node_modules</code> is absent and <code>npm install</code> was outside the read-only contract — <b>Unknown</b>.</p>
+</section>
+
+<section id="candidates">
+<h2>Findings</h2>
+
+<h3>Performance</h3>
+
+<article id="c-vlc">
+  <h4>Persist a checksum for system-located binaries so VLC skips its version shell-out</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 92 · <code>performance</code></p>
+  <p class="cite"><code>internal/tools/detect.go:59</code> · <code>detect.go:74</code> · <code>detect.go:145-150</code> · <code>detect.go:198-213</code> · <code>internal/tools/defs.go:28</code></p>
+  <div class="diagram">
+    <svg viewBox="0 0 640 210" role="img" aria-label="Detect fast path taken by cache-sourced tools, missed by system-located tools">
+      <text x="10" y="18" font-size="10" fill="currentColor" opacity="0.6">DETECT() PER TOOL</text>
+      <rect x="10" y="34" width="150" height="52" rx="4" fill="none" stroke="currentColor"/>
+      <text x="20" y="56" font-size="12" fill="currentColor">cache-source branch</text>
+      <text x="20" y="74" font-size="10" fill="currentColor" opacity="0.7">detect.go:145 sets Checksum</text>
+      <path d="M160 60 H 260" stroke="currentColor" fill="none" marker-end="url(#ar)"/>
+      <rect x="262" y="34" width="170" height="52" rx="4" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="2"/>
+      <text x="272" y="56" font-size="12" fill="currentColor">fast path hits</text>
+      <text x="272" y="74" font-size="10" fill="currentColor" opacity="0.7">Version != "" &amp;&amp; Checksum != ""</text>
+      <text x="452" y="64" font-size="12" fill="currentColor">0 ms</text>
+
+      <rect x="10" y="118" width="150" height="52" rx="4" fill="none" stroke="var(--c-danger)"/>
+      <text x="20" y="140" font-size="12" fill="var(--c-danger)">system-fallback branch</text>
+      <text x="20" y="158" font-size="10" fill="var(--c-danger)" opacity="0.85">detect.go:198 — no Checksum</text>
+      <path d="M160 144 H 260" stroke="var(--c-danger)" fill="none" marker-end="url(#ard)"/>
+      <rect x="262" y="118" width="170" height="52" rx="4" fill="none" stroke="var(--c-danger)"/>
+      <text x="272" y="140" font-size="12" fill="var(--c-danger)">readVersion shells out</text>
+      <text x="272" y="158" font-size="10" fill="var(--c-danger)" opacity="0.85">VLC --version</text>
+      <text x="452" y="148" font-size="12" fill="var(--c-danger)">1.97 s</text>
+      <defs>
+        <marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+        <marker id="ard" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--c-danger)"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <p><b>Problem.</b> <code>Detect()</code> loops every known tool including <code>vlc</code>; the manifest entry for a system-located binary never gets a <code>Checksum</code>, so the trust fast path at <code>detect.go:74</code> can never fire and <code>VLC --version</code> runs on every call.</p>
+  <p><b>Solution.</b> In <code>detectOne</code>, compute and persist <code>entry.Checksum</code> in the system-fallback branch (<code>detect.go:198-213</code>) the same way the cache-source branch already does at <code>detect.go:145-150</code>.</p>
+  <ul>
+    <li>Measured: <code>VLC --version</code> = 1.97 s</li>
+    <li><code>powerhour check</code>/<code>doctor</code>/<code>tools list</code> = 2.3–2.4 s</li>
+    <li>This one subprocess is ~85% of that</li>
+    <li><code>status</code> (never calls <code>Detect</code>) = 0.37 s</li>
+    <li>Reuses the skip yt-dlp already gets</li>
+  </ul>
+</article>
+
+<article id="c-updatecheck">
+  <h4>Give a failed update-check the same TTL as a successful one</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 91 · <code>performance</code></p>
+  <p class="cite"><code>internal/tools/update_check.go:104</code> · <code>update_check.go:115</code> · <code>update_check.go:211</code> · <code>internal/cli/notices.go:33-39</code> · <code>internal/cli/root.go</code> <span>PersistentPostRun</span></p>
+  <pre><code>// update_check.go:115 — a failed entry is never fresh, so it retries every run
+fresh := ok &amp;&amp; !entry.CheckFailed &amp;&amp; time.Since(entry.CheckedAt) &lt; updateCheckTTL
+//              ^^^^^^^^^^^^^^^^^^^</code></pre>
+  <p><b>Problem.</b> <code>~/.powerhour/update_check.json</code> currently holds <code>"check_failed": true</code> for ffmpeg. Because <code>!entry.CheckFailed</code> gates freshness, <code>checkHomebrewLatest</code> re-shells <code>brew info --json=v2 ffmpeg</code> on the next invocation, and every one after. <code>printUpdateNotices</code> runs from <code>PersistentPostRun</code>, so this fires for <code>status</code> too.</p>
+  <p><b>Solution.</b> In <code>CheckForUpdates</code>, drop <code>!entry.CheckFailed</code> from the <code>fresh</code> condition, or give failed entries a shorter nonzero backoff (1 h) so a persistently-failing <code>brew info</code> is retried on a schedule.</p>
+  <ul>
+    <li>Measured: <code>brew info</code> = 0.40 s</li>
+    <li>0.40 s on <em>every</em> CLI invocation, permanently</li>
+    <li>Failure state is self-sustaining today</li>
+  </ul>
+</article>
+
+<h3>Security — posture</h3>
+
+<article id="c-proxylog">
+  <h4>Redact proxy userinfo before writing the fetch log banner</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 92 · <code>security</code></p>
+  <p class="cite"><code>internal/cache/fetch.go:138</code> · <code>fetch.go:34</code> · <code>fetch.go:174</code></p>
+  <pre><code>// fetch.go:138 — writeProxyBanner, into logs/fetch_%03d.log opened 0o644
+fmt.Fprintf(w, "[powerhour] yt-dlp proxy: %s\n", proxy)</code></pre>
+  <p><b>Problem.</b> A proxy URL commonly carries inline auth (<code>http://user:pass@host:port</code>). The raw string is written in cleartext into a world-readable log retained under the project's <code>logs/</code> — exactly the files a user pastes into a bug report.</p>
+  <p><b>Solution.</b> In <code>writeProxyBanner</code>, parse with <code>net/url</code> (already imported at <code>fetch.go:174</code> for <code>fetchProxyLocation</code>) and print <code>proxyURL.Redacted()</code> instead of <code>proxy</code>.</p>
+  <ul>
+    <li>Secret stops leaving config</li>
+    <li>One <code>Fprintf</code>, one call site</li>
+    <li>Stdlib already imported in the file</li>
+  </ul>
+</article>
+
+<article id="c-checksum">
+  <h4>Pin publisher checksums for downloaded tool binaries</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 90 · <code>security</code></p>
+  <p class="cite"><code>internal/tools/releases.go:26-68</code> · <code>internal/tools/install.go:405-462</code> · <code>internal/tools/release_dynamic.go:127</code> · <code>internal/tools/detect.go:74-116</code></p>
+  <div class="diagram">
+    <svg viewBox="0 0 640 180" role="img" aria-label="Download path with no upstream integrity gate">
+      <rect x="10" y="60" width="120" height="48" rx="4" fill="none" stroke="currentColor"/>
+      <text x="24" y="82" font-size="12" fill="currentColor">GitHub release</text>
+      <text x="24" y="98" font-size="10" fill="currentColor" opacity="0.7">yt-dlp / ffmpeg</text>
+      <path d="M130 84 H 210" stroke="currentColor" fill="none" marker-end="url(#ar2)"/>
+      <rect x="212" y="60" width="150" height="48" rx="4" fill="none" stroke="var(--c-danger)" stroke-dasharray="5 4"/>
+      <text x="224" y="82" font-size="12" fill="var(--c-danger)">ensureDownload</text>
+      <text x="224" y="98" font-size="10" fill="var(--c-danger)" opacity="0.85">checksum == "" → skip</text>
+      <path d="M362 84 H 442" stroke="var(--c-danger)" fill="none" marker-end="url(#ar2d)"/>
+      <rect x="444" y="60" width="180" height="48" rx="4" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="2"/>
+      <text x="456" y="82" font-size="12" fill="currentColor">executed binary</text>
+      <text x="456" y="98" font-size="10" fill="currentColor" opacity="0.7">SHA256 computed after, locally</text>
+      <text x="212" y="140" font-size="10" fill="var(--c-danger)">no gate between publisher and execution</text>
+      <defs>
+        <marker id="ar2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker>
+        <marker id="ar2d" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--c-danger)"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <p><b>Problem.</b> Every <code>releaseSpec.Checksum</code> in <code>releases.go</code> is hardcoded <code>""</code>, with the comment "populate them as part of the release process when the authoritative SHA256 values are available." <code>ensureDownload</code> skips verification entirely when the checksum is empty. The SHA256 in <code>detect.go</code> is computed <em>after</em> download, for local change-detection only — never against a published value.</p>
+  <p><b>Solution.</b> Populate <code>releaseSpec.Checksum</code> from yt-dlp's published <code>SHA2-256SUMS</code> asset at release-pinning time, and thread the same field through <code>release_dynamic.go</code>'s resolution path so <code>ensureDownload</code> always has a value to check.</p>
+  <ul>
+    <li>Closes supply-chain gap on auto-executed binaries</li>
+    <li>Verification code already exists — only the value is missing</li>
+  </ul>
+</article>
+
+<article id="c-perms">
+  <h4>Write <code>~/.powerhour/config.yaml</code> at 0600</h4>
+  <p class="callout callout--happy"><b>Worth exploring</b> · 80 · <code>security</code></p>
+  <p class="cite"><code>internal/tools/encoding.go:287-299</code> · <code>encoding.go:26</code> · <code>internal/cache/index.go:111</code> · <code>internal/cache/fetch.go:276</code></p>
+  <p><b>Problem.</b> <code>SaveGlobalConfig</code> writes <code>0o644</code> — world-readable — and the file holds <code>downloads.proxy</code>, which commonly embeds <code>user:pass@</code>. The same <code>0o644</code> is used for the non-sensitive cache index, so one mode is doing two jobs.</p>
+  <p><b>Solution.</b> Write the global config with <code>0o600</code> and its directory <code>0o700</code> in <code>SaveGlobalConfig</code>, leaving <code>0o644</code> for the genuinely non-sensitive cache files.</p>
+  <ul>
+    <li>Credential unreadable by other local users</li>
+    <li>Separates credential-bearing from cache files</li>
+    <li>Pairs with the log-redaction card</li>
+  </ul>
+</article>
+
+<article id="c-govulncheck">
+  <h4>Add a dependency vulnerability gate</h4>
+  <p class="callout callout--warn"><b>Worth exploring</b> · 75 · <code>security</code></p>
+  <p class="cite"><code>.github/</code> (only <code>ISSUE_TEMPLATE/</code>) · <code>go.mod:3</code> · <code>go.sum</code></p>
+  <p><b>Problem.</b> No workflow files, no <code>dependabot.yml</code>, no <code>renovate.json</code>. <code>go.sum</code> pins 26 dependencies, which buys reproducibility but not currency — nothing would ever surface a CVE in <code>golang.org/x/*</code> or <code>gopkg.in/yaml.v3</code>.</p>
+  <p><b>Solution.</b> Add <code>.github/workflows/govulncheck.yml</code> running <code>govulncheck ./...</code> on push, or wire it as an <code>admin.toml</code> task alongside <code>deploy</code>.</p>
+  <ul>
+    <li>Transitive CVEs become visible</li>
+    <li>Pairs with the <code>admin test</code> task card</li>
+  </ul>
+</article>
+
+<h3>Docs &amp; product surface</h3>
+
+<article id="c-clidocs">
+  <h4>Document <code>tui</code>, <code>library</code>, <code>clean</code>, <code>doctor</code>, <code>export</code>, <code>cache remove|doctor</code> in the CLI reference</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 92 · <code>docs</code> + <code>product</code> — two lenses landed here independently</p>
+  <p class="cite"><code>docs/cli.md</code> · <code>docs/index.md</code> · <code>docs/guide/getting-started.md</code> · <code>internal/cli/tui_cmd.go</code> · <code>clean.go</code> · <code>doctor.go</code> · <code>export.go</code> · <code>library*.go</code> · <code>cache_remove.go</code> · <code>cache_doctor.go</code></p>
+  <p><b>Problem.</b> <code>docs/cli.md</code>'s headings stop at <code>cache add</code>. <code>powerhour tui</code> — the full-screen dashboard with inline edit, VLC preview, cache doctor overlay, and render/concat triggers — has zero entry anywhere in the docs site, and <code>docs/index.md</code> never mentions it. The onboarding path therefore steers users back to hand-editing <code>songs.yaml</code>.</p>
+  <p><b>Solution.</b> Add <code>### powerhour tui</code> plus sections for <code>library</code>, <code>clean</code>, <code>doctor</code>, <code>export</code> and <code>## Cache Management</code> entries for <code>cache remove</code>/<code>cache doctor</code>, mirroring the existing <code>### powerhour &lt;cmd&gt;</code> + flag-table format; add <code>tui</code> as a <code>theme: alt</code> hero action on <code>docs/index.md</code>; insert a step between getting-started steps 3 and 4 pointing at it.</p>
+  <ul>
+    <li>The primary interface becomes discoverable</li>
+    <li>7 shipped commands stop being invisible</li>
+    <li>One file carries most of the change</li>
+  </ul>
+</article>
+
+<article id="c-dashdocs">
+  <h4>Add <code>docs/architecture/tui-dashboard.md</code></h4>
+  <p class="callout callout--happy"><b>Strong</b> · 90 · <code>docs</code></p>
+  <p class="cite"><code>docs/architecture/tui.md</code> (71 lines) · <code>docs/.vitepress/config.ts</code> · <code>internal/tui/dashboard/</code> (18 files)</p>
+  <p><b>Problem.</b> <code>docs/architecture/tui.md</code> covers only <code>internal/tui/</code> — <code>StatusWriter</code>, <code>ProgressModel</code>, <code>RunWithWork</code>. Grepping <code>dashboard</code> across <code>docs/architecture/*.md</code> and <code>docs/cli.md</code> returns nothing. The 18-file subpackage carrying the five most recent commits has no page on the site.</p>
+  <p><b>Solution.</b> Add <code>docs/architecture/tui-dashboard.md</code> with a new <code>/architecture/</code> sidebar entry, covering <code>Model</code>, the four views, the interaction modes, and mutation write-back.</p>
+  <ul>
+    <li>Newest subsystem stops being oral tradition</li>
+    <li>Splits the <code>.claude/CLAUDE.md</code> wall of prose</li>
+  </ul>
+</article>
+
+<article id="c-migrate">
+  <h4>Delete the <code>powerhour migrate</code> section and fix the <code>cache add</code> signature in cli.md</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 88 · <code>docs</code></p>
+  <p class="cite"><code>docs/cli.md:223-236</code> · <code>docs/cli.md:199-206</code> · <code>internal/cli/cache_migrate.go</code> · <code>internal/cli/cache_add.go:45</code></p>
+  <p><b>Problem.</b> <code>docs/cli.md:223-236</code> documents <code>powerhour migrate --project &lt;dir&gt;</code> moving files into a global cache. No <code>Use: "migrate"</code> exists anywhere in <code>internal/cli/</code> — <code>cache_migrate.go</code> holds only helpers. The global cache is unbuilt Roadmap Phase 6. Separately, cli.md shows <code>cache add &lt;url&gt; &lt;file-path&gt;</code> as two positional args; <code>cache_add.go:45</code> is <code>Use: "add &lt;file-or-id&gt;"</code>, one arg, URL via <code>--url</code>.</p>
+  <p><b>Solution.</b> Delete lines 223-236; rewrite the <code>cache add</code> usage block to the one-arg form with <code>--url</code>.</p>
+  <ul>
+    <li>Documented command that fails outright goes away</li>
+    <li>Reference matches <code>cobra.Command</code> definitions</li>
+  </ul>
+</article>
+
+<article id="c-specs">
+  <h4>Reach <code>docs/specs/concat-time-index.md</code> from the site</h4>
+  <p class="callout callout--happy"><b>Worth exploring</b> · 88 · <code>docs</code></p>
+  <p class="cite"><code>docs/.vitepress/config.ts</code> · <code>docs/specs/concat-time-index.md</code></p>
+  <p><b>Problem.</b> The sidebar has <code>/guide/</code>, <code>/architecture/</code>, <code>/development/</code> keys and no <code>/specs/</code> key. No page links to the spec. It builds into the site and nothing reaches it.</p>
+  <p><b>Solution.</b> Add a <code>/specs/</code> sidebar section in <code>config.ts</code> pointing at <code>concat-time-index.md</code>, or link it from <code>docs/architecture/render.md</code> where concat is already discussed.</p>
+  <ul>
+    <li>Written spec becomes reachable</li>
+  </ul>
+</article>
+
+<article id="c-fastpath">
+  <h4>Surface the one-command <code>concat</code> cascade in getting-started</h4>
+  <p class="callout callout--warn"><b>Worth exploring</b> · 80 · <code>product</code></p>
+  <p class="cite"><code>docs/guide/getting-started.md</code> steps 4-7 · <code>.claude/CLAUDE.md</code> "Concat auto-render cascade"</p>
+  <p><b>Problem.</b> Getting-started walks <code>fetch</code> → <code>render</code> → <code>tools encoding</code> → <code>concat</code> as four sequential manual commands. The cascade already implemented means <code>concat</code> alone auto-renders, which auto-fetches — a fresh project with only config and plans produces the final video in one command. Nothing in the onboarding path says so.</p>
+  <p><b>Solution.</b> Add a callout after step 3: "or skip straight to <code>powerhour concat --project my-power-hour</code> — it fetches and renders anything missing first", keeping the manual steps below for per-stage control.</p>
+  <ul>
+    <li>Shipped fast path becomes findable</li>
+    <li>Job story shortens: 4 commands → 1</li>
+  </ul>
+</article>
+
+<h3>Tests</h3>
+
+<article id="c-permissive">
+  <h4>Pin <code>ImportFromCSV</code>'s heuristics with a table-driven test</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 88 · <code>tests</code></p>
+  <p class="cite"><code>pkg/csvplan/permissive_import.go:34</code> · <code>:270</code> <span>heuristicRoles</span> · <code>:415</code> <span>majorityDelim</span></p>
+  <p><b>Problem.</b> Grep across every <code>*_test.go</code> returns no match for <code>ImportFromCSV</code>, <code>heuristicRoles</code>, or <code>majorityDelim</code>. These decide column roles and delimiter for pasted or imported CSV/TSV — the correctness of every batch "Add Clip" import. Zero behaviours pinned. (<code>import_text_test.go</code> exercises a different file.)</p>
+  <p><b>Solution.</b> Add <code>pkg/csvplan/permissive_import_test.go</code>, table-driven, feeding <code>ImportFromCSV</code> raw text (CSV, TSV, header-present, header-absent, mixed quoting) and asserting the returned <code>[]CollectionRow</code>. Crosses the existing public seam — no new interface.</p>
+  <ul>
+    <li>Coverage on the batch-import path</li>
+    <li>Public seam already exists</li>
+  </ul>
+</article>
+
+<article id="c-servicetest">
+  <h4>Test <code>render.Service</code>'s skip decision at the service level</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 87 · <code>tests</code></p>
+  <p class="cite"><code>internal/render/service.go:122</code> <span>Render</span> · <code>:165</code> <span>renderOne</span> · <code>internal/render/test_helpers_test.go:9</code></p>
+  <p><b>Problem.</b> <code>Render</code>/<code>renderOne</code> compare <code>Segment.StoredHash</code> against the computed hash and check output-file existence to decide skip-vs-render. Only <code>render/state</code>'s hash/detect/store are tested — never <code>Service</code> consuming them. <code>newTestSegment</code> and an injectable <code>cache.Runner</code> already exist; the seam is built and unused at this level.</p>
+  <p><b>Solution.</b> Add <code>internal/render/service_test.go</code> using <code>newTestSegment</code> plus a fake <code>cache.Runner</code>, asserting <code>Render</code> skips when <code>StoredHash</code> matches <em>and</em> the output exists, and re-renders when either is false.</p>
+  <ul>
+    <li>The decision that avoids re-encoding gets pinned</li>
+    <li>Injection seam already present</li>
+  </ul>
+</article>
+
+<article id="c-resolveenc">
+  <h4>Test the <code>ResolveEncoding</code> cascade</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 86 · <code>tests</code></p>
+  <p class="cite"><code>internal/tools/encoding.go:358</code></p>
+  <pre><code>func ResolveEncoding(profile *EncodingProfile, global, project EncodingDefaults) ResolvedEncoding</code></pre>
+  <p><b>Problem.</b> No <code>*_test.go</code> references <code>ResolveEncoding</code>. It implements the documented chain — built-in defaults → global <code>~/.powerhour/config.yaml</code> → project <code>powerhour.yaml</code> — that decides the codec, CRF, and bitrate of every render. A merge-precedence bug silently changes output quality.</p>
+  <p><b>Solution.</b> Table-driven <code>internal/tools/encoding_test.go</code> calling <code>ResolveEncoding</code> with partially-populated <code>global</code>/<code>project</code> structs, asserting field-by-field that project beats global beats profile defaults. Pure function, no mocking.</p>
+  <ul>
+    <li>Precedence becomes checkable</li>
+    <li>Governs output quality of every clip</li>
+  </ul>
+</article>
+
+<article id="c-normalize">
+  <h4>Cover <code>NormalizeMetadata</code>'s untested branches</h4>
+  <p class="callout callout--happy"><b>Worth exploring</b> · 82 · <code>tests</code></p>
+  <p class="cite"><code>internal/cache/normalize.go:50</code> · <code>:165</code> <span>splitArtistTitle</span> · <code>:186</code> <span>cleanVideoTitle</span> · <code>internal/cache/service_test.go:177</code></p>
+  <p><b>Problem.</b> <code>TestNormalizeMetadataAppliesArtistAliasAndTrack</code> is the only test touching <code>NormalizeMetadata</code>, and it covers only the alias + <code>Track</code>-present path. The "Artist - Title" split, the video-suffix stripping, and the uploader fallback are reachable through the same public seam and asserted nowhere. Those are the common case for non-music-platform uploads, where <code>Track</code> is absent.</p>
+  <p><b>Solution.</b> Extend the same file with <code>NormalizeMetadata</code> cases for <code>"Artist - Title (Official Video)"</code> with no <code>Track</code>, and uploader-only input — asserting <code>Result.Title</code>, <code>.Artist</code>, <code>.Confidence</code>, <code>.Reasons</code>.</p>
+  <ul>
+    <li>Common-case branches pinned</li>
+    <li>Same file, same public seam</li>
+  </ul>
+</article>
+
+<article id="c-admintest">
+  <h4>Give the suite an <code>admin</code> entry point</h4>
+  <p class="callout callout--warn"><b>Worth exploring</b> · 77 · <code>tests</code></p>
+  <p class="cite"><code>admin.toml</code> (only <code>[commands.deploy]</code>) · no <code>.github/workflows/</code></p>
+  <p><b>Problem.</b> <code>go test ./...</code> passes today, but nothing runs it except a human typing it. <code>admin.toml</code> defines <code>deploy</code> and nothing else, though <code>.claude/CLAUDE.md</code> documents build, test, vet, and fmt commands as things typed by hand.</p>
+  <p><b>Solution.</b> Add <code>[commands.test]</code> running <code>go test ./...</code>, matching the shape the repo already uses for <code>deploy</code>.</p>
+  <ul>
+    <li>Suite reachable the way <code>deploy</code> is</li>
+    <li>Agentic control surface, not just CI</li>
+  </ul>
+</article>
+
+<h3>Repo layout &amp; agent instructions</h3>
+
+<article id="c-verify">
+  <h4>Rename <code>.claude/skills/verify/</code> to <code>verify-project/</code> and track it</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 95 · <code>layout</code> + <code>claude-md</code> — two lenses landed here independently</p>
+  <p class="cite"><code>.claude/skills/verify/SKILL.md:2</code> (<code>name: verify</code>) · <code>.gitignore:21</code> · <code>git ls-files .claude/skills/</code> → only <code>read-logs.md</code></p>
+  <div class="diagram">
+    <svg viewBox="0 0 640 170" role="img" aria-label="Skill name collision between bundled verify and project verify">
+      <text x="10" y="18" font-size="10" fill="currentColor" opacity="0.6">Skill("verify") RESOLUTION</text>
+      <rect x="10" y="34" width="180" height="44" rx="4" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="2"/>
+      <text x="22" y="61" font-size="12" fill="currentColor">bundled verify (built-in)</text>
+      <rect x="10" y="94" width="180" height="44" rx="4" fill="none" stroke="var(--c-danger)" stroke-dasharray="5 4"/>
+      <text x="22" y="115" font-size="12" fill="var(--c-danger)">.claude/skills/verify/</text>
+      <text x="22" y="131" font-size="10" fill="var(--c-danger)" opacity="0.85">gitignored, untracked, shadowed</text>
+      <path d="M190 56 H 300" stroke="currentColor" fill="none" marker-end="url(#ar3)"/>
+      <path d="M190 116 H 260" stroke="var(--c-danger)" stroke-dasharray="4 4" fill="none"/>
+      <text x="266" y="120" font-size="11" fill="var(--c-danger)">✕</text>
+      <rect x="302" y="34" width="180" height="44" rx="4" fill="none" stroke="currentColor"/>
+      <text x="314" y="61" font-size="12" fill="currentColor">what actually runs</text>
+      <text x="302" y="150" font-size="10" fill="currentColor" opacity="0.6">rename to verify-project/ → no collision, project skill runs</text>
+      <defs><marker id="ar3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="currentColor"/></marker></defs>
+    </svg>
+  </div>
+  <p><b>Problem.</b> The project's verification skill declares <code>name: verify</code>, which collides with the bundled skill of the same name, so <code>Skill("verify")</code> can resolve to the wrong one. It is also gitignored at <code>.gitignore:21</code>, so the project's own definition of "is this work actually done" has no history and can't be reviewed through the repo.</p>
+  <p><b>Solution.</b> Move the directory to <code>.claude/skills/verify-project/</code>, update the frontmatter <code>name:</code> field, delete <code>.gitignore:21</code>, and track the new path.</p>
+  <ul>
+    <li>Verification resolves to the project's own skill</li>
+    <li>The verification path gains git history</li>
+    <li>Every other card on this list is checked through it</li>
+  </ul>
+</article>
+
+<article id="c-claudemd">
+  <h4>Fold the untracked root <code>CLAUDE.md</code> into <code>.claude/CLAUDE.md</code></h4>
+  <p class="callout callout--happy"><b>Strong</b> · 90 · <code>layout</code> + <code>claude-md</code> — two lenses landed here independently</p>
+  <p class="cite"><code>CLAUDE.md</code> (root, <code>?? </code> untracked) · <code>.claude/CLAUDE.md</code> (tracked)</p>
+  <p><b>Problem.</b> Two instruction files describe the same project with diverging Overview/Commands/Architecture sections, and both are loaded. The root one has no git history — nothing to check a rule's origin against — and it has already drifted: it calls commit <code>df6d05d</code> (July 24 2026) "recent" while HEAD is <code>21cf9d3</code>, five commits later.</p>
+  <p><b>Solution.</b> Merge the root file's non-duplicate content — the note that the <code>powerhour</code> binary and <code>powerhour-1/</code> at repo root are untracked scratch outputs — into <code>.claude/CLAUDE.md</code>'s Notes section, then <code>rm CLAUDE.md</code>. One tracked instruction file.</p>
+  <ul>
+    <li>Duplicate rule set collapses to one</li>
+    <li>Instruction history becomes checkable</li>
+    <li>Stale commit claim goes away</li>
+  </ul>
+</article>
+
+<article id="c-hook">
+  <h4>Move the "always <code>go install</code>" rule from two prose copies into one hook</h4>
+  <p class="callout callout--happy"><b>Worth exploring</b> · 84 · <code>claude-md</code></p>
+  <p class="cite"><code>.claude/CLAUDE.md</code> Agent Behavior · <code>CLAUDE.local.md</code></p>
+  <p><b>Problem.</b> The same behaviour is stated twice with drifting scope. <code>.claude/CLAUDE.md</code>: "running <code>go install ./cmd/powerhour</code> <em>before closing out the task</em> unless the user explicitly says not to." <code>CLAUDE.local.md</code>: "After <em>any</em> code change ready for testing — not just 'significant' ones — run <code>go install ./cmd/powerhour</code> automatically, without asking." Two enforcement points for one rule, and the emphasis language is a hook signal.</p>
+  <p><b>Solution.</b> A <code>PostToolUse</code> hook in <code>settings.local.json</code> matching <code>Edit</code>/<code>Write</code> on <code>**/*.go</code>, shelling <code>go install ./cmd/powerhour</code> — then delete both prose rules.</p>
+  <ul>
+    <li>Behaviour executes instead of being remembered</li>
+    <li>Two drifting copies → zero</li>
+    <li>Removes the condition rather than guarding it</li>
+  </ul>
+</article>
+
+<article id="c-adr">
+  <h4>Add <code>docs/adr/</code></h4>
+  <p class="callout callout--warn"><b>Worth exploring</b> · 75 · <code>layout</code></p>
+  <p class="cite">no <code>docs/adr/</code>, <code>docs/decisions/</code> anywhere in tree · <code>docs/architecture/smart-rerender.md</code> · <code>.claude/CLAUDE.md</code> "Key Design Decisions"</p>
+  <p><b>Problem.</b> Real architectural calls are recorded only as prose describing <em>what</em> — the two-hash-level re-render design, single-file-collection resolution, "no backwards compatibility" — with no dated record of <em>why</em>, or what was rejected.</p>
+  <p><b>Solution.</b> Create <code>docs/adr/0001-…</code> onward, seeding it from decisions already made: the <code>GlobalConfigHash</code> / <code>SegmentInputHash</code> split, single-file-collection resolution, and the no-backcompat policy.</p>
+  <ul>
+    <li>Decisions gain a reopening record</li>
+  </ul>
+</article>
+
+<h3>Interface safety</h3>
+
+<article id="c-writecsv">
+  <h4>Merge headers inside <code>WriteCSV</code>, matching <code>WriteYAML</code></h4>
+  <p class="callout callout--happy"><b>Strong</b> · 87 · <code>interface-safety</code></p>
+  <p class="cite"><code>pkg/csvplan/writer.go:36-42</code> · <code>writer.go:74-75</code> · <code>internal/project/collection_mutation.go:118-132</code> · callers: <code>internal/tui/dashboard/model.go:1152,2766,3016</code>, <code>internal/cli/add.go:73</code></p>
+  <div class="compare">
+    <div>
+      <p class="cite">WriteYAML — self-healing</p>
+      <pre><code>// writer.go:74
+columns = mergeYAMLHeaders(columns, rows)
+// new CustomFields always survive</code></pre>
+    </div>
+    <div>
+      <p class="cite">WriteCSV — silently lossy</p>
+      <pre><code>// writer.go:36
+for _, h := range headers {
+    if val, ok := row.CustomFields[h]; ok {
+        // keys not in headers: dropped
+    }
+}</code></pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Two functions with the same shape behave oppositely. Any code path that adds a <code>CustomFields</code> key without separately updating <code>coll.Headers</code> loses that data on the next save — no error, no log line — for CSV collections, which is what <code>init</code> generates by default. The YAML branch of the same wrapper is immune to the identical mistake.</p>
+  <p><b>Solution.</b> Make <code>WriteCSV</code>'s first line <code>headers = MergeHeaders(headers, rows)</code>, mirroring <code>WriteYAML</code>. No caller needs to pre-merge.</p>
+  <ul>
+    <li>Footgun removed at the API, not at 4 call sites</li>
+    <li>Two write paths behave identically</li>
+    <li>Removes the condition rather than guarding it</li>
+  </ul>
+</article>
+
+<article id="c-savevalidate">
+  <h4>Validate inside <code>config.Save</code>, not only in <code>doctor</code>/<code>check</code></h4>
+  <p class="callout callout--happy"><b>Strong</b> · 82 · <code>interface-safety</code></p>
+  <p class="cite"><code>internal/config/write.go:11</code> · <code>internal/config/validation.go:27</code> · <code>:215</code> · <code>:232</code> · <code>:276</code> · <code>internal/tui/dashboard/model.go:3263-3271</code></p>
+  <p><b>Problem.</b> <code>Save(path, cfg)</code> marshals and atomically writes with zero validation. <code>saveConfigAndReResolve</code> is the sole write path for every TUI timeline mutation. <code>ValidateStrict()</code> checks exactly the invariants a sequence entry must hold — <code>collection</code> and <code>file</code> mutually exclusive, fades ≥ 0 — but only <code>doctor</code> and <code>check</code> ever call it. A mutation that violates either is persisted as-is and surfaces later, at <code>render</code> or <code>concat</code>.</p>
+  <p><b>Solution.</b> <code>Save(path string, cfg Config, projectRoot string, knownSegmentTokens []string) error</code> — run <code>cfg.ValidateStrict(...)</code> first, return a joined error on any error-severity result, abort the write. One call site to update at <code>model.go:3265</code>.</p>
+  <ul>
+    <li>Invalid config can't reach disk</li>
+    <li>Failure moves from render-time to save-time</li>
+    <li>Future mutation features inherit the check</li>
+  </ul>
+  <p class="callout callout--warn">The scorer could not confirm <code>model.go:3265</code> is the only <code>config.Save</code> call site globally — enumerate before changing the signature.</p>
+</article>
+
+<h3>Architecture</h3>
+
+<article id="c-renderjob">
+  <h4>Give the render pipeline one implementation instead of two</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 82 · <code>architecture</code></p>
+  <p class="cite"><code>internal/cli/collections_render.go:41</code>, <code>:602</code> · <code>internal/tui/dashboard/model.go:2412</code>, <code>:2533</code></p>
+  <div class="compare">
+    <div>
+      <p class="cite">Before — two orchestrators</p>
+      <svg viewBox="0 0 280 220" role="img" aria-label="Two parallel render orchestration paths">
+        <rect x="8" y="10" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+        <text x="18" y="30" font-size="10" fill="currentColor">runCollectionRender</text>
+        <rect x="152" y="10" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+        <text x="160" y="30" font-size="9" fill="currentColor">runDashboardRenderJob</text>
+        <rect x="8" y="52" width="120" height="26" rx="3" fill="var(--c-danger)" fill-opacity="0.15" stroke="var(--c-danger)"/>
+        <text x="18" y="69" font-size="9" fill="var(--c-danger)">auto-fetch missing</text>
+        <rect x="152" y="52" width="120" height="26" rx="3" fill="none" stroke="currentColor" stroke-dasharray="4 4" opacity="0.4"/>
+        <text x="176" y="69" font-size="9" fill="currentColor" opacity="0.5">— absent —</text>
+        <rect x="8" y="86" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="18" y="103" font-size="9" fill="currentColor">buildSegment</text>
+        <rect x="152" y="86" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="162" y="103" font-size="9" fill="currentColor">buildSegmentLocal</text>
+        <rect x="8" y="120" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="18" y="137" font-size="9" fill="currentColor">applyFades</text>
+        <rect x="152" y="120" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="162" y="137" font-size="9" fill="currentColor">applyFadesLocal</text>
+        <rect x="8" y="154" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="18" y="171" font-size="9" fill="currentColor">hash · render · save</text>
+        <rect x="152" y="154" width="120" height="26" rx="3" fill="none" stroke="currentColor"/>
+        <text x="162" y="171" font-size="9" fill="currentColor">hash · render · save</text>
+        <text x="8" y="202" font-size="9" fill="var(--c-danger)">already drifted at the fetch step</text>
+      </svg>
+    </div>
+    <div>
+      <p class="cite">After — one module, two adapters</p>
+      <svg viewBox="0 0 280 220" role="img" aria-label="One render job module with two thin reporter adapters">
+        <rect x="8" y="10" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+        <text x="26" y="30" font-size="10" fill="currentColor">CLI adapter</text>
+        <rect x="152" y="10" width="120" height="30" rx="4" fill="none" stroke="currentColor"/>
+        <text x="168" y="30" font-size="10" fill="currentColor">TUI adapter</text>
+        <path d="M68 40 L 110 66" stroke="currentColor" fill="none"/>
+        <path d="M212 40 L 170 66" stroke="currentColor" fill="none"/>
+        <text x="96" y="60" font-size="8" fill="currentColor" opacity="0.6">Reporter</text>
+        <rect x="24" y="70" width="232" height="110" rx="5" fill="currentColor" fill-opacity="0.12" stroke="currentColor" stroke-width="2"/>
+        <text x="36" y="92" font-size="11" fill="currentColor">render.RunCollectionJob</text>
+        <text x="36" y="114" font-size="9" fill="currentColor" opacity="0.65">auto-fetch missing sources</text>
+        <text x="36" y="132" font-size="9" fill="currentColor" opacity="0.65">build segment · apply fades</text>
+        <text x="36" y="150" font-size="9" fill="currentColor" opacity="0.65">hash-detect · render · save state</text>
+        <text x="8" y="202" font-size="9" fill="currentColor" opacity="0.6">two *Local helpers deleted</text>
+      </svg>
+    </div>
+  </div>
+  <p><b>Problem.</b> Both entry points run preflight → build segment → hash-compare against <code>renderstate.RenderState</code> → <code>render.Service.Render</code> → save state, with near-identical helper bodies. They have already drifted: the CLI path auto-fetches missing sources, the dashboard path silently does not.</p>
+  <p><b>Solution.</b> Extract <code>render.RunCollectionJob(ctx, pp, cfg, coll, rows, reporter render.Reporter) error</code> owning the whole sequence. <code>runCollectionRender</code> and <code>runDashboardRenderJob</code> become adapters supplying a <code>Reporter</code> — progress table vs channel events. Delete <code>buildCollectionRenderSegmentLocal</code> and <code>applySequenceEntryFadesLocal</code>.</p>
+  <ul>
+    <li>Locality: one module owns render orchestration</li>
+    <li>Leverage: one interface, two call sites</li>
+    <li>Deletes 2 duplicated helpers</li>
+    <li>TUI inherits auto-fetch for free</li>
+  </ul>
+</article>
+
+<h3>Interface (TUI)</h3>
+
+<article id="c-header">
+  <h4>Route the dashboard header through the width helper every other surface uses</h4>
+  <p class="callout callout--happy"><b>Strong</b> · 83 · <code>gui</code></p>
+  <p class="cite"><code>internal/tui/dashboard/header.go:13-61</code> <span>renderHeader</span> · <code>help_row.go:28-35</code> · <code>row_render.go:14</code> · <code>model.go:83</code>, <code>:386</code></p>
+  <p><b>Problem.</b> <code>renderHeader</code> concatenates the view-tab list plus every collection's <code>name: cached/total</code> count and writes it straight out. Every other render path in the package — <code>helpRowText</code>, <code>renderCell</code> — routes text through <code>tui.TruncateWithEllipsis</code> keyed on <code>termWidth</code> first. <code>Model</code> already carries <code>termWidth</code>; <code>renderHeader</code> never receives it. It is the one surface with no width discipline, in exactly the narrow-terminal case the rest of the package was built to survive.</p>
+  <p><b>Solution.</b> Build the tab + summary line into a local string, then <code>tui.TruncateWithEllipsis(line, m.termWidth)</code> before <code>b.WriteString</code> — the pattern already used for rows and help text.</p>
+  <ul>
+    <li>Last unbounded surface joins the rule</li>
+    <li>Helper and <code>termWidth</code> both already exist</li>
+  </ul>
+</article>
+
+</section>
+
+<section id="top-recommendation">
+  <h2>Top recommendation</h2>
+  <article>
+    <h3><a href="#c-verify">Rename <code>.claude/skills/verify/</code> to <code>verify-project/</code> and track it</a></h3>
+    <p>Highest-scoring finding of the run at 95, and the only one two lenses reached from opposite directions — <code>layout</code> from the repo standard, <code>claude-md</code> from the instruction files. It is also first in dependency order: it repairs the path every other card on this list gets checked through, and until it resolves to the project's own skill rather than the bundled one, "verified" means something the repo can't inspect.</p>
+    <p class="cite">Next by leverage: <a href="#c-vlc">the VLC detection skip</a> (2.0 s off every inspect command, measured) and <a href="#c-clidocs">the CLI reference gap</a> (the primary interface is undocumented — two lenses).</p>
+  </article>
+</section>
