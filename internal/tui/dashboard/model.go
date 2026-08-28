@@ -1932,6 +1932,19 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 	v := m.timelineView
 	key := msg.String()
 
+	// While a slot is marked, ↑/↓ walk only the slots it could actually trade
+	// with. Every other slot is a dead stop under this gesture — a swap needs
+	// a partner from the same pool — so stepping onto one is a keypress that
+	// cannot lead anywhere.
+	if v.marked && v.focusPanel == 1 && !v.concatFocus {
+		switch key {
+		case "up", "k":
+			return m.moveMarkedCursor(v, -1), nil
+		case "down", "j":
+			return m.moveMarkedCursor(v, +1), nil
+		}
+	}
+
 	switch key {
 	case "r":
 		c := execCommand("powerhour", "finalize", "--project", m.pp.Root)
@@ -2188,6 +2201,25 @@ func (m Model) handleOrderSelect(v timelineView) (tea.Model, tea.Cmd) {
 	v.orderNote = cycleNote
 	m.timelineView = v
 	return m, nil
+}
+
+// moveMarkedCursor steps the cursor to the next slot in the marked slot's
+// collection, in the given direction, and stops at the ends rather than
+// wrapping. A collection with a single slot leaves the cursor where it is.
+func (m Model) moveMarkedCursor(v timelineView, delta int) Model {
+	if v.markedSlot < 0 || v.markedSlot >= len(m.order.Slots) {
+		return m
+	}
+	want := m.order.Slots[v.markedSlot].Collection
+	for i := v.resCursor + delta; i >= 0 && i < len(m.order.Slots); i += delta {
+		if m.order.Slots[i].Collection == want {
+			v.resCursor = i
+			v.autoScrollRes()
+			break
+		}
+	}
+	m.timelineView = v
+	return m
 }
 
 // markNote is the footer line the mark-and-swap mode holds while a slot is

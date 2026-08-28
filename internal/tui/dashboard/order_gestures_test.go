@@ -475,3 +475,64 @@ func TestOrderGestureCycleWrapsBackToTheStart(t *testing.T) {
 		t.Fatal("slot 3 still marked pending after wrapping back to the start")
 	}
 }
+
+// TestOrderGestureMarkedCursorSkipsOtherPools verifies that while a slot is
+// marked the cursor steps only between slots it could trade with. In a real
+// project songs and interstitials alternate, so an unfiltered cursor makes
+// every second keypress a dead stop.
+func TestOrderGestureMarkedCursorSkipsOtherPools(t *testing.T) {
+	m := testOrderGestureModel(t)
+	// Interleave the two collections the way a real timeline does:
+	// song, ad, song, ad, song.
+	m.order.Slots = []playback.Slot{
+		{Collection: "songs", RowID: "aaa111"},
+		{Collection: "ads", RowID: "ddd444"},
+		{Collection: "songs", RowID: "bbb222"},
+		{Collection: "ads", RowID: "eee555"},
+		{Collection: "songs", RowID: "ccc333"},
+	}
+	m.timelineView.order = m.order
+	m.timelineView.resCursor = 0
+
+	marked, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = marked.(Model)
+
+	for _, want := range []int{2, 4, 4} { // the last stops at the end, no wrap
+		next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(Model)
+		if m.timelineView.resCursor != want {
+			t.Fatalf("resCursor = %d, want %d — the cursor must skip the ads slots", m.timelineView.resCursor, want)
+		}
+	}
+
+	for _, want := range []int{2, 0, 0} {
+		next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+		m = next.(Model)
+		if m.timelineView.resCursor != want {
+			t.Fatalf("resCursor = %d going up, want %d", m.timelineView.resCursor, want)
+		}
+	}
+	// The mark survives the whole walk: filtering the cursor must not be able
+	// to cancel the gesture it exists to serve. (The swap itself is covered by
+	// TestOrderGestureMarkAndSwap, against an order the real config produces —
+	// persistOrder re-resolves through Reconcile, which would discard this
+	// hand-built interleaving.)
+	if !m.timelineView.marked || m.timelineView.markedSlot != 0 {
+		t.Fatalf("marked=%v markedSlot=%d after the walk, want true/0", m.timelineView.marked, m.timelineView.markedSlot)
+	}
+}
+
+// TestOrderGestureUnmarkedCursorVisitsEveryRow verifies the filtering is
+// scoped to the gesture: with nothing marked, ↓ still walks every slot.
+func TestOrderGestureUnmarkedCursorVisitsEveryRow(t *testing.T) {
+	m := testOrderGestureModel(t)
+	m.timelineView.resCursor = 0
+
+	for want := 1; want <= 3; want++ {
+		next, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+		m = next.(Model)
+		if m.timelineView.resCursor != want {
+			t.Fatalf("resCursor = %d, want %d — an unmarked cursor skips nothing", m.timelineView.resCursor, want)
+		}
+	}
+}
