@@ -441,6 +441,76 @@ go run ./cmd/powerhour library verify [--fix] [--json]
 
 Verifies that all library files are readable and not corrupted. With `--fix`, attempts to re-download any corrupt or missing URL-backed sources.
 
+## Playback Order
+
+The playback order is the materialized, authoritative list of slots (collection rows and inline `file:` entries) that make up the final concatenated output, stored at `playback-order.yaml` in the project root. Every subcommand reconciles the stored order against the current timeline and pools before acting, and reports what changed (rows dropped, added, or filled) so a stale order is never mutated silently.
+
+### `powerhour order`
+
+List every slot: number, kind, collection, row id, resolved display label, and lock state.
+
+```bash
+powerhour order [--json]
+go run ./cmd/powerhour order [--json]
+```
+
+### `powerhour order swap`
+
+Swap the occupants of two slots.
+
+```bash
+powerhour order swap <slotA> <slotB> [--json]
+go run ./cmd/powerhour order swap <slotA> <slotB> [--json]
+```
+
+Slot numbers are 1-based, matching `powerhour order`'s listing. A slot backed by an inline `file:` entry has no collection or pool — it always holds its position — so swapping it errors. Swapping a locked slot is allowed; locking only excludes a slot from `shuffle`.
+
+### `powerhour order set`
+
+Assign a specific row id to a slot.
+
+```bash
+powerhour order set <slot> <row-id> [--json]
+go run ./cmd/powerhour order set <slot> <row-id> [--json]
+```
+
+The row id must belong to the slot's own collection. A `file:` slot cannot be set, for the same reason it cannot be swapped.
+
+### `powerhour order lock` / `powerhour order unlock`
+
+Lock or unlock a slot so `shuffle` skips (or resumes) touching it.
+
+```bash
+powerhour order lock <slot> [--json]
+powerhour order unlock <slot> [--json]
+go run ./cmd/powerhour order lock <slot> [--json]
+go run ./cmd/powerhour order unlock <slot> [--json]
+```
+
+### `powerhour order shuffle`
+
+Shuffle playback-order slots.
+
+```bash
+powerhour order shuffle [--collection <name>] [--json]
+go run ./cmd/powerhour order shuffle [--collection <name>] [--json]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--collection <name>` | Shuffle only this collection's slots; omit to shuffle every collection present in the order |
+
+Scope is global: the shuffled group spans the whole order regardless of which timeline sequence entry produced each slot, so a song can freely cross a `file:` bookend like an intermission clip. Locked slots are excluded. Behavior follows the collection's `selection`: `once` permutes the rows already occupying the group (every row keeps exactly one slot); `repeat` redraws each slot independently from the collection's full pool.
+
+### `powerhour order reconcile`
+
+Reconcile the stored order against the current timeline and pools without otherwise mutating it, reporting and persisting whatever changed.
+
+```bash
+powerhour order reconcile [--json]
+go run ./cmd/powerhour order reconcile [--json]
+```
+
 ## Cleanup
 
 ### `powerhour clean segments`

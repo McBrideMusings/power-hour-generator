@@ -48,6 +48,37 @@ type CollectionConfig struct {
 	FieldMap map[string][]string `yaml:"field_map,omitempty"`
 }
 
+// Selection is the normalized form of CollectionConfig.Selection — whether a
+// collection's pool is consumed once or cycles. The yaml field itself stays
+// a plain string (validation.go and playback/reconcile.go read it as one);
+// this named type exists only where callers (playback.Shuffle and its
+// callers) need a typed value instead of a bare string.
+type Selection string
+
+const (
+	// SelectionOnce consumes each pool row exactly once — the pool runs out.
+	SelectionOnce Selection = "once"
+	// SelectionRepeat cycles the pool with modulo wraparound.
+	SelectionRepeat Selection = "repeat"
+)
+
+// ParseSelection normalizes a raw selection string (trimmed, lowercased).
+// An empty string defaults to SelectionOnce, matching CollectionConfig's own
+// applyDefaults; any other value passes through unchanged so a caller can
+// still detect and reject an unrecognized selection.
+func ParseSelection(s string) Selection {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return SelectionOnce
+	}
+	return Selection(s)
+}
+
+// SelectionValue returns the normalized Selection for this collection.
+func (c CollectionConfig) SelectionValue() Selection {
+	return ParseSelection(c.Selection)
+}
+
 // TimelineConfig defines the playback sequence for the power hour.
 type TimelineConfig struct {
 	Sequence []SequenceEntry `yaml:"sequence"`
@@ -418,7 +449,13 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("read config: %w", err)
 	}
 
-	cfg := Default()
+	// Unmarshal into a bare Config, not Default(): yaml.v3 merges into a
+	// pre-populated map/slice field rather than replacing it, so seeding
+	// Collections/Timeline from Default() here would leave the default
+	// "interstitials" collection and its sequence entry behind even when
+	// the file declares its own collections and never mentions it.
+	// ApplyDefaults below still backfills every scalar field.
+	var cfg Config
 	if err := yaml.Unmarshal(contents, &cfg); err != nil {
 		return Config{}, fmt.Errorf("unmarshal config: %w", err)
 	}
