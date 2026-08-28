@@ -215,3 +215,50 @@ func TestSegmentBaseNameLeavesSpecificNamesAlone(t *testing.T) {
 		t.Fatalf("name = %q, want 002_miami unchanged", got)
 	}
 }
+
+// TestSourceCacheResolvesEachLinkOnce verifies the memo: a link is resolved
+// once per loaded state, however many times the readiness map asks for it.
+// Reordering the playback order cannot change whether a source file exists,
+// so a gesture must never pay to find out again — on a plan whose links sit
+// on a network mount, each cold stat costs hundreds of milliseconds.
+func TestSourceCacheResolvesEachLinkOnce(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	c := newSourceCache()
+	row := csvplan.CollectionRow{Link: present}
+	first := c.resolve(nil, dir, row)
+	if first != present {
+		t.Fatalf("resolve = %q, want %q", first, present)
+	}
+
+	// Delete the file: a second resolve that hit the disk would now return "".
+	if err := os.Remove(present); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got := c.resolve(nil, dir, row); got != present {
+		t.Fatalf("resolve = %q after the file vanished, want the memoized %q — the second call went to disk", got, present)
+	}
+
+	// A fresh cache is what a reload gets, and it sees the current truth.
+	if got := newSourceCache().resolve(nil, dir, row); got != "" {
+		t.Fatalf("a fresh cache returned %q, want \"\" — a reload must re-resolve", got)
+	}
+}
+
+// TestSourceCacheNilResolvesDirectly verifies the nil receiver still works,
+// so a caller with no cache is not a nil-pointer panic.
+func TestSourceCacheNilResolvesDirectly(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "clip.mp4")
+	if err := os.WriteFile(present, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var c *sourceCache
+	if got := c.resolve(nil, dir, csvplan.CollectionRow{Link: present}); got != present {
+		t.Fatalf("nil-receiver resolve = %q, want %q", got, present)
+	}
+}

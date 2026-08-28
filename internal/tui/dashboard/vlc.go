@@ -198,6 +198,42 @@ func resolveRenderedSegmentPath(scan *segmentScanner, pp paths.ProjectPaths, cfg
 	return scan.find(cfg.SegmentFilenameTemplate(), seg)
 }
 
+// sourceCache memoizes resolveSourcePath for the life of one loaded project
+// state. A plan's local links commonly point at a network mount — an SMB
+// share, say — where a cold os.Stat costs hundreds of milliseconds each, and
+// the readiness map re-resolves every row of every collection after every
+// playback-order gesture. Without this, one lock or swap pays for a full
+// round of network stats whenever the OS cache has gone cold.
+//
+// It is deliberately keyed on the link alone and never invalidated in place:
+// its lifetime is a reload. Anything that changes what a link resolves to —
+// a fetch, an edit, a refresh — rebuilds the model and gets a fresh cache.
+type sourceCache struct {
+	paths map[string]string
+}
+
+func newSourceCache() *sourceCache {
+	return &sourceCache{paths: make(map[string]string)}
+}
+
+// resolve returns the row's source path, consulting the memo first. A nil
+// receiver resolves without memoizing, so callers with no cache still work.
+func (c *sourceCache) resolve(idx *cache.Index, root string, row csvplan.CollectionRow) string {
+	if c == nil {
+		return resolveSourcePath(idx, root, row)
+	}
+	key := strings.TrimSpace(row.Link)
+	if key == "" {
+		return ""
+	}
+	if path, ok := c.paths[key]; ok {
+		return path
+	}
+	path := resolveSourcePath(idx, root, row)
+	c.paths[key] = path
+	return path
+}
+
 // resolveSourcePath resolves a collection row's original (unrendered, uncut)
 // source file: the cached download for a URL, or the local file it points at.
 // Returns "" when nothing resolvable exists on disk.

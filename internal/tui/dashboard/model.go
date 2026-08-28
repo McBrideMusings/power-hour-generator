@@ -89,6 +89,13 @@ type Model struct {
 	// Cache status per row (for timeline dots).
 	cacheStatus map[string]string
 
+	// srcCache memoizes source-path resolution for the life of this loaded
+	// state. buildCacheStatus walks every collection, so a gesture touching
+	// only songs still resolves every interstitial's source — and a plan's
+	// local links commonly sit on a network mount where each cold stat costs
+	// hundreds of milliseconds.
+	srcCache *sourceCache
+
 	// Tool warning text (empty = no warning).
 	toolWarning string
 
@@ -217,7 +224,8 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 
 	// Build summaries and cache status.
 	summaries := buildSummaries(collections, names, idx, pp, cfg, pos, rs)
-	cacheStatus := buildCacheStatus(cfg, collections, pos, idx, pp)
+	srcCache := newSourceCache()
+	cacheStatus := buildCacheStatus(cfg, collections, pos, idx, pp, srcCache)
 
 	m := Model{
 		cfg:             cfg,
@@ -232,6 +240,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 		collectionViews: collViews,
 		summaries:       summaries,
 		cacheStatus:     cacheStatus,
+		srcCache:        srcCache,
 		toolWarning:     toolWarning,
 		toolStatuses:    toolStatuses,
 		cacheView:       newCacheView(cfg, idx, buildCollectionLinks(collections)),
@@ -2317,7 +2326,7 @@ func previewOrder(m Model) Model {
 	m.timeline = project.EntriesFromPlacements(placements)
 	m.timelineView.resolved = m.timeline
 	m.timelineView.order = m.order
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp, m.srcCache)
 	return m
 }
 
@@ -2379,7 +2388,7 @@ func (m Model) handleOrderToggleLock(v timelineView) (tea.Model, tea.Cmd) {
 		note = "unlocked"
 	}
 	m.timelineView = v
-	return m.persistOrder(note), nil
+	return m.persistOrderLockOnly(note), nil
 }
 
 // handleOrderShuffle implements the `S` gesture: shuffle the unlocked slots
@@ -2423,12 +2432,28 @@ func (m Model) handleOrderShuffle(v timelineView) (tea.Model, tea.Cmd) {
 // panel and `finalize` never disagree — and recomputes the readiness dots,
 // since a mutation can go stale relative to already-rendered segments.
 func (m Model) persistOrder(note string) Model {
+	return m.persistOrderWithReadiness(note, true)
+}
+
+// persistOrderLockOnly is persistOrder for a mutation that moved no row.
+// Locking changes which slots Shuffle may touch and nothing else — no row
+// changes position, so no segment's expected filename changes and no dot can
+// change colour. Rebuilding readiness anyway walks every collection and
+// re-resolves every row's source, which is what made a lock cost a round of
+// network stats on a plan whose links sit on a mounted share.
+func (m Model) persistOrderLockOnly(note string) Model {
+	return m.persistOrderWithReadiness(note, false)
+}
+
+func (m Model) persistOrderWithReadiness(note string, readiness bool) Model {
 	if err := playback.Save(m.pp.Root, m.order); err != nil {
 		m.statusMsg = fmt.Sprintf("Save playback order error: %v", err)
 		return m
 	}
 	m = syncPlaybackOrder(m)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
+	if readiness {
+		m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp, m.srcCache)
+	}
 	m.timelineView.orderNote = note
 	return m
 }
@@ -3775,7 +3800,7 @@ func reResolve(m Model) Model {
 	m = syncPlaybackOrder(m)
 
 	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.positions(), m.renderState)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp, m.srcCache)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
 	oldShowAll := m.cacheView.showAll
 	m.cacheView = newCacheView(m.cfg, m.cacheIdx, buildCollectionLinks(m.collections))
@@ -3804,7 +3829,7 @@ func reloadState(m Model) Model {
 	m.cacheView.showAll = oldShowAll
 	pos := m.positions()
 	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, pos, rs)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, pos, idx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, pos, idx, m.pp, m.srcCache)
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
 		coll := m.collections[collName]
@@ -4033,14 +4058,14 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 // "rendered" state for preview purposes — an inline file plays as-is either
 // way, untrimmed and without overlays — so they're binary: "rendered" (the
 // file exists) or "missing" (it doesn't).
-func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, pos playback.PositionIndex, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
+func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, pos playback.PositionIndex, idx *cache.Index, pp paths.ProjectPaths, src *sourceCache) map[string]string {
 	status := make(map[string]string)
 	scan := newSegmentScanner()
 	for name, coll := range collections {
 		for _, row := range coll.Rows {
 			key := fmt.Sprintf("%s:%d", name, row.Index)
 			rendered, numbered := resolveRenderedSegmentPath(scan, pp, cfg, pos, name, coll, row)
-			raw := resolveSourcePath(idx, pp.Root, row)
+			raw := src.resolve(idx, pp.Root, row)
 			status[key] = playbackReadiness(rendered, numbered, raw)
 		}
 	}
