@@ -477,6 +477,32 @@ func TestInlineEditCtrlEMovesToEnd(t *testing.T) {
 	}
 }
 
+func TestInlineEditCtrlUKillsToStartOfLine(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeInlineEdit
+	m.editFieldIdx = 0
+	m.editValue = "First Song"
+	m.editOriginal = "First Song"
+	m.editCursor = len("First ")
+	m.collectionViews[0].editing = true
+	m.collectionViews[0].editFieldIdx = 0
+	m.collectionViews[0].editValue = "First Song"
+	m.collectionViews[0].editCursor = len("First ")
+
+	gotModel, _ := m.handleInlineEditKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := gotModel.(Model)
+
+	if got.editValue != "Song" {
+		t.Fatalf("editValue after Ctrl+U = %q, want %q", got.editValue, "Song")
+	}
+	if got.editCursor != 0 {
+		t.Fatalf("editCursor after Ctrl+U = %d, want 0", got.editCursor)
+	}
+	if got.collectionViews[0].editValue != "Song" {
+		t.Fatalf("collectionViews[0].editValue after Ctrl+U = %q, want %q", got.collectionViews[0].editValue, "Song")
+	}
+}
+
 func TestInlineEditOptionBackspaceDeletesWord(t *testing.T) {
 	m := testCollectionModel(t)
 	m.mode = modeInlineEdit
@@ -928,6 +954,31 @@ func TestAddClipBackspaceAndCaretEditBuffer(t *testing.T) {
 	}
 }
 
+func TestAddClipCtrlUKillsToStartOfLine(t *testing.T) {
+	m := testCollectionModel(t)
+	m.mode = modeAddClip
+	m.addCvIdx = 0
+	m.addBuffer = "https://youtu.be/abc123"
+	m.addCursor = len("https://")
+	m.collectionViews[0].addFocus = true
+	m.collectionViews[0].addBuffer = m.addBuffer
+	m.collectionViews[0].addCursor = m.addCursor
+
+	gotModel, _ := m.handleAddClipKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := gotModel.(Model)
+
+	want := "youtu.be/abc123"
+	if got.addBuffer != want {
+		t.Fatalf("addBuffer after Ctrl+U = %q, want %q", got.addBuffer, want)
+	}
+	if got.addCursor != 0 {
+		t.Fatalf("addCursor after Ctrl+U = %d, want 0", got.addCursor)
+	}
+	if got.collectionViews[0].addBuffer != want {
+		t.Fatalf("view addBuffer after Ctrl+U = %q, want %q", got.collectionViews[0].addBuffer, want)
+	}
+}
+
 func TestInlineEditLinkCtrlRStartsProbe(t *testing.T) {
 	m := testCollectionModel(t)
 	m.mode = modeInlineEdit
@@ -1058,6 +1109,24 @@ func TestHandleAddSeqKeyEscCancels(t *testing.T) {
 	}
 	if len(got.timelineView.sequence) != 1 {
 		t.Fatalf("sequence len = %d, want unchanged 1", len(got.timelineView.sequence))
+	}
+}
+
+func TestHandleAddSeqKeyCtrlUKillsToStartOfLine(t *testing.T) {
+	m := testTimelineModel(t)
+	m.mode = modeAddSeq
+	m.timelineView.addFocus = true
+	m.timelineView.addBuffer = "songs"
+	m.timelineView.addCursor = len("so")
+
+	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := gotModel.(Model)
+
+	if got.timelineView.addBuffer != "ngs" {
+		t.Fatalf("addBuffer after Ctrl+U = %q, want %q", got.timelineView.addBuffer, "ngs")
+	}
+	if got.timelineView.addCursor != 0 {
+		t.Fatalf("addCursor after Ctrl+U = %d, want 0", got.timelineView.addCursor)
 	}
 }
 
@@ -2448,6 +2517,50 @@ func TestHandleAddCacheKeyTypesIntoBuffer(t *testing.T) {
 	}
 	if m.cacheView.addHint == "" {
 		t.Fatal("addHint = \"\", want a classification hint for a recognized YouTube ID")
+	}
+}
+
+func TestHandleAddCacheKeyCtrlUKillsToStartOfLine(t *testing.T) {
+	root := t.TempDir()
+	idx := &cache.Index{Entries: map[string]cache.Entry{}}
+	m := newTestCacheModel(t, root, idx, nil)
+	m.mode = modeAddCache
+	m.cacheView.addFocus = true
+	m.cacheView.addBuffer = "HWl1Tu9oZmY"
+	m.cacheView.addCursor = len("HWl1")
+
+	gotModel, _ := m.handleAddCacheKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := gotModel.(Model)
+
+	want := "Tu9oZmY"
+	if got.cacheView.addBuffer != want {
+		t.Fatalf("addBuffer after Ctrl+U = %q, want %q", got.cacheView.addBuffer, want)
+	}
+	if got.cacheView.addCursor != 0 {
+		t.Fatalf("addCursor after Ctrl+U = %d, want 0", got.cacheView.addCursor)
+	}
+}
+
+func TestHandleCacheInlineEditKeyCtrlUKillsToStartOfLine(t *testing.T) {
+	root := t.TempDir()
+	idx, links := buildNCacheEntries(t, root, 1)
+	m := newTestCacheModel(t, root, idx, links)
+	m.mode = modeCacheInlineEdit
+	v := m.cacheView
+	v.editing = true
+	v.editFieldIdx = 0
+	v.editValue = "First Song"
+	v.editCursor = len("First ")
+	m.cacheView = v
+
+	gotModel, _ := m.handleCacheInlineEditKey(tea.KeyMsg{Type: tea.KeyCtrlU})
+	got := gotModel.(Model)
+
+	if got.cacheView.editValue != "Song" {
+		t.Fatalf("editValue after Ctrl+U = %q, want %q", got.cacheView.editValue, "Song")
+	}
+	if got.cacheView.editCursor != 0 {
+		t.Fatalf("editCursor after Ctrl+U = %d, want 0", got.cacheView.editCursor)
 	}
 }
 

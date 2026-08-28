@@ -910,6 +910,15 @@ func (m Model) handleInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.refreshInlineEditHint(cvIdx)
 		return m, nil
 
+	case tea.KeyCtrlU:
+		// Unix-style kill-to-start-of-line: drop everything before the cursor.
+		m.editValue = m.editValue[m.editCursor:]
+		m.editCursor = 0
+		m.collectionViews[cvIdx].editValue = m.editValue
+		m.collectionViews[cvIdx].editCursor = m.editCursor
+		m = m.refreshInlineEditHint(cvIdx)
+		return m, nil
+
 	case tea.KeyRunes:
 		ch := string(msg.Runes)
 		m.editValue = m.editValue[:m.editCursor] + ch + m.editValue[m.editCursor:]
@@ -1175,6 +1184,14 @@ func (m Model) handleAddClipKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.refreshAddClipHint(cvIdx)
 		return m, nil
 
+	case tea.KeyCtrlU:
+		// Unix-style kill-to-start-of-line: drop everything before the cursor.
+		m.addBuffer = m.addBuffer[m.addCursor:]
+		m.addCursor = 0
+		m.syncAddClipBuffer(cvIdx)
+		m = m.refreshAddClipHint(cvIdx)
+		return m, nil
+
 	case tea.KeyRunes:
 		ch := string(msg.Runes)
 		m.addBuffer = m.addBuffer[:m.addCursor] + ch + m.addBuffer[m.addCursor:]
@@ -1296,6 +1313,13 @@ func (m Model) handleAddSeqKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.timelineView = v
 		return m, nil
 
+	case tea.KeyCtrlU:
+		// Unix-style kill-to-start-of-line: drop everything before the cursor.
+		v.addBuffer = v.addBuffer[v.addCursor:]
+		v.addCursor = 0
+		m.timelineView = v
+		return m, nil
+
 	case tea.KeyRunes:
 		ch := string(msg.Runes)
 		v.addBuffer = v.addBuffer[:v.addCursor] + ch + v.addBuffer[v.addCursor:]
@@ -1366,6 +1390,14 @@ func (m Model) handleAddCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			v.addBuffer = v.addBuffer[:v.addCursor-1] + v.addBuffer[v.addCursor:]
 			v.addCursor--
 		}
+		m.cacheView = v
+		m = m.refreshAddCacheHint()
+		return m, nil
+
+	case tea.KeyCtrlU:
+		// Unix-style kill-to-start-of-line: drop everything before the cursor.
+		v.addBuffer = v.addBuffer[v.addCursor:]
+		v.addCursor = 0
 		m.cacheView = v
 		m = m.refreshAddCacheHint()
 		return m, nil
@@ -1580,7 +1612,8 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 			m.resetAddClipInput(cvIdx, true)
 			return m, nil
 		}
-		coll = project.AppendCollectionRows(coll, rows)
+		deduped, skipped := project.DedupeImportedRows(coll, rows)
+		coll = project.AppendCollectionRows(coll, deduped)
 		if err := project.WriteCollectionPlan(coll); err != nil {
 			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("write error: %v", err))
 			m.resetAddClipInput(cvIdx, true)
@@ -1588,11 +1621,15 @@ func (m Model) dispatchAddBuffer(cvIdx int, value string) (tea.Model, tea.Cmd) {
 		}
 		m.collections[collName] = coll
 		m = reloadCollection(m, cvIdx)
-		if len(rows) > 0 {
+		if len(deduped) > 0 {
 			m.collectionViews[cvIdx].cursor = len(m.collectionViews[cvIdx].rows) - 1
 			m.collectionViews[cvIdx].autoScroll()
-			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("imported %d rows from %s", len(rows), format))
 		}
+		note := fmt.Sprintf("imported %d rows from %s", len(deduped), format)
+		if skipped > 0 {
+			note = fmt.Sprintf("imported %d rows from %s, skipped %d duplicates", len(deduped), format, skipped)
+		}
+		m = m.setCollectionCursorNote(cvIdx, note)
 		// Stay in modeAddClip with an empty buffer so another paste is ready.
 		m.resetAddClipInput(cvIdx, true)
 		return m, nil
@@ -2367,6 +2404,10 @@ func (m Model) handleCacheInlineEditKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		v.editCursor = 0
 	case tea.KeyEnd:
 		v.editCursor = len(v.editValue)
+	case tea.KeyCtrlU:
+		// Unix-style kill-to-start-of-line: drop everything before the cursor.
+		v.editValue = v.editValue[v.editCursor:]
+		v.editCursor = 0
 	case tea.KeySpace:
 		v.editValue = v.editValue[:v.editCursor] + " " + v.editValue[v.editCursor:]
 		v.editCursor++
@@ -2887,7 +2928,6 @@ func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.Colle
 		events <- jobCompletedEvent{label: "Fetch", err: err}
 		return
 	}
-	dirty := false
 	if all {
 		events <- jobCollectionStatusEvent{collectionIdx: cvIdx, status: "fetching all"}
 		for _, row := range rows {
@@ -2902,7 +2942,13 @@ func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.Colle
 			events <- jobCompletedEvent{label: "Fetch", err: err}
 			return
 		}
-		dirty = dirty || result.Updated
+		if result.Updated {
+			if saveErr := cache.Save(pp, idx); saveErr != nil {
+				events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: "note:ERROR - " + strings.TrimSpace(saveErr.Error())}
+				events <- jobCompletedEvent{label: "Fetch", err: saveErr}
+				return
+			}
+		}
 		finalStatus := "OK"
 		switch result.Status {
 		case cache.ResolveStatusCached, cache.ResolveStatusMatched:
@@ -2911,12 +2957,6 @@ func runDashboardFetchJob(pp paths.ProjectPaths, cvIdx int, rows []csvplan.Colle
 			finalStatus = "note:ERROR - source could not be resolved"
 		}
 		events <- jobRowStatusEvent{collectionIdx: cvIdx, rowIndex: row.Index, status: finalStatus}
-	}
-	if dirty {
-		if err := cache.Save(pp, idx); err != nil {
-			events <- jobCompletedEvent{label: "Fetch", err: err}
-			return
-		}
 	}
 	events <- jobCompletedEvent{label: "Fetch", err: nil}
 }
@@ -3189,7 +3229,8 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		coll = project.AppendCollectionRows(coll, rows)
+		deduped, skipped := project.DedupeImportedRows(coll, rows)
+		coll = project.AppendCollectionRows(coll, deduped)
 		if err := project.WriteCollectionPlan(coll); err != nil {
 			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("write error: %v", err))
 			return m, nil
@@ -3197,11 +3238,15 @@ func (m Model) processAddRow(value string) (tea.Model, tea.Cmd) {
 
 		m.collections[collName] = coll
 		m = reloadCollection(m, cvIdx)
-		if len(rows) > 0 {
+		if len(deduped) > 0 {
 			m.collectionViews[cvIdx].cursor = len(m.collectionViews[cvIdx].rows) - 1
 			m.collectionViews[cvIdx].autoScroll()
-			m = m.setCollectionCursorNote(cvIdx, fmt.Sprintf("imported %d rows from %s", len(rows), format))
 		}
+		note := fmt.Sprintf("imported %d rows from %s", len(deduped), format)
+		if skipped > 0 {
+			note = fmt.Sprintf("imported %d rows from %s, skipped %d duplicates", len(deduped), format, skipped)
+		}
+		m = m.setCollectionCursorNote(cvIdx, note)
 		return m, nil
 	}
 
