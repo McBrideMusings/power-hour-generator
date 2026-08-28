@@ -88,7 +88,9 @@ gofmt -w $(find cmd internal pkg -name '*.go')
 
 - **No backwards compatibility**: Freely break older project layouts; migrate forward instead of supporting legacy configs.
 - **Single source of truth**: CSV plan and YAML config are authoritative; caches are derived state.
-- **Template system**: Download filenames use `$TOKEN` placeholders. Overlay text uses `{token}` brace syntax (case-insensitive). Dynamic fields from CSV columns are automatically available in both.
+- **Segment names always identify the row**: `render.SegmentBaseName`'s `withRowIdentity` appends the row id when the template rendered a name that owes nothing to the row — a collection with no `title`/`name` column renders `$INDEX_PAD3_$SAFE_TITLE` down to `001`, a name made entirely of playback position, so two such rows are distinguished only by where they sit and reordering silently repoints one at another's file. Whether the row contributed is decided by rendering the template a second time against a blank `csvplan.Row`: an identical result means every character came from somewhere other than the row. Interstitials therefore render as `003_2d34ef.mp4`; song segments, whose titles already make the name specific, are left alone. Migrating a project that already has position-only segments is a rename, not a re-encode — `state.DetectChanges` keys on row identity and renames `prior.OutputPath` to the new name.
+
+**Template system**: Download filenames use `$TOKEN` placeholders. Overlay text uses `{token}` brace syntax (case-insensitive). Dynamic fields from CSV columns are automatically available in both.
 - **Overlay profiles** under `profiles.overlays` are the single source of truth for overlay configuration. Do not recreate legacy `overlays` blocks.
 - **Timing anchors**: `from_start`, `from_end`, `absolute`, `persistent`. Each overlay segment supports independent fade in/out.
 - **Never show a blank screen**: Every CLI phase must have visible progress feedback — use `StatusWriter` for setup phases and `ProgressModel` for main work.

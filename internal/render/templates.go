@@ -7,8 +7,12 @@ import (
 	"strings"
 
 	"powerhour/internal/project"
+	"powerhour/pkg/csvplan"
 )
 
+// SegmentBaseName renders a segment's output filename (without extension)
+// from the template. The result is guaranteed to identify the row, not just
+// its position: see withRowIdentity.
 func SegmentBaseName(template string, seg Segment) string {
 	template = strings.TrimSpace(template)
 	values := segmentTemplateValues(seg)
@@ -20,7 +24,34 @@ func SegmentBaseName(template string, seg Segment) string {
 	if base == "" {
 		return sanitizeSegment(fallbackSegmentBase(seg.Clip))
 	}
-	return base
+	return withRowIdentity(base, template, seg)
+}
+
+// withRowIdentity appends the row id when the template rendered a name that
+// owes nothing to the row itself.
+//
+// A collection with no title or name column — an interstitials plan, say —
+// renders $INDEX_PAD3_$SAFE_TITLE down to "001", a name made entirely of
+// playback position. Two such rows are then distinguished only by where they
+// happen to sit in the order, so reordering silently repoints a row at
+// another row's file, and anything matching segments by anything other than
+// exact position matches all of them equally.
+//
+// Whether the row contributed is decided by rendering the template a second
+// time against a blank row: an identical result means every character of the
+// name came from somewhere other than the row.
+func withRowIdentity(base, template string, seg Segment) string {
+	id := strings.TrimSpace(seg.Clip.Row.RowID)
+	if id == "" {
+		return base
+	}
+	blank := seg
+	blank.Clip.Row = csvplan.Row{Index: seg.Clip.Row.Index}
+	blank.Clip.MediaPath = ""
+	if sanitizeSegment(applySegmentTemplate(template, segmentTemplateValues(blank))) != base {
+		return base
+	}
+	return base + "_" + id
 }
 
 func fallbackSegmentBase(clip project.Clip) string {

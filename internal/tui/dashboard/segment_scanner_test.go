@@ -155,3 +155,63 @@ func TestSegmentScannerPrefersNewest(t *testing.T) {
 		t.Fatalf("find = %q, want the newer segment %q", path, newer.OutputPath)
 	}
 }
+
+// TestSegmentScannerRefusesPositionOnlyNames is the guard behind the bug where
+// two interstitials played the same video: with no title column the template
+// renders down to pure position ("001"), leaving an empty prefix and suffix
+// that match every file in the directory.
+func TestSegmentScannerRefusesPositionOnlyNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"001.mp4", "002.mp4"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	// A row with no id and no title: nothing can make its name specific.
+	seg := render.Segment{Clip: project.Clip{PlaybackPosition: 9}}
+	seg.OutputPath = filepath.Join(dir, render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", seg)+".mp4")
+
+	path, numbered := newSegmentScanner().find("$INDEX_PAD3_$SAFE_TITLE", seg)
+	if path != "" || numbered {
+		t.Fatalf("find = (%q, %v), want (\"\", false) — a position-only name must never match another row", path, numbered)
+	}
+}
+
+// TestSegmentBaseNameAppendsRowIDWhenNameIsPositionOnly verifies the naming
+// fix: a titleless row's segment carries its row id, so two of them can never
+// resolve to the same file.
+func TestSegmentBaseNameAppendsRowIDWhenNameIsPositionOnly(t *testing.T) {
+	a := render.Segment{Clip: project.Clip{PlaybackPosition: 14, Row: csvplan.Row{RowID: "285919"}}}
+	b := render.Segment{Clip: project.Clip{PlaybackPosition: 15, Row: csvplan.Row{RowID: "0335f2"}}}
+
+	nameA := render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", a)
+	nameB := render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", b)
+	if nameA != "014_285919" {
+		t.Fatalf("name = %q, want 014_285919", nameA)
+	}
+	if nameA == nameB {
+		t.Fatalf("two titleless rows share the name %q", nameA)
+	}
+
+	// The same row at a different position keeps its id, so the scanner's
+	// prefix/suffix can still find it after a reorder.
+	moved := a
+	moved.Clip.PlaybackPosition = 90
+	if got := render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", moved); got != "090_285919" {
+		t.Fatalf("moved name = %q, want 090_285919", got)
+	}
+}
+
+// TestSegmentBaseNameLeavesSpecificNamesAlone verifies a row that does
+// contribute to its own name is not given a redundant id suffix — the 120
+// already-rendered song segments must keep resolving.
+func TestSegmentBaseNameLeavesSpecificNamesAlone(t *testing.T) {
+	seg := render.Segment{Clip: project.Clip{
+		PlaybackPosition: 2,
+		Row:              csvplan.Row{RowID: "ac4f5b", Title: "Miami"},
+	}}
+	if got := render.SegmentBaseName("$INDEX_PAD3_$SAFE_TITLE", seg); got != "002_miami" {
+		t.Fatalf("name = %q, want 002_miami unchanged", got)
+	}
+}

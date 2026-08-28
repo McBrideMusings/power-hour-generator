@@ -388,6 +388,14 @@ func (s *segmentScanner) find(tmpl string, seg render.Segment) (path string, num
 		// only answer there is.
 		return "", false
 	}
+	if prefix == "" && suffix == "" {
+		// Everything in the name came from the playback position, so the
+		// pattern matches every segment in the directory equally and would
+		// hand back an arbitrary other row's file. Refuse rather than guess;
+		// SegmentBaseName's withRowIdentity is what stops names from being
+		// this under-specified in the first place.
+		return "", false
+	}
 	// A row that has been reordered more than once leaves several segments on
 	// disk under different numbers. Take the newest: it was rendered from the
 	// most recent plan row, so its trim and overlays are the least stale.
