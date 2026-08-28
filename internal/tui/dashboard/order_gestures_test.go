@@ -203,6 +203,25 @@ func TestOrderGestureLock(t *testing.T) {
 	}
 }
 
+// TestOrderGestureLockThroughGlobalKeyHandler drives l through handleKey, the
+// real entry point, rather than straight into the timeline handler. l used to
+// be a global next-view binding, so the key switched tabs and never reached
+// the lock gesture; the direct-call tests above could not see that.
+func TestOrderGestureLockThroughGlobalKeyHandler(t *testing.T) {
+	m := testOrderGestureModel(t)
+	m.timelineView.resCursor = 1 // songs B
+
+	locked, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	got := locked.(Model)
+
+	if got.activeView != 0 {
+		t.Fatalf("activeView = %d, want 0 — l must not switch views", got.activeView)
+	}
+	if !got.order.Slots[1].Locked {
+		t.Fatal("slot 1 Locked = false, want true after l")
+	}
+}
+
 // TestOrderGestureShuffleSkipsLockedSlots verifies S shuffles a collection's
 // unlocked slots and leaves a locked one untouched in position.
 func TestOrderGestureShuffleSkipsLockedSlots(t *testing.T) {

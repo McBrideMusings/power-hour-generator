@@ -722,12 +722,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.refreshFromDisk(), nil
 	}
 
-	// Left/right arrow keys cycle through views.
+	// Left/right arrow keys cycle through views. Deliberately not h/l: the
+	// playback order panel binds l to lock, and one key cannot have two owners.
 	switch key {
-	case "right", "l":
+	case "right":
 		m.activeView = (m.activeView + 1) % len(m.viewNames)
 		return m, nil
-	case "left", "h":
+	case "left":
 		m.activeView = (m.activeView - 1 + len(m.viewNames)) % len(m.viewNames)
 		return m, nil
 	}
