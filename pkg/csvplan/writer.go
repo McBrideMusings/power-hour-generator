@@ -156,13 +156,42 @@ func mergeYAMLHeaders(columns []string, defaults map[string]string, rows []Colle
 	return append(merged, extras...)
 }
 
+// knownColumnOrder lists columns that must be hoisted to the front of a
+// merged header set, in order, when present — rather than falling in with
+// the alphabetically-sorted extras. "id" leads so the stable row identity
+// column reads first instead of being buried among ordinary data columns.
+var knownColumnOrder = []string{"id"}
+
 // MergeHeaders preserves the existing CSV header order while appending any new
-// normalized fields present in the provided rows.
+// normalized fields present in the provided rows. Known columns (see
+// knownColumnOrder) are hoisted to the front when present in either the
+// existing headers or the row data, ahead of everything else.
 func MergeHeaders(headers []string, rows []CollectionRow) []string {
 	seen := make(map[string]bool)
 
+	present := func(name string) bool {
+		for _, header := range headers {
+			if normalizeHeader(header) == name {
+				return true
+			}
+		}
+		for _, row := range rows {
+			if _, ok := row.CustomFields[name]; ok {
+				return true
+			}
+		}
+		return false
+	}
+
+	merged := make([]string, 0, len(headers)+len(knownColumnOrder))
+	for _, known := range knownColumnOrder {
+		if present(known) {
+			seen[known] = true
+			merged = append(merged, known)
+		}
+	}
+
 	// Add existing headers in order
-	merged := make([]string, 0, len(headers))
 	for _, header := range headers {
 		normalized := normalizeHeader(header)
 		if normalized != "" && !seen[normalized] {

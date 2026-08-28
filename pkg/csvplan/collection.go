@@ -2,7 +2,9 @@ package csvplan
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/csv"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +25,7 @@ type CollectionOptions struct {
 // CollectionRow represents a single clip from a collection plan with dynamic fields.
 type CollectionRow struct {
 	Index           int               // 1-based row index
+	RowID           string            // Stable per-row id (6 hex chars), survives reordering/edits
 	Link            string            // Video link (required)
 	StartRaw        string            // Raw start time string
 	Start           time.Duration     // Parsed start time
@@ -30,21 +33,32 @@ type CollectionRow struct {
 	CustomFields    map[string]string // All CSV columns as key-value pairs
 }
 
-// LoadCollection reads a CSV with configurable headers for a collection.
+// LoadCollection reads a CSV with configurable headers for a collection. Any
+// row lacking a stable id is assigned one and written back to path (so a row
+// hand-added in an external editor gets an id on next load).
 func LoadCollection(path string, opts CollectionOptions) ([]CollectionRow, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
-	return loadCollectionData(data, opts)
+	rows, assigned, err := loadCollectionData(data, opts)
+	if assigned > 0 && len(rows) > 0 {
+		if headers, delimiter, herr := ReadHeaders(path); herr == nil {
+			_ = WriteCSV(path, headers, rows, delimiter)
+		}
+	}
+	return rows, err
 }
 
-// LoadCollectionData reads a collection plan from raw CSV/TSV bytes.
+// LoadCollectionData reads a collection plan from raw CSV/TSV bytes. Missing
+// ids are assigned in memory but never written back — the caller (paste/import
+// flows) has no path to write to.
 func LoadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
-	return loadCollectionData(data, opts)
+	rows, _, err := loadCollectionData(data, opts)
+	return rows, err
 }
 
-func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
+func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, int, error) {
 	// Normalize header names
 	opts.LinkHeader = normalizeHeader(opts.LinkHeader)
 	opts.StartHeader = normalizeHeader(opts.StartHeader)
@@ -55,13 +69,13 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 	// Validate protected headers
 	protectedHeaders := map[string]bool{"index": true, "id": true}
 	if protectedHeaders[opts.LinkHeader] {
-		return nil, fmt.Errorf("link_header cannot be %q (protected name)", opts.LinkHeader)
+		return nil, 0, fmt.Errorf("link_header cannot be %q (protected name)", opts.LinkHeader)
 	}
 	if protectedHeaders[opts.StartHeader] {
-		return nil, fmt.Errorf("start_header cannot be %q (protected name)", opts.StartHeader)
+		return nil, 0, fmt.Errorf("start_header cannot be %q (protected name)", opts.StartHeader)
 	}
 	if opts.DurationHeader != "" && protectedHeaders[opts.DurationHeader] {
-		return nil, fmt.Errorf("duration_header cannot be %q (protected name)", opts.DurationHeader)
+		return nil, 0, fmt.Errorf("duration_header cannot be %q (protected name)", opts.DurationHeader)
 	}
 
 	// Apply defaults
@@ -76,12 +90,12 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 	}
 
 	if len(data) == 0 {
-		return nil, errors.New("plan file is empty")
+		return nil, 0, errors.New("plan file is empty")
 	}
 
 	comma, err := detectDelimiter(data)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	reader := csv.NewReader(bytes.NewReader(data))
@@ -101,7 +115,7 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("parse file: %w", err)
+			return nil, 0, fmt.Errorf("parse file: %w", err)
 		}
 		line++
 
@@ -110,7 +124,7 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 		if line == 1 {
 			headerMap, err = buildCollectionHeaderMap(record, opts)
 			if err != nil {
-				return nil, err
+				return nil, 0, err
 			}
 			continue
 		}
@@ -131,14 +145,66 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, e
 	}
 
 	if headerMap == nil {
-		return nil, errors.New("missing header row")
+		return nil, 0, errors.New("missing header row")
 	}
+
+	assigned := assignRowIDs(rows)
 
 	if len(errs) > 0 {
-		return rows, errs
+		return rows, assigned, errs
 	}
 
-	return rows, nil
+	return rows, assigned, nil
+}
+
+// assignRowIDs generates a stable 6-hex-char id for any row lacking one,
+// retrying on collision with ids already present in rows, and mirrors the
+// generated id into CustomFields["id"] so the existing writers persist it.
+// Returns the number of rows assigned.
+func assignRowIDs(rows []CollectionRow) int {
+	if len(rows) == 0 {
+		return 0
+	}
+
+	seen := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		if row.RowID != "" {
+			seen[row.RowID] = true
+		}
+	}
+
+	assigned := 0
+	for i := range rows {
+		if rows[i].RowID != "" {
+			continue
+		}
+		id := newRowID(seen)
+		seen[id] = true
+		rows[i].RowID = id
+		if rows[i].CustomFields == nil {
+			rows[i].CustomFields = make(map[string]string, 1)
+		}
+		rows[i].CustomFields["id"] = id
+		assigned++
+	}
+	return assigned
+}
+
+// newRowID generates a 6-hex-char id not already present in seen.
+func newRowID(seen map[string]bool) string {
+	for {
+		buf := make([]byte, 3)
+		if _, err := rand.Read(buf); err != nil {
+			// crypto/rand.Read does not fail on supported platforms; if it
+			// somehow does, fall back to a fixed collision-checked attempt
+			// so we never return an empty id.
+			buf = []byte{0, 0, 0}
+		}
+		id := hex.EncodeToString(buf)
+		if !seen[id] {
+			return id
+		}
+	}
 }
 
 func buildCollectionHeaderMap(header []string, opts CollectionOptions) (map[string]int, error) {
@@ -241,6 +307,7 @@ func parseCollectionRecord(record []string, header map[string]int, index, line i
 
 	row := CollectionRow{
 		Index:           index,
+		RowID:           get("id"),
 		Link:            link,
 		StartRaw:        startRaw,
 		Start:           startDur,

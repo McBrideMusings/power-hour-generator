@@ -200,8 +200,9 @@ func TestAddCommandPreservesStructuredYAMLColumnsOnRoundTrip(t *testing.T) {
 		t.Fatalf("LoadCollectionYAML after first add: %v", err)
 	}
 
-	// Verify columns include the custom "genre" column
-	expectedColumns := []string{"title", "artist", "name", "start_time", "duration", "link", "genre"}
+	// Verify columns include the custom "genre" column. "id" leads because
+	// the row lacked one and LoadCollectionYAML assigns + persists it back.
+	expectedColumns := []string{"id", "title", "artist", "name", "start_time", "duration", "link", "genre"}
 	if len(result.Columns) != len(expectedColumns) {
 		t.Fatalf("Expected %d columns, got %d: %v", len(expectedColumns), len(result.Columns), result.Columns)
 	}

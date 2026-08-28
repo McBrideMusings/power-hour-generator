@@ -102,7 +102,9 @@ func TestWriteCSV_TabDelimiter(t *testing.T) {
 		t.Errorf("title = %q", loaded[0].CustomFields["title"])
 	}
 
-	// Verify ReadHeaders returns tab delimiter.
+	// Verify ReadHeaders returns tab delimiter. LoadCollection above assigned
+	// a missing row id and persisted it back to disk, so the header set now
+	// includes "id" alongside the original 4 columns.
 	hdrs, delim, err := ReadHeaders(path)
 	if err != nil {
 		t.Fatalf("ReadHeaders: %v", err)
@@ -110,8 +112,8 @@ func TestWriteCSV_TabDelimiter(t *testing.T) {
 	if delim != '\t' {
 		t.Errorf("delimiter = %q, want tab", delim)
 	}
-	if len(hdrs) != 4 {
-		t.Errorf("headers count = %d, want 4", len(hdrs))
+	if len(hdrs) != 5 {
+		t.Errorf("headers count = %d, want 5", len(hdrs))
 	}
 }
 
@@ -426,13 +428,21 @@ func TestWriteCSV_MergesUnlistedRowFields(t *testing.T) {
 		t.Fatalf("yaml mood = %q, want %q", got, "upbeat")
 	}
 
-	// CSV and YAML reloads must agree field-for-field.
+	// CSV and YAML reloads must agree field-for-field, except "id" — each
+	// load assigns its own row a fresh, independently-generated stable id
+	// since the two plan files have never shared one.
 	for field, want := range yamlResult.Rows[0].CustomFields {
+		if field == "id" {
+			continue
+		}
 		if got := csvLoaded[0].CustomFields[field]; got != want {
 			t.Errorf("field %q: csv = %q, yaml = %q", field, got, want)
 		}
 	}
 	for field, want := range csvLoaded[0].CustomFields {
+		if field == "id" {
+			continue
+		}
 		if got := yamlResult.Rows[0].CustomFields[field]; got != want {
 			t.Errorf("field %q: yaml = %q, csv = %q", field, got, want)
 		}

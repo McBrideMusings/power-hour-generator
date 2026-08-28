@@ -29,6 +29,7 @@ func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) 
 	var results []ValidationResult
 	results = append(results, c.validateExternalFiles(projectRoot)...)
 	results = append(results, c.validateOverlayEntries()...)
+	results = append(results, c.validateCollectionSelection()...)
 	results = append(results, c.validateCacheConfig()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
@@ -82,6 +83,26 @@ func (c Config) validateExternalFiles(projectRoot string) []ValidationResult {
 			results = append(results, ValidationResult{
 				Level:   "error",
 				Message: fmt.Sprintf("collection file %q not found", path),
+			})
+		}
+	}
+	return results
+}
+
+// validateCollectionSelection rejects a collection's selection value when it
+// is neither "once" nor "repeat" — the only two pool-consumption modes
+// selectionOf (internal/project/timeline_plan.go) understands.
+func (c Config) validateCollectionSelection() []ValidationResult {
+	var results []ValidationResult
+	for name, coll := range c.Collections {
+		selection := strings.ToLower(strings.TrimSpace(coll.Selection))
+		if selection == "" {
+			continue
+		}
+		if selection != "once" && selection != "repeat" {
+			results = append(results, ValidationResult{
+				Level:   "error",
+				Message: fmt.Sprintf("collection %q: selection %q must be \"once\" or \"repeat\"", name, coll.Selection),
 			})
 		}
 	}
