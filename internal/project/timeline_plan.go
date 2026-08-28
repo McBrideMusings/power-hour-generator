@@ -62,12 +62,8 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 			return nil, err
 		}
 
-		ilStart := cursor[entry.Interleave.Collection]
-		ilAvail := len(secondary.Rows) - ilStart
-		if ilAvail <= 0 {
-			ilStart = 0
-			ilAvail = len(secondary.Rows)
-		}
+		ilTotal := len(secondary.Rows)
+		ilStart := cursor[entry.Interleave.Collection] % max(ilTotal, 1)
 
 		every := entry.Interleave.Every
 		if every <= 0 {
@@ -77,10 +73,10 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 		ilIdx := 0
 
 		emitIL := func() {
-			if ilAvail <= 0 {
+			if ilTotal <= 0 {
 				return
 			}
-			absIdx := ilStart + (ilIdx % ilAvail)
+			absIdx := (ilStart + ilIdx) % ilTotal
 			ilRow := secondary.Rows[absIdx]
 			placements = append(placements, TimelinePlacement{
 				SequenceEntryIndex: entryIdx,
@@ -122,8 +118,8 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 			}
 		}
 
-		if ilAvail > 0 {
-			cursor[entry.Interleave.Collection] = ilStart + (ilIdx % ilAvail)
+		if ilTotal > 0 {
+			cursor[entry.Interleave.Collection] = (ilStart + ilIdx) % ilTotal
 		}
 	}
 

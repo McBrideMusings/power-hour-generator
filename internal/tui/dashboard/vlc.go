@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
 	"powerhour/internal/project"
@@ -188,17 +189,107 @@ func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, collNa
 	return resolveRenderedSegment(pp, cfg, collName, coll, row).OutputPath
 }
 
-// resolveAllTimelineSegmentPaths returns all rendered segment paths in timeline order.
-func resolveAllTimelineSegmentPaths(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection) []string {
-	segments, err := render.ResolveTimelineSegments(pp, cfg, collections)
+// resolveSourcePath resolves a collection row's original (unrendered, uncut)
+// source file: the cached download for a URL, or the local file it points at.
+// Returns "" when nothing resolvable exists on disk.
+func resolveSourcePath(idx *cache.Index, root string, row csvplan.CollectionRow) string {
+	link := strings.TrimSpace(row.Link)
+	if link == "" {
+		return ""
+	}
+
+	if isURL(link) {
+		if idx == nil {
+			return ""
+		}
+		key, ok := idx.LookupLink(link)
+		if !ok {
+			return ""
+		}
+		entry, ok := idx.GetByIdentifier(key)
+		if !ok || entry.CachedPath == "" {
+			return ""
+		}
+		return entry.CachedPath
+	}
+
+	path := strings.Trim(link, "'\"")
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
+
+// existingPath returns the first candidate that exists on disk, or "" if none do.
+func existingPath(candidates ...string) string {
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if _, err := os.Stat(c); err == nil {
+			return c
+		}
+	}
+	return ""
+}
+
+// resolveAllTimelineSegmentPathsWithFallback returns the best playable path for
+// every entry in timeline order: the rendered segment when it exists on disk,
+// otherwise the raw (unrendered, uncut) source file when that exists, otherwise
+// "" (dropped by playPlaylistInVLC's own existence filter).
+func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index) []string {
+	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
 	if err != nil {
 		return nil
 	}
-	result := make([]string, 0, len(segments))
-	for _, seg := range segments {
-		result = append(result, seg.Path)
+
+	var result []string
+	for _, placement := range placements {
+		if placement.SourceFile != "" {
+			raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
+			rendered := render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw)
+			result = append(result, existingPath(rendered, raw))
+			continue
+		}
+
+		coll, ok := collections[placement.Collection]
+		if !ok {
+			continue
+		}
+		row, ok := findCollectionRow(coll, placement.RowIndex)
+		if !ok {
+			continue
+		}
+		rendered := resolveRenderedSegmentPath(pp, cfg, placement.Collection, coll, row)
+		raw := resolveSourcePath(idx, pp.Root, row)
+		result = append(result, existingPath(rendered, raw))
 	}
 	return result
+}
+
+// resolveCollectionAllPathsWithFallback returns the best playable path for every
+// row of a single collection, in plan order: the rendered segment when it
+// exists, otherwise the raw (unrendered, uncut) source file.
+func resolveCollectionAllPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, idx *cache.Index) []string {
+	result := make([]string, 0, len(coll.Rows))
+	for _, row := range coll.Rows {
+		rendered := resolveRenderedSegmentPath(pp, cfg, collName, coll, row)
+		raw := resolveSourcePath(idx, pp.Root, row)
+		result = append(result, existingPath(rendered, raw))
+	}
+	return result
+}
+
+func findCollectionRow(coll project.Collection, rowIndex int) (csvplan.CollectionRow, bool) {
+	for _, row := range coll.Rows {
+		if row.Index == rowIndex {
+			return row, true
+		}
+	}
+	return csvplan.CollectionRow{}, false
 }
 
 // resolveSequenceEntrySegmentPaths returns the rendered segment paths for a single

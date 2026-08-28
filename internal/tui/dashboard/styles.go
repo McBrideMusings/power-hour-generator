@@ -27,9 +27,14 @@ var (
 	cursorStyle   = lipgloss.NewStyle().Bold(true)
 	fadeDim       = lipgloss.NewStyle().Faint(true)
 
-	// Cache dots.
-	dotCached  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("●")
-	dotMissing = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("●")
+	// Playback-readiness dots (timeline PLAYBACK ORDER panel): green = rendered
+	// segment ready, amber = falls back to the raw/uncut source, red = nothing
+	// playable exists yet. Amber matches rowNotRendered's color (214) below —
+	// same meaning, same hue — rather than ANSI 3, which reads too close to
+	// red in many terminal themes.
+	dotCached      = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("●")
+	dotFallback    = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("●")
+	dotUnavailable = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("●")
 
 	// Collection view.
 	colHeader = lipgloss.NewStyle().Bold(true).Faint(true)

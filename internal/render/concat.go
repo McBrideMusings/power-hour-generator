@@ -56,7 +56,7 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 	var result []TimelineSegmentPath
 	for _, placement := range placements {
 		if placement.SourceFile != "" {
-			resolvedFile := resolveInlineFilePath(pp.Root, placement.SourceFile)
+			resolvedFile := ResolveInlineFilePath(pp.Root, placement.SourceFile)
 			result = append(result, TimelineSegmentPath{
 				CollectionName: "__inline__",
 				Path:           InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, resolvedFile),
@@ -308,9 +308,9 @@ func buildReencodeArgs(concatFile, outputPath string, enc tools.ResolvedEncoding
 	return args
 }
 
-// resolveInlineFilePath resolves a file path from a sequence entry relative to
+// ResolveInlineFilePath resolves a file path from a sequence entry relative to
 // the project root when the path is not absolute.
-func resolveInlineFilePath(root, file string) string {
+func ResolveInlineFilePath(root, file string) string {
 	if filepath.IsAbs(file) {
 		return file
 	}

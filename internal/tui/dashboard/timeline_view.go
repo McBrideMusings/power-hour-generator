@@ -275,11 +275,15 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			cursor = cursorStyle.Render("▸ ")
 		}
 
-		// Cache dot.
+		// Playback-readiness dot: green = rendered segment ready, amber =
+		// falls back to the raw/uncut source, red = nothing playable yet.
 		key := cacheKeyForEntry(e)
-		dot := dotMissing
-		if status, ok := cacheStatus[key]; ok && status == "cached" {
+		dot := dotUnavailable
+		switch cacheStatus[key] {
+		case "rendered":
 			dot = dotCached
+		case "cached":
+			dot = dotFallback
 		}
 
 		seqNum := faint.Render(fmt.Sprintf("%02d", e.Sequence))
@@ -432,7 +436,7 @@ func (v timelineView) entryDuration(e project.TimelineEntry) int {
 }
 
 func (v *timelineView) autoScrollRes() {
-	visible := v.resPanelHeight()
+	visible := scrollAutoScrollBudget(v.resPanelHeight())
 	if v.resCursor < v.resScrollTop {
 		v.resScrollTop = v.resCursor
 	} else if v.resCursor >= v.resScrollTop+visible {

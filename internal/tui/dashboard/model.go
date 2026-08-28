@@ -202,7 +202,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 
 	// Build summaries and cache status.
 	summaries := buildSummaries(collections, names, idx, pp, cfg, rs)
-	cacheStatus := buildCacheStatus(collections, idx, pp)
+	cacheStatus := buildCacheStatus(cfg, collections, idx, pp)
 
 	m := Model{
 		cfg:             cfg,
@@ -1950,10 +1950,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		collName := m.collectionNames[cvIdx]
 		coll := m.collections[collName]
 		m.collectionViews[cvIdx].activity = "opening vlc..."
-		var allPaths []string
-		for _, row := range v.rows {
-			allPaths = append(allPaths, resolveRenderedSegmentPath(m.pp, m.cfg, collName, coll, row))
-		}
+		allPaths := resolveCollectionAllPathsWithFallback(m.pp, m.cfg, collName, coll, m.cacheIdx)
 		tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
 		_, _, err := playPlaylistInVLC(vlcPath, allPaths, tmpDir)
 		if err != nil {
@@ -2169,17 +2166,13 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 				}
 			}
 		} else if v.focusPanel == 1 && len(v.resolved) > 0 && v.resCursor >= 0 && v.resCursor < len(v.resolved) {
-			paths := resolveAllTimelineSegmentPaths(m.pp, m.cfg, m.collections)
-			if v.resCursor >= len(paths) {
-				m.statusMsg = "No segment for this playback item"
+			paths := resolveAllTimelineSegmentPathsWithFallback(m.pp, m.cfg, m.collections, m.cacheIdx)
+			if v.resCursor >= len(paths) || paths[v.resCursor] == "" {
+				m.statusMsg = "No rendered or cached file found"
 				return m, nil
 			}
-			if _, err := os.Stat(paths[v.resCursor]); err == nil {
-				if err := playFileInVLC(vlcPath, paths[v.resCursor]); err != nil {
-					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
-				}
-			} else {
-				m.statusMsg = "Segment not yet rendered"
+			if err := playFileInVLC(vlcPath, paths[v.resCursor]); err != nil {
+				m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 			}
 		}
 		return m, nil
@@ -2201,7 +2194,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			}
 			return m, nil
 		}
-		allPaths := resolveAllTimelineSegmentPaths(m.pp, m.cfg, m.collections)
+		allPaths := resolveAllTimelineSegmentPathsWithFallback(m.pp, m.cfg, m.collections, m.cacheIdx)
 		if len(allPaths) == 0 {
 			m.statusMsg = "No timeline segments found"
 			return m, nil
@@ -2668,7 +2661,7 @@ func (m Model) applyCurrentDoctorEntry() Model {
 }
 
 func (v *timelineView) autoScrollSeq() {
-	visible := v.seqPanelHeight()
+	visible := scrollAutoScrollBudget(v.seqPanelHeight())
 	if v.seqCursor < v.seqScrollTop {
 		v.seqScrollTop = v.seqCursor
 	} else if v.seqCursor >= v.seqScrollTop+visible {
@@ -2677,12 +2670,24 @@ func (v *timelineView) autoScrollSeq() {
 }
 
 func (v *collectionView) autoScroll() {
-	visible := v.visibleRowCount()
+	visible := scrollAutoScrollBudget(v.visibleRowCount())
 	if v.cursor < v.scrollTop {
 		v.scrollTop = v.cursor
 	} else if v.cursor >= v.scrollTop+visible {
 		v.scrollTop = v.cursor - visible + 1
 	}
+}
+
+// scrollAutoScrollBudget reserves the worst-case 2 lines a scrollable panel's
+// "↑ N more above" / "↓ N more below" indicators can consume, so autoscroll
+// never assumes more rows are visible than the renderer actually draws for a
+// given scrollTop (the renderer reserves 1 line per indicator, dynamically,
+// as it lays out the panel). Without this reservation the two disagree and
+// the down indicator gets permanently stuck a line or two short of the true
+// end, because autoscroll stops advancing scrollTop before the renderer's
+// window has actually reached the last row.
+func scrollAutoScrollBudget(panelHeight int) int {
+	return max(panelHeight-2, 1)
 }
 
 // View satisfies tea.Model.
@@ -3600,7 +3605,7 @@ func reResolve(m Model) Model {
 	}
 
 	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.renderState)
-	m.cacheStatus = buildCacheStatus(m.collections, m.cacheIdx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.cacheIdx, m.pp)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
 	oldShowAll := m.cacheView.showAll
 	m.cacheView = newCacheView(m.cfg, m.cacheIdx, buildCollectionLinks(m.collections))
@@ -3612,36 +3617,7 @@ func reResolve(m Model) Model {
 
 // resolveVideoPath finds the cached or local file path for a collection row.
 func (m Model) resolveVideoPath(row csvplan.CollectionRow) string {
-	link := strings.TrimSpace(row.Link)
-	if link == "" {
-		return ""
-	}
-
-	isURL := isURL(link)
-	if isURL {
-		if m.cacheIdx == nil {
-			return ""
-		}
-		key, ok := m.cacheIdx.LookupLink(link)
-		if !ok {
-			return ""
-		}
-		entry, ok := m.cacheIdx.GetByIdentifier(key)
-		if !ok || entry.CachedPath == "" {
-			return ""
-		}
-		return entry.CachedPath
-	}
-
-	// Local file.
-	path := strings.Trim(link, "'\"")
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(m.pp.Root, path)
-	}
-	if _, err := os.Stat(path); err != nil {
-		return ""
-	}
-	return path
+	return resolveSourcePath(m.cacheIdx, m.pp.Root, row)
 }
 
 // reloadState reloads cache index and render state from disk (after render/concat).
@@ -3657,7 +3633,7 @@ func reloadState(m Model) Model {
 	m.cacheView.termHeight = oldH
 	m.cacheView.showAll = oldShowAll
 	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, rs)
-	m.cacheStatus = buildCacheStatus(m.collections, idx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, idx, m.pp)
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
 		coll := m.collections[collName]
@@ -3844,31 +3820,53 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 	return summaries
 }
 
-// buildCacheStatus builds a cache status map keyed by "collection:index" or "file:path".
-func buildCacheStatus(collections map[string]project.Collection, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
+// buildCacheStatus builds a playback-readiness map keyed by "collection:index"
+// (collection rows) or "file:path" (inline timeline file entries). For
+// collection rows, values are "rendered" (the trimmed/overlaid segment
+// Shift+V/v would play exists), "cached" (no rendered segment yet, but the
+// raw/uncut source exists and would be used as a fallback), or "missing"
+// (nothing playable). Inline file entries have no meaningfully-better
+// "rendered" state for preview purposes — an inline file plays as-is either
+// way, untrimmed and without overlays — so they're binary: "rendered" (the
+// file exists) or "missing" (it doesn't).
+func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
 	status := make(map[string]string)
 	for name, coll := range collections {
 		for _, row := range coll.Rows {
 			key := fmt.Sprintf("%s:%d", name, row.Index)
-			link := strings.TrimSpace(row.Link)
-			cached := false
-
-			if isURL(link) {
-				if idx != nil {
-					_, cached = idx.LookupLink(link)
-				}
-			} else {
-				cached = checkFileExists(link, pp.Root)
-			}
-
-			if cached {
-				status[key] = "cached"
-			} else {
-				status[key] = "missing"
-			}
+			rendered := resolveRenderedSegmentPath(pp, cfg, name, coll, row)
+			raw := resolveSourcePath(idx, pp.Root, row)
+			status[key] = playbackReadiness(rendered, raw)
 		}
 	}
+	for _, entry := range cfg.Timeline.Sequence {
+		if entry.File == "" {
+			continue
+		}
+		raw := render.ResolveInlineFilePath(pp.Root, entry.File)
+		state := "missing"
+		if _, err := os.Stat(raw); err == nil {
+			state = "rendered"
+		}
+		status["file:"+entry.File] = state
+	}
 	return status
+}
+
+// playbackReadiness classifies a rendered/raw path pair per buildCacheStatus's
+// three states. renderedPath is checked for existence here; rawPath is
+// expected to already be existence-validated (resolveSourcePath returns "" if
+// the source doesn't resolve to a file on disk).
+func playbackReadiness(renderedPath, rawPath string) string {
+	if renderedPath != "" {
+		if _, err := os.Stat(renderedPath); err == nil {
+			return "rendered"
+		}
+	}
+	if rawPath != "" {
+		return "cached"
+	}
+	return "missing"
 }
 
 func buildCollectionLinks(collections map[string]project.Collection) map[string]string {
