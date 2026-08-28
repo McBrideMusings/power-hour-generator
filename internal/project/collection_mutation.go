@@ -158,6 +158,12 @@ func DuplicateCollectionRow(coll Collection, rowIdx int) Collection {
 	for k, v := range row.CustomFields {
 		dup.CustomFields[k] = v
 	}
+	// The id is the row's identity, not its content. Carrying it over would
+	// make the copy the same row as its source everywhere the playback order,
+	// the position index and render state are concerned — one slot, one
+	// segment, and the copy unreachable. RowID is already left empty; the id
+	// custom field has to go with it, or the write-back puts it back.
+	delete(dup.CustomFields, "id")
 
 	return AppendCollectionRows(coll, []csvplan.CollectionRow{dup})
 }

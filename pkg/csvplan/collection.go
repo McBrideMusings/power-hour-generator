@@ -157,25 +157,29 @@ func loadCollectionData(data []byte, opts CollectionOptions) ([]CollectionRow, i
 	return rows, assigned, nil
 }
 
-// assignRowIDs generates a stable 6-hex-char id for any row lacking one,
-// retrying on collision with ids already present in rows, and mirrors the
-// generated id into CustomFields["id"] so the existing writers persist it.
-// Returns the number of rows assigned.
+// assignRowIDs enforces the invariant the playback order depends on: every
+// row carries an id, and no two rows share one. A row with no id gets one; a
+// row whose id is already taken by an earlier row gets a fresh one, the
+// earlier row keeping the original so existing slots, locks and render state
+// stay pointed at the same row. The id is mirrored into CustomFields["id"]
+// so the existing writers persist it. Returns the number of rows changed.
+//
+// Repairing duplicates is not defensive tidying: (collection, id) IS a slot's
+// identity, so two rows sharing an id are one row to the playback order, the
+// position index and render state. They collapse into a single slot, the
+// extras become unreachable — unselectable in the order, never rendered — and
+// their segments overwrite each other. Any path can produce one: a duplicate
+// gesture that copies the id field, or a plan hand-edited by copy-paste.
 func assignRowIDs(rows []CollectionRow) int {
 	if len(rows) == 0 {
 		return 0
 	}
 
 	seen := make(map[string]bool, len(rows))
-	for _, row := range rows {
-		if row.RowID != "" {
-			seen[row.RowID] = true
-		}
-	}
-
-	assigned := 0
+	changed := 0
 	for i := range rows {
-		if rows[i].RowID != "" {
+		if rows[i].RowID != "" && !seen[rows[i].RowID] {
+			seen[rows[i].RowID] = true
 			continue
 		}
 		id := newRowID(seen)
@@ -185,9 +189,9 @@ func assignRowIDs(rows []CollectionRow) int {
 			rows[i].CustomFields = make(map[string]string, 1)
 		}
 		rows[i].CustomFields["id"] = id
-		assigned++
+		changed++
 	}
-	return assigned
+	return changed
 }
 
 // newRowID generates a 6-hex-char id not already present in seen.
