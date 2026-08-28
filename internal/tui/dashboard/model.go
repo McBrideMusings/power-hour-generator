@@ -2347,7 +2347,11 @@ func syncPlaybackOrder(m Model) Model {
 	if len(m.cfg.Timeline.Sequence) == 0 {
 		return m
 	}
-	order, changes, err := playback.ResolveOrder(m.pp.Root, m.cfg, m.collections)
+	// The reconcile changes are deliberately discarded: the panel shows the
+	// resolved order, and a resolve that never saves would re-report the same
+	// drift on every launch forever. `powerhour order` is where reconcile
+	// changes are reported, and it persists them.
+	order, _, err := playback.ResolveOrder(m.pp.Root, m.cfg, m.collections)
 	if err != nil {
 		m.statusMsg = fmt.Sprintf("Playback order error: %v", err)
 		return m
@@ -2362,31 +2366,7 @@ func syncPlaybackOrder(m Model) Model {
 	m.timeline = timeline
 	m.timelineView.resolved = timeline
 	m.timelineView.order = order
-	m.timelineView.reconcileNote = summarizeOrderChanges(changes)
 	return m
-}
-
-// summarizeOrderChanges renders playback.Reconcile's changes as a one-line
-// panel note ("reconciled: 2 dropped, 1 filled"), or "" when there were none.
-func summarizeOrderChanges(changes []playback.Change) string {
-	if len(changes) == 0 {
-		return ""
-	}
-	counts := make(map[playback.ChangeKind]int)
-	for _, c := range changes {
-		counts[c.Kind]++
-	}
-	var parts []string
-	if n := counts[playback.ChangeDropped]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d dropped", n))
-	}
-	if n := counts[playback.ChangeAdded]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d added", n))
-	}
-	if n := counts[playback.ChangeFilled]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d filled", n))
-	}
-	return "reconciled: " + strings.Join(parts, ", ")
 }
 
 func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

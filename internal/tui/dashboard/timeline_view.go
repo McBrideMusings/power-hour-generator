@@ -94,11 +94,6 @@ type timelineView struct {
 	// Rendered through the footer ladder, never as a second status line.
 	orderNote string
 
-	// reconcileNote summarizes what playback.Reconcile changed the last time
-	// the order was resolved (dropped/added/filled slots). Empty when the
-	// stored order needed no reconciliation.
-	reconcileNote string
-
 	// Terminal dimensions for viewport calculation.
 	termWidth  int
 	termHeight int
@@ -265,11 +260,6 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteString(sectionLabel.Render(fmt.Sprintf("PLAYBACK ORDER · %d clips · ~%s", len(v.resolved), formatDuration(totalDuration))))
 	b.WriteByte('\n')
 
-	if v.reconcileNote != "" {
-		b.WriteString(faint.Render("  " + v.reconcileNote))
-		b.WriteByte('\n')
-	}
-
 	resH := v.resPanelHeight()
 	visibleRes := max(resH, 1)
 	startRes := v.resScrollTop
@@ -367,15 +357,14 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 }
 
 // renderHelpRow returns the single inline help row for the timeline view.
-// Priority: confirm-delete, then a transient gesture note, then the
-// reconcile summary, then a panel-aware default hint. The sequence panel is
+// Priority: confirm-delete, then a transient gesture note, then a
+// panel-aware default hint. The sequence panel is
 // read-only, so its default advertises no mutation keys; the playback order
 // panel advertises the gestures.
 func (v timelineView) renderHelpRow() string {
 	var sources []helpRowSource
 	sources = append(sources, helpRowSource{v.confirmDelete, confirmStyle})
 	sources = append(sources, helpRowSource{v.orderNote, editStyle})
-	sources = append(sources, helpRowSource{v.reconcileNote, faint})
 
 	defaultText := "s change · l lock · S shuffle"
 	if v.focusPanel == 0 && !v.concatFocus {
