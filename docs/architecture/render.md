@@ -52,11 +52,11 @@ The service runs multiple FFmpeg processes concurrently, limited by `--concurren
 - Executes and captures stderr to `logs/`
 - Reports success or failure
 
-## Concatenation (`concat.go`)
+## Finalize (`finalize.go`)
 
-After segments are rendered, `concat.go` handles assembling them into a final output video:
+After segments are rendered, `finalize.go` handles assembling them into a final output video:
 
-1. **Timeline resolution** — walks the timeline config to determine segment order, respecting interleave rules. Interleave clips cycle when exhausted (e.g., a single interstitial repeats between every song). Falls back to sorted glob of `*.mp4` when no timeline is configured.
+1. **Order resolution** — `render.ResolveTimelineSegments` resolves segment order via `playback.OrderedPlacements`, which loads (or materializes) and reconciles the project's playback order (`playback-order.yaml`) rather than walking `timeline.sequence` directly. `timeline.sequence` still seeds the order the first time it's materialized (interleave rules included — a single interstitial repeats between every song when its pool is exhausted), but a swap, lock, or shuffle applied via `powerhour order` changes what finalize outputs. Falls back to sorted glob of `*.mp4` when no timeline is configured. This is the same resolution the TUI's PLAYBACK ORDER panel uses (per ADR 0003), so the two can't disagree.
 2. **Concat list** — writes an ffmpeg concat demuxer file, verifying each segment exists.
 3. **Execution** — tries stream copy first (fast, lossless when all segments share codecs). If stream copy fails, falls back to re-encoding using the resolved encoding settings (video codec, bitrate, audio codec, sample rate, channels, preset).
 

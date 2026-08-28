@@ -133,13 +133,13 @@ powerhour sample title --collection songs --index 5
 powerhour sample credit --collection songs --index 5
 ```
 
-### `powerhour concat`
+### `powerhour finalize`
 
-Concatenate rendered segments into a final video following the timeline sequence.
+Assemble the playback order into the final video.
 
 ```bash
-powerhour concat --project <dir> [--output <path>] [--dry-run]
-go run ./cmd/powerhour concat --project <dir> [--output <path>] [--dry-run]
+powerhour finalize --project <dir> [--output <path>] [--dry-run]
+go run ./cmd/powerhour finalize --project <dir> [--output <path>] [--dry-run]
 ```
 
 | Flag | Description |
@@ -158,7 +158,7 @@ powerhour tui --project <dir>
 go run ./cmd/powerhour tui --project <dir>
 ```
 
-The dashboard is the primary day-to-day interface for managing projects. It provides a full-screen terminal UI for viewing and editing collections, cache entries, render state, and the timeline. Views are navigated with arrow keys and numbers (1-9 to jump directly). Collections are edited inline, and rows can be reordered, deleted, or modified without leaving the dashboard. The cache view allows filtering and metadata inspection. The timeline view shows the resolved sequence of clips that will be concatenated.
+The dashboard is the primary day-to-day interface for managing projects. It provides a full-screen terminal UI for viewing and editing collections, cache entries, render state, and the timeline. Views are navigated with arrow keys and numbers (1-9 to jump directly). Collections are edited inline, and rows can be reordered, deleted, or modified without leaving the dashboard. The cache view allows filtering and metadata inspection. The timeline view shows the resolved playback order — the sequence of clips finalize will assemble into the final video.
 
 Requires at least one configured collection to launch.
 

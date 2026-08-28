@@ -7,7 +7,7 @@ Development is tracked via [GitHub Issues](https://github.com/McBrideMusings/pow
 - [x] **Phase 0: Foundation** — Legacy cleanup, config validation, test coverage
 - [x] **Phase 1: TUI & Performance** — Progress display and tool detection optimization
 - [x] **Phase 2: Timeline Architecture** — Timeline config, resolver, and interleave patterns
-- [x] **Phase 3: Concatenation** — `powerhour concat` command for joining segments into a final video
+- [x] **Phase 3: Finalize** — `powerhour finalize` command for assembling segments into a final video, resolved from the playback order
 - [x] **Phase 4: Smart Re-rendering** — Input hashing, render state, change detection, dry-run
 - [ ] **Phase 5: Config Modularity** — Config splitting with external profile/collection files
 - [ ] **Phase 6: Global Media Library** — Shared source cache across projects

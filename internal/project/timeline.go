@@ -20,7 +20,15 @@ func ResolveTimeline(timeline config.TimelineConfig, collections map[string]Coll
 	if err != nil {
 		return nil, err
 	}
+	return EntriesFromPlacements(placements), nil
+}
 
+// EntriesFromPlacements maps resolved timeline placements onto the
+// TimelineEntry shape the TUI panel renders. Factored out of ResolveTimeline
+// so a caller resolving placements from the playback order (per ADR 0003,
+// internal/playback.OrderedPlacements) can produce the identical entry shape
+// without going through config-order resolution.
+func EntriesFromPlacements(placements []TimelinePlacement) []TimelineEntry {
 	entries := make([]TimelineEntry, 0, len(placements))
 	for i, placement := range placements {
 		entries = append(entries, TimelineEntry{
@@ -30,7 +38,7 @@ func ResolveTimeline(timeline config.TimelineConfig, collections map[string]Coll
 			SourceFile: placement.SourceFile,
 		})
 	}
-	return entries, nil
+	return entries
 }
 
 // ResolvePlacement returns the effective placement value, defaulting to "between".

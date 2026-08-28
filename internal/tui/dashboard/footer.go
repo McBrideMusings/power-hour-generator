@@ -14,7 +14,7 @@ func renderFooter(m Model) string {
 	kind := m.viewKind(m.activeView)
 	switch kind {
 	case "timeline":
-		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  x del  u refresh") + vlc + footerStyle.Render("  e/E edit/ext  r render  c concat  o open  ? help  q/Esc quit")
+		return footerStyle.Render("←/→ views  ↑/↓ move  J/K reorder  a add  x del  u refresh") + vlc + footerStyle.Render("  e/E edit/ext  r finalize  o open  ? help  q/Esc quit")
 	case "collection":
 		altV := ""
 		if m.vlcAvailable() {

@@ -27,7 +27,7 @@ This is a different layer from the progress display covered on the [TUI System](
 
 `←`/`→` step between views; number keys jump directly. Each view type has its own file:
 
-- **`timeline_view.go`** — the configured sequence entries plus the resolved preview (what `concat` would actually produce), and the concat output path/status.
+- **`timeline_view.go`** — the configured sequence entries plus the resolved preview (what `finalize` would actually produce, resolved from the playback order — the same resolution `finalize` itself uses, per ADR 0003), and the finalized output path/status.
 - **`collection_view.go`** — one table per collection with dynamic columns discovered from the plan data, row-state color coding (rendered / not-rendered / not-cached), and a persistent "add clip" slot at the bottom.
 - **`cache_view.go`** — the yt-dlp cache index, with a filtered/all toggle, configurable columns driven by `cache.view.columns` in config, and a persistent "add" slot for registering a URL, YouTube ID, or local file directly into the cache.
 - **`tools_view.go`** — detected tool versions, install methods, and update status.
@@ -68,7 +68,7 @@ Several dashboard features run off the bubbletea main loop and report back throu
 - **`song_lookup.go`** — `setCacheEntryField` and cache-backed suggestions for the add-clip slot.
 - **`cache_doctor.go`** — the `overlayDoctor` overlay: inline metadata review/correction with fuzzy artist autocomplete and an async yt-dlp requery (`Ctrl+R`). `view()` allocates its `termHeight-5` line budget by priority rather than tail-chopping: edit fields, confidence reasons, and requery status always render; the optional context fields (uploader/channel/track/album) are dropped first, the artist suggestion list is capped second, and any reduction leaves an inline `hidden`/`… N more` marker.
 - **`vlc.go`** — VLC playback integration (single item, playlist, or untrimmed source for scrubbing), driven via `open -a VLC` / `osascript` on macOS.
-- **`tea.ExecProcess`** shell-outs — `render` and `concat` hand off to the real CLI subprocess, then reload state on return.
+- **`tea.ExecProcess`** shell-outs — the timeline view's `r` and the collection views' `r`/`R` hand off to the real CLI subprocess (`finalize` on the timeline, `render` on a collection), then reload state on return.
 - **`dashboardJobEvent`** — the channel type used by background fetch/render jobs (`runDashboardFetchJob`, `runDashboardRenderJob`); `Model.drainJobEvents` pulls events off it each tick to update per-row job status without blocking the UI.
 
 ## See also

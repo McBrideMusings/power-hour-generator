@@ -156,7 +156,7 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			faint.Render(size),
 			exportedAt)
 	} else {
-		b.WriteString(cursor + faint.Render("not yet exported — press c to concatenate"))
+		b.WriteString(cursor + faint.Render("not yet exported — press r to finalize"))
 	}
 	b.WriteByte('\n')
 	b.WriteByte('\n')
@@ -341,7 +341,7 @@ func (v timelineView) renderHelpRow() string {
 		sources = append(sources, helpRowSource{inlineRowNote(v.seqStatus[v.seqCursor], 0), editStyle})
 	}
 
-	defaultText := "a add · d delete · J/K reorder · e edit · r render · c concat"
+	defaultText := "a add · d delete · J/K reorder · e edit · r finalize"
 	if len(v.sequence) == 0 {
 		defaultText = "no sequence entries — press a to add one"
 	}

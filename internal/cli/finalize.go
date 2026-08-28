@@ -24,29 +24,29 @@ import (
 )
 
 var (
-	concatOut    string
-	concatDryRun bool
-	concatForce  bool
+	finalizeOut    string
+	finalizeDryRun bool
+	finalizeForce  bool
 )
 
-func newConcatCmd() *cobra.Command {
+func newFinalizeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "concat",
-		Short: "Concatenate rendered segments into a final video",
-		RunE:  runConcat,
+		Use:   "finalize",
+		Short: "Assemble the playback order into the final video",
+		RunE:  runFinalize,
 	}
 
-	cmd.Flags().StringVar(&concatOut, "out", "", "Output file path (default: <project>/powerhour.mp4)")
-	cmd.Flags().BoolVar(&concatDryRun, "dry-run", false, "Print the resolved segment list without running ffmpeg")
-	cmd.Flags().BoolVar(&concatForce, "force", false, "Re-render inline file segments even if they already exist")
+	cmd.Flags().StringVar(&finalizeOut, "out", "", "Output file path (default: <project>/powerhour.mp4)")
+	cmd.Flags().BoolVar(&finalizeDryRun, "dry-run", false, "Print the resolved segment list without running ffmpeg")
+	cmd.Flags().BoolVar(&finalizeForce, "force", false, "Re-render inline file segments even if they already exist")
 
 	return cmd
 }
 
-func runConcat(cmd *cobra.Command, _ []string) error {
-	glogf, gcloser := logx.StartCommand("concat")
+func runFinalize(cmd *cobra.Command, _ []string) error {
+	glogf, gcloser := logx.StartCommand("finalize")
 	defer gcloser.Close()
-	glogf("concat started")
+	glogf("finalize started")
 
 	pp, err := paths.Resolve(projectDir)
 	if err != nil {
@@ -77,7 +77,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 
 	// Load encoding profile (probe if not cached).
 	sw.Update("Resolving encoding profile...")
-	enc, err := resolveEncodingForConcat(ctx2, cfg)
+	enc, err := resolveEncodingForFinalize(ctx2, cfg)
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Build ordered segment list from timeline.
+	// Build ordered segment list from the playback order.
 	sw.Update("Resolving timeline...")
 	segments, err := render.ResolveTimelineSegments(pp, cfg, collections)
 	if err != nil {
@@ -107,7 +107,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Check for missing or stale segments and auto-render if needed.
-	if !concatDryRun && hasMissingSegments(segments) {
+	if !finalizeDryRun && hasMissingSegments(segments) {
 		sw.Update("Rendering missing segments...")
 		glogf("auto-render: missing segments detected, triggering render")
 		savedConcurrency := renderConcurrency
@@ -125,7 +125,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	if concatDryRun {
+	if finalizeDryRun {
 		sw.Stop()
 
 		// Build hash info for inline file entries so their status can show
@@ -170,7 +170,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 			if err != nil {
 				return fmt.Errorf("init render service: %w", err)
 			}
-			if err := renderInlineFiles(ctx2, pp, cfg, svc, concatForce); err != nil {
+			if err := renderInlineFiles(ctx2, pp, cfg, svc, finalizeForce); err != nil {
 				return err
 			}
 			break
@@ -189,7 +189,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Determine output path.
-	outputPath := concatOut
+	outputPath := finalizeOut
 	if outputPath == "" {
 		outputPath = filepath.Join(pp.Root, "powerhour"+containerExt(enc.Container))
 	}
@@ -205,7 +205,7 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	}
 
 	sw.Stop()
-	glogf("concat finished: %s (method=%s)", result.OutputPath, result.Method)
+	glogf("finalize finished: %s (method=%s)", result.OutputPath, result.Method)
 
 	// Report result.
 	info, statErr := os.Stat(result.OutputPath)
@@ -228,10 +228,10 @@ func runConcat(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// resolveEncodingForConcat returns the merged ResolvedEncoding from cached
+// resolveEncodingForFinalize returns the merged ResolvedEncoding from cached
 // profile + global defaults + project overrides. If no cached profile exists,
 // it probes the machine.
-func resolveEncodingForConcat(ctx context.Context, cfg config.Config) (tools.ResolvedEncoding, error) {
+func resolveEncodingForFinalize(ctx context.Context, cfg config.Config) (tools.ResolvedEncoding, error) {
 	profile := tools.LoadEncodingProfile()
 	if profile == nil {
 		ffmpegPath, err := tools.Lookup("ffmpeg")
@@ -288,7 +288,7 @@ func containerExt(container string) string {
 
 // inlineHashInfo carries the stored (render-state) and freshly-computed
 // input hash for an inline file entry's segment, used to detect staleness
-// in `concat --dry-run`.
+// in `finalize --dry-run`.
 type inlineHashInfo struct {
 	stored   string
 	computed string

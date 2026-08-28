@@ -53,7 +53,6 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 		"↑/↓ or j/k          Move cursor",
 		"?                   Toggle this help",
 		"u or Ctrl+R         Refresh from disk (tools view rebinds u; use Ctrl+R there)",
-		"c                   Concatenate the full timeline into the final video",
 		"o                   Open the project folder in the file manager",
 		"q, Esc, or Ctrl+C   Quit",
 	)
@@ -61,12 +60,12 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 	switch viewKind {
 	case "timeline":
 		section("Timeline View",
-			"r            Render all segments (runs powerhour render)",
+			"r            Finalize: assemble the playback order into the final video (runs powerhour finalize)",
 			"a            Focus the Add slot (type a collection name or file path)",
 			"J/K          Reorder the selected entry",
 			"x            Delete the selected entry, or the output row",
 			"e            On an entry row: open powerhour.yaml (press u after editing)",
-			"E            On the output row: open the rendered concat file",
+			"E            On the output row: open the finalized output file",
 			"v            Play the selected entry (or output) in VLC",
 			"V            Play the whole timeline as a VLC playlist",
 		)

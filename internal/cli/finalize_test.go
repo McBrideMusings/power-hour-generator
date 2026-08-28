@@ -7,15 +7,18 @@ import (
 
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
+	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/state"
+	"powerhour/pkg/csvplan"
 )
 
-// TestConcatDryRunSegmentStatus pins issue #40: `concat --dry-run` must show
-// per-entry status (✓ / stale / missing) for inline file entries, mirroring
-// the hash-based drift detection `status` already shows for the timeline
-// section.
-func TestConcatDryRunSegmentStatus(t *testing.T) {
+// TestFinalizeDryRunSegmentStatus pins issue #40: `finalize --dry-run` must
+// show per-entry status (✓ / stale / missing) for inline file entries,
+// mirroring the hash-based drift detection `status` already shows for the
+// timeline section.
+func TestFinalizeDryRunSegmentStatus(t *testing.T) {
 	root := t.TempDir()
 	pp := paths.ProjectPaths{
 		Root:            root,
@@ -94,4 +97,68 @@ func findSegPathBySource(t *testing.T, pp paths.ProjectPaths, cfg config.Config,
 		sourcePath = filepath.Join(pp.Root, sourcePath)
 	}
 	return render.InlineSegmentPath(pp.SegmentsDir, seqIdx, sourcePath)
+}
+
+// TestResolveTimelineSegmentsHonorsPlaybackOrderSwap is the issue's own
+// regression test: before the seam swap in render.ResolveTimelineSegments,
+// a playback.Swap had no effect on the resolved segment order because
+// ResolveTimelineSegments resolved from config order (BuildTimelinePlacements)
+// instead of the playback order.
+func TestResolveTimelineSegmentsHonorsPlaybackOrderSwap(t *testing.T) {
+	root := t.TempDir()
+	pp := paths.ProjectPaths{
+		Root:        root,
+		SegmentsDir: filepath.Join(root, "segments"),
+	}
+
+	cfg := config.Config{
+		Timeline: config.TimelineConfig{
+			Sequence: []config.SequenceEntry{
+				{Collection: "songs"},
+			},
+		},
+	}
+	rows := []csvplan.CollectionRow{
+		{Index: 1, RowID: "s1"},
+		{Index: 2, RowID: "s2"},
+		{Index: 3, RowID: "s3"},
+	}
+	collections := map[string]project.Collection{
+		"songs": {
+			Name:   "songs",
+			Config: config.CollectionConfig{Selection: "once"},
+			Rows:   rows,
+		},
+	}
+
+	before, err := render.ResolveTimelineSegments(pp, cfg, collections)
+	if err != nil {
+		t.Fatalf("ResolveTimelineSegments (before): %v", err)
+	}
+	if len(before) != 3 {
+		t.Fatalf("segments = %d, want 3", len(before))
+	}
+
+	order, _, err := playback.ResolveOrder(root, cfg, collections)
+	if err != nil {
+		t.Fatalf("ResolveOrder: %v", err)
+	}
+	if err := playback.Swap(&order, 0, 2); err != nil {
+		t.Fatalf("Swap: %v", err)
+	}
+	if err := playback.Save(root, order); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	after, err := render.ResolveTimelineSegments(pp, cfg, collections)
+	if err != nil {
+		t.Fatalf("ResolveTimelineSegments (after): %v", err)
+	}
+
+	if before[0].Path == after[0].Path && before[2].Path == after[2].Path {
+		t.Fatalf("swap did not change resolved segment order: before=%+v after=%+v", before, after)
+	}
+	if after[0].Path != before[2].Path || after[2].Path != before[0].Path {
+		t.Fatalf("resolved order does not reflect the swap: before=%+v after=%+v", before, after)
+	}
 }
