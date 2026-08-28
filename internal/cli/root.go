@@ -76,6 +76,7 @@ func newRootCmd() *cobra.Command {
 		newLibraryCmd(),
 		newCleanCmd(),
 		newToolsCmd(),
+		newOrderCmd(),
 		convertCmd,
 	)
 	// convert operates on a standalone file path; project/json flags don't apply.
