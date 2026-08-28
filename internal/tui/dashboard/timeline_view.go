@@ -76,6 +76,12 @@ type timelineView struct {
 	cycling   bool
 	cycleSlot int
 
+	// cycleBackup is the order as it stood when cycle mode was armed. It is
+	// what Esc restores, and diffing it against the live order is how the
+	// panel marks which rows a pending edit would move — including the far
+	// side of a swap, which is not the row under the cursor.
+	cycleBackup []playback.Slot
+
 	// orderNote is a transient one-line result of the last playback-order
 	// gesture (swap confirmed, shuffle count, "file entries have no pool").
 	// Rendered through the footer ladder, never as a second status line.
@@ -105,6 +111,15 @@ func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collec
 		seqStatus:       make(map[int]string),
 		seqStatusUntil:  make(map[int]int),
 	}
+}
+
+// cyclePending reports whether slot i holds a different row than it did when
+// cycle mode was armed — an uncommitted change the panel marks as pending.
+func (v timelineView) cyclePending(i int) bool {
+	if !v.cycling || i >= len(v.cycleBackup) || i >= len(v.order.Slots) {
+		return false
+	}
+	return v.cycleBackup[i].RowID != v.order.Slots[i].RowID
 }
 
 // findConcatOutput looks for the concat output file in the project root.
@@ -280,13 +295,17 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			cursor = cursorStyle.Render("▸ ")
 		}
 
-		// Playback-readiness dot: green = rendered segment ready, amber =
-		// falls back to the raw/uncut source, red = nothing playable yet.
+		// Playback-readiness dot: green = rendered segment ready at this
+		// position, yellow half-dot = rendered at an older position so only
+		// its burned-in number is stale, amber = falls back to the raw/uncut
+		// source, red = nothing playable yet.
 		key := cacheKeyForEntry(e)
 		dot := dotUnavailable
 		switch cacheStatus[key] {
 		case "rendered":
 			dot = dotCached
+		case "misnumbered":
+			dot = dotMisnumbered
 		case "cached":
 			dot = dotFallback
 		}
@@ -300,8 +319,12 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		displayLabel := label
 		switch {
 		case v.cycling && i == v.cycleSlot:
-			// Arrows on both sides say ←/→ change this row right now.
+			// Arrows on both sides say ←/→ change this row.
 			displayLabel = cycleArrowStyle.Render("‹ ") + cycleSlotStyle.Render(label) + cycleArrowStyle.Render(" ›")
+		case v.cyclePending(i):
+			// The other end of a pending swap. Italic says "not saved yet",
+			// so the row does not read as a change that already happened.
+			displayLabel = cyclePendingStyle.Render(label)
 		case locked:
 			displayLabel = lockedRowStyle.Render(label)
 		}

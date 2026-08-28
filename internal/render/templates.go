@@ -254,3 +254,66 @@ func sanitizeSegment(value string) string {
 	}
 	return result
 }
+
+// SegmentNamePattern splits the basename tmpl produces for seg into the parts
+// that do not depend on the clip's playback position and the part that does.
+// varies is false when the template embeds no position at all, in which case
+// prefix and suffix are meaningless.
+//
+// It exists so a caller can find a segment that was rendered while the row sat
+// at a different position in the playback order: the file is still on disk
+// under its old number, and prefix+suffix identify it. Rather than parse the
+// template, this renders the name at several positions and keeps only what
+// none of them moved — so it stays correct for any template, including one
+// that repeats the position or omits it.
+func SegmentNamePattern(tmpl string, seg Segment) (prefix, suffix string, varies bool) {
+	// The probes must disagree in every digit column a padded number can use.
+	// Two adjacent values are not enough: $INDEX_PAD3 renders 1 and 2 as
+	// "001"/"002", whose shared "00" prefix would then exclude position 10.
+	probes := []int{1, 2, 10, 20, 100, 200}
+
+	names := make([]string, 0, len(probes))
+	for _, p := range probes {
+		probe := seg
+		probe.Clip.PlaybackPosition = p
+		names = append(names, SegmentBaseName(tmpl, probe))
+	}
+
+	same := true
+	for _, n := range names[1:] {
+		if n != names[0] {
+			same = false
+			break
+		}
+	}
+	if same {
+		return "", "", false
+	}
+
+	prefix, suffix = names[0], names[0]
+	for _, n := range names[1:] {
+		prefix = commonPrefix(prefix, n)
+		suffix = commonSuffix(suffix, n)
+	}
+	// A short name could let the two halves overlap and double-count bytes.
+	if len(prefix)+len(suffix) > len(names[0]) {
+		suffix = suffix[len(prefix)+len(suffix)-len(names[0]):]
+	}
+	return prefix, suffix, true
+}
+
+func commonPrefix(a, b string) string {
+	i := 0
+	for i < len(a) && i < len(b) && a[i] == b[i] {
+		i++
+	}
+	return a[:i]
+}
+
+func commonSuffix(a, b string) string {
+	i := 0
+	for i < len(a) && i < len(b) && a[len(a)-1-i] == b[len(b)-1-i] {
+		i++
+	}
+	return a[len(a)-i:]
+}

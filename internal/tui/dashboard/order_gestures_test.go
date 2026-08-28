@@ -83,7 +83,7 @@ func testOrderGestureModel(t *testing.T) Model {
 // TestOrderGestureCycleOnce verifies cycle mode on a `once` collection: s
 // arms the cursor slot, → steps its occupant to the next pool row, and
 // because that row already holds another slot the two exchange — so every
-// row still occupies exactly one slot. The step is persisted immediately.
+// row still occupies exactly one slot. The step stays in memory until Enter.
 func TestOrderGestureCycleOnce(t *testing.T) {
 	m := testOrderGestureModel(t)
 	m.timelineView.resCursor = 0 // songs A
@@ -107,17 +107,88 @@ func TestOrderGestureCycleOnce(t *testing.T) {
 		t.Fatalf("cycling=%v cycleSlot=%d — a step must not leave cycle mode", got.timelineView.cycling, got.timelineView.cycleSlot)
 	}
 
-	onDisk, found, err := playback.Load(got.pp.Root)
-	if err != nil || !found {
-		t.Fatalf("playback.Load: found=%v err=%v", found, err)
-	}
-	if onDisk.Slots[0].RowID != "bbb222" {
-		t.Fatalf("persisted slot0 = %q, want bbb222", onDisk.Slots[0].RowID)
+	// Nothing is on disk yet: the step is pending until Enter.
+	if _, found, _ := playback.Load(got.pp.Root); found {
+		t.Fatal("a pending cycle step wrote playback-order.yaml, want nothing written until Enter")
 	}
 
 	done, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if done.(Model).timelineView.cycling {
+	final := done.(Model)
+	if final.timelineView.cycling {
 		t.Fatal("still cycling after Enter, want cycle mode left")
+	}
+	onDisk, found, err := playback.Load(final.pp.Root)
+	if err != nil || !found {
+		t.Fatalf("playback.Load after Enter: found=%v err=%v", found, err)
+	}
+	if onDisk.Slots[0].RowID != "bbb222" || onDisk.Slots[1].RowID != "aaa111" {
+		t.Fatalf("persisted slots = %q/%q, want bbb222/aaa111", onDisk.Slots[0].RowID, onDisk.Slots[1].RowID)
+	}
+}
+
+// TestOrderGestureCycleEscUndoesEverySlot is the guarantee the gesture is
+// built around: Esc restores the order as it stood when s was pressed —
+// including the far side of a swap, which is not the row under the cursor —
+// and leaves playback-order.yaml untouched.
+func TestOrderGestureCycleEscUndoesEverySlot(t *testing.T) {
+	m := testOrderGestureModel(t)
+	m.timelineView.resCursor = 0
+	before := []string{m.order.Slots[0].RowID, m.order.Slots[1].RowID, m.order.Slots[2].RowID}
+
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	stepped, _ := armed.(Model).handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	stepped2, _ := stepped.(Model).handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	moved := stepped2.(Model)
+	if moved.order.Slots[0].RowID == before[0] {
+		t.Fatal("setup: two right presses did not move slot 0")
+	}
+
+	undone, _ := moved.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
+	got := undone.(Model)
+	for i, want := range before {
+		if got.order.Slots[i].RowID != want {
+			t.Fatalf("slot %d = %q after Esc, want %q restored", i, got.order.Slots[i].RowID, want)
+		}
+	}
+	if got.timelineView.cycling {
+		t.Fatal("still cycling after Esc, want cycle mode left")
+	}
+	if _, found, _ := playback.Load(got.pp.Root); found {
+		t.Fatal("Esc left a playback-order.yaml behind, want nothing ever written")
+	}
+}
+
+// TestOrderGestureCycleSwallowsOtherKeys verifies cycle mode is modal: a key
+// that is neither a step nor a decision cannot leave the mode, so it can
+// never silently commit or discard the pending edit.
+func TestOrderGestureCycleSwallowsOtherKeys(t *testing.T) {
+	m := testOrderGestureModel(t)
+	m.timelineView.resCursor = 0
+
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	stepped, _ := armed.(Model).handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	pending := stepped.(Model)
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyDown},
+		{Type: tea.KeyRunes, Runes: []rune("q")},
+		{Type: tea.KeyRunes, Runes: []rune("l")},
+		{Type: tea.KeyRunes, Runes: []rune("2")},
+	} {
+		next, cmd := pending.handleKey(key)
+		got := next.(Model)
+		if cmd != nil {
+			t.Fatalf("key %v returned a cmd while cycling, want nil", key)
+		}
+		if !got.timelineView.cycling {
+			t.Fatalf("key %v left cycle mode, want it swallowed", key)
+		}
+		if got.activeView != 0 {
+			t.Fatalf("key %v switched view while cycling", key)
+		}
+		if _, found, _ := playback.Load(got.pp.Root); found {
+			t.Fatalf("key %v caused a write while cycling", key)
+		}
 	}
 }
 
@@ -135,6 +206,9 @@ func TestOrderGestureCycleRepeat(t *testing.T) {
 
 	if got.order.Slots[3].RowID != "eee555" {
 		t.Fatalf("slot 3 RowID = %q, want eee555 (next in the ads pool)", got.order.Slots[3].RowID)
+	}
+	if !got.timelineView.cyclePending(3) {
+		t.Fatal("slot 3 not marked pending, want the panel to show it as unsaved")
 	}
 	// ← from the first pool row wraps to the last.
 	m2 := testOrderGestureModel(t)
@@ -246,9 +320,9 @@ func TestOrderGestureShuffleSkipsLockedSlots(t *testing.T) {
 	}
 }
 
-// TestOrderGestureEscLeavesCycleMode verifies Esc leaves cycle mode without
-// quitting the dashboard, and without touching the order.
-func TestOrderGestureEscLeavesCycleMode(t *testing.T) {
+// TestOrderGestureEscWithNoStepIsHarmless verifies Esc with no pending step
+// leaves cycle mode without quitting the dashboard or touching the order.
+func TestOrderGestureEscWithNoStepIsHarmless(t *testing.T) {
 	m := testOrderGestureModel(t)
 	m.timelineView.resCursor = 0
 
@@ -290,7 +364,23 @@ func TestFooterHidesMutationKeysInSequencePanel(t *testing.T) {
 
 	m.timelineView.focusPanel = 1
 	orderFooter := renderFooter(m)
+	if strings.Contains(orderFooter, "commit") {
+		t.Fatalf("idle playback-order footer = %q, should not advertise the cycle-mode keys", orderFooter)
+	}
 	if !strings.Contains(orderFooter, "s change") || !strings.Contains(orderFooter, "l lock") || !strings.Contains(orderFooter, "S shuffle") {
 		t.Fatalf("playback-order footer = %q, want the s/l/S gesture keys", orderFooter)
+	}
+
+	// While cycling, ←/→ belong to the slot, so the footer must stop calling
+	// them view switching and must name both the commit and the undo key.
+	m.timelineView.cycling = true
+	cycleFooter := renderFooter(m)
+	for _, want := range []string{"←/→ change this slot", "commit", "Esc undo"} {
+		if !strings.Contains(cycleFooter, want) {
+			t.Fatalf("cycling footer = %q, want it to name %q", cycleFooter, want)
+		}
+	}
+	if strings.Contains(cycleFooter, "views") {
+		t.Fatalf("cycling footer = %q, still advertises ←/→ as view switching", cycleFooter)
 	}
 }

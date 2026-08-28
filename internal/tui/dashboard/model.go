@@ -677,21 +677,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	key := msg.String()
 
-	// Cycle mode owns ←/→ (which are otherwise view switching), and Enter and
-	// Esc (which are otherwise quit), for as long as a slot is being cycled.
-	// It claims them before the global bindings, or the gesture could never
-	// reach the keys it is defined in terms of.
+	// Cycle mode is modal, and every other key is swallowed while it is up.
+	// It has to claim ←/→ (otherwise view switching) and Enter/Esc (otherwise
+	// quit) ahead of the global bindings, or the gesture could never reach the
+	// keys it is defined in terms of — and swallowing the rest is what makes
+	// "nothing is written until Enter" true: no other key can leave the mode,
+	// so none of them can decide the pending edit's fate by accident. Ctrl+C
+	// still quits, because a modal state must never be able to trap the user.
 	if m.activeView == 0 && m.timelineView.cycling {
 		switch key {
 		case "left":
 			return m.handleOrderCycle(m.timelineView, -1)
 		case "right":
 			return m.handleOrderCycle(m.timelineView, +1)
-		case "enter", "esc":
-			m.timelineView.cycling = false
-			m.timelineView.orderNote = ""
-			return m, nil
+		case "enter", "s":
+			return m.commitOrderCycle(), nil
+		case "esc":
+			return m.cancelOrderCycle(), nil
+		case "ctrl+c":
+			return m, tea.Quit
 		}
+		return m, nil
 	}
 
 	// The tools view claims r/u/U and cursor movement before the global
@@ -1844,8 +1850,8 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		coll := m.collections[collName]
 		row := v.rows[v.cursor]
 		m = m.setCollectionRowNote(cvIdx, row.Index, "opening vlc...")
-		segPath := resolveRenderedSegmentPath(m.pp, m.cfg, m.positions(), collName, coll, row)
-		if _, err := os.Stat(segPath); err == nil {
+		segPath, _ := resolveRenderedSegmentPath(newSegmentScanner(), m.pp, m.cfg, m.positions(), collName, coll, row)
+		if segPath != "" {
 			if err := playFileInVLC(vlcPath, segPath); err != nil {
 				m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 			}
@@ -1915,14 +1921,6 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	v := m.timelineView
 	key := msg.String()
-
-	// Cycle mode is about one slot, so anything that moves the cursor off it
-	// — or leaves the panel — ends it. The arrows it does own never reach
-	// here; handleKey claims them first.
-	if v.cycling && key != "s" {
-		v.cycling = false
-		v.orderNote = ""
-	}
 
 	switch key {
 	case "r":
@@ -2130,10 +2128,10 @@ func currentOrderSlot(m Model, v timelineView) (int, playback.Slot, bool) {
 
 // handleOrderCycleToggle implements the `s` gesture: enter or leave cycle
 // mode on the cursor slot. While cycling, ←/→ walk the slot's occupant
-// through its collection's pool and write on every press; Enter, s or Esc
-// leave. Selection only decides what a step means (playback.Cycle), never
-// whether the gesture exists — per ADR 0002 it never branches on a
-// collection name.
+// through its collection's pool IN MEMORY ONLY; Enter or s commits the result
+// to playback-order.yaml and Esc restores the snapshot taken here. Selection
+// only decides what a step means (playback.Cycle), never whether the gesture
+// exists — per ADR 0002 it never branches on a collection name.
 func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 	slot, sl, ok := currentOrderSlot(m, v)
 	if !ok {
@@ -2157,21 +2155,21 @@ func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if v.cycling && v.cycleSlot == slot {
-		v.cycling = false
-		v.orderNote = ""
-	} else {
-		v.cycling = true
-		v.cycleSlot = slot
-		v.orderNote = "←/→ change · Enter or s to finish"
-	}
+	// Snapshot before the first step so Esc has something exact to restore.
+	// The pending edit lives only in m.order until Enter, which is what makes
+	// the preview honest: nothing on disk has changed yet.
+	v.cycling = true
+	v.cycleSlot = slot
+	v.cycleBackup = append([]playback.Slot(nil), m.order.Slots...)
+	v.orderNote = cycleNote
 	m.timelineView = v
 	return m, nil
 }
 
-// handleOrderCycle steps the cycling slot's occupant by delta and writes the
-// result immediately. The step itself is playback.Cycle — this holds no
-// logic beyond finding the collection and its pool (ADR 0003).
+// handleOrderCycle steps the cycling slot's occupant by delta. The step is
+// pending: it lands in m.order and the panel re-renders from it, but nothing
+// is written until commitOrderCycle. The step itself is playback.Cycle — this
+// holds no logic beyond finding the collection and its pool (ADR 0003).
 func (m Model) handleOrderCycle(v timelineView, delta int) (tea.Model, tea.Cmd) {
 	slot := v.cycleSlot
 	if !v.cycling || slot < 0 || slot >= len(m.order.Slots) {
@@ -2187,13 +2185,69 @@ func (m Model) handleOrderCycle(v timelineView, delta int) (tea.Model, tea.Cmd) 
 		m.timelineView = v
 		return m, nil
 	}
+	// Cycle mutates m.order, never the file. commitOrderCycle is the only
+	// path to disk.
 	if err := playback.Cycle(&m.order, slot, coll.Config.SelectionValue(), playback.Pool(coll), delta); err != nil {
 		v.orderNote = err.Error()
 		m.timelineView = v
 		return m, nil
 	}
+	v.orderNote = cycleNote
 	m.timelineView = v
-	return m.persistOrder("←/→ change · Enter or s to finish"), nil
+	return previewOrder(m), nil
+}
+
+// cycleNote is the footer line cycle mode holds while a pending edit is up.
+const cycleNote = "←/→ change · Enter to commit · Esc to undo"
+
+// previewOrder re-derives the timeline from the in-memory order WITHOUT
+// touching playback-order.yaml, so a pending cycle edit is visible in the
+// panel while remaining uncommitted. persistOrder is the committing sibling.
+func previewOrder(m Model) Model {
+	placements, err := playback.Placements(m.order, m.cfg, m.collections)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Playback order error: %v", err)
+		return m
+	}
+	m.timeline = project.EntriesFromPlacements(placements)
+	m.timelineView.resolved = m.timeline
+	m.timelineView.order = m.order
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
+	return m
+}
+
+// commitOrderCycle writes the pending edit to playback-order.yaml and leaves
+// cycle mode. This is the only place a cycle reaches disk.
+func (m Model) commitOrderCycle() Model {
+	v := m.timelineView
+	changed := 0
+	for i, sl := range m.order.Slots {
+		if i < len(v.cycleBackup) && v.cycleBackup[i].RowID != sl.RowID {
+			changed++
+		}
+	}
+	v.cycling = false
+	v.cycleBackup = nil
+	m.timelineView = v
+	if changed == 0 {
+		m.timelineView.orderNote = ""
+		return m
+	}
+	return m.persistOrder(fmt.Sprintf("committed %d slots", changed))
+}
+
+// cancelOrderCycle restores the order captured when cycle mode was armed and
+// leaves. Nothing was written, so there is nothing to roll back on disk.
+func (m Model) cancelOrderCycle() Model {
+	v := m.timelineView
+	if v.cycleBackup != nil {
+		m.order.Slots = v.cycleBackup
+	}
+	v.cycling = false
+	v.cycleBackup = nil
+	v.orderNote = ""
+	m.timelineView = v
+	return previewOrder(m)
 }
 
 // handleOrderToggleLock implements the `l` gesture.
@@ -3883,20 +3937,24 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 // buildCacheStatus builds a playback-readiness map keyed by "collection:index"
 // (collection rows) or "file:path" (inline timeline file entries). For
 // collection rows, values are "rendered" (the trimmed/overlaid segment
-// Shift+V/v would play exists), "cached" (no rendered segment yet, but the
-// raw/uncut source exists and would be used as a fallback), or "missing"
-// (nothing playable). Inline file entries have no meaningfully-better
+// Shift+V/v would play exists at this playback position), "misnumbered" (a
+// segment exists but was rendered while the row sat elsewhere in the order,
+// so its burned-in number is stale — still played in preference to the raw
+// source, since the clip and its length are right), "cached" (no rendered
+// segment at any position, but the raw/uncut source exists and would be used
+// as a fallback), or "missing" (nothing playable). Inline file entries have no meaningfully-better
 // "rendered" state for preview purposes — an inline file plays as-is either
 // way, untrimmed and without overlays — so they're binary: "rendered" (the
 // file exists) or "missing" (it doesn't).
 func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, pos playback.PositionIndex, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
 	status := make(map[string]string)
+	scan := newSegmentScanner()
 	for name, coll := range collections {
 		for _, row := range coll.Rows {
 			key := fmt.Sprintf("%s:%d", name, row.Index)
-			rendered := resolveRenderedSegmentPath(pp, cfg, pos, name, coll, row)
+			rendered, numbered := resolveRenderedSegmentPath(scan, pp, cfg, pos, name, coll, row)
 			raw := resolveSourcePath(idx, pp.Root, row)
-			status[key] = playbackReadiness(rendered, raw)
+			status[key] = playbackReadiness(rendered, numbered, raw)
 		}
 	}
 	for _, entry := range cfg.Timeline.Sequence {
@@ -3913,15 +3971,21 @@ func buildCacheStatus(cfg config.Config, collections map[string]project.Collecti
 	return status
 }
 
-// playbackReadiness classifies a rendered/raw path pair per buildCacheStatus's
-// three states. renderedPath is checked for existence here; rawPath is
-// expected to already be existence-validated (resolveSourcePath returns "" if
-// the source doesn't resolve to a file on disk).
-func playbackReadiness(renderedPath, rawPath string) string {
+// playbackReadiness classifies a rendered/raw path pair into buildCacheStatus's
+// four states. Both paths are expected to already be existence-validated —
+// segmentScanner.find and resolveSourcePath each return "" when nothing is on
+// disk.
+//
+// "misnumbered" is the middle state: a segment rendered while the row sat at a
+// different playback position. The clip and its length are right and only the
+// burned-in number is stale, which makes it a much better preview than the
+// uncut source, so it ranks above "cached".
+func playbackReadiness(renderedPath string, numbered bool, rawPath string) string {
 	if renderedPath != "" {
-		if _, err := os.Stat(renderedPath); err == nil {
+		if numbered {
 			return "rendered"
 		}
+		return "misnumbered"
 	}
 	if rawPath != "" {
 		return "cached"

@@ -25,7 +25,7 @@ func renderFooter(m Model) string {
 			// so the footer must not still advertise them as "views".
 			// Every step is already written, so leaving is "done", never
 			// "cancel" — there is nothing left to discard.
-			return footerStyle.Render("←/→ change this slot  Enter/s/Esc done")
+			return footerStyle.Render("←/→ change this slot  Enter/s commit  Esc undo")
 		default:
 			return footerStyle.Render("←/→ views  ↑/↓ move  s change  l lock  S shuffle  u refresh") + vlc + footerStyle.Render("  r finalize  o open  ? help  q/Esc quit")
 		}

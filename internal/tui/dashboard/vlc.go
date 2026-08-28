@@ -189,9 +189,13 @@ func resolveRenderedSegment(pp paths.ProjectPaths, cfg config.Config, pos playba
 	return seg
 }
 
-// resolveRenderedSegmentPath returns the rendered segment output path for a collection row.
-func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, row csvplan.CollectionRow) string {
-	return resolveRenderedSegment(pp, cfg, pos, collName, coll, row).OutputPath
+// resolveRenderedSegmentPath returns the best rendered segment on disk for a
+// collection row, and whether its burned-in number matches the row's current
+// playback position. A segment rendered at an older position still counts:
+// it is the right clip at the right length, only mis-numbered.
+func resolveRenderedSegmentPath(scan *segmentScanner, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, row csvplan.CollectionRow) (string, bool) {
+	seg := resolveRenderedSegment(pp, cfg, pos, collName, coll, row)
+	return scan.find(cfg.SegmentFilenameTemplate(), seg)
 }
 
 // resolveSourcePath resolves a collection row's original (unrendered, uncut)
@@ -244,7 +248,7 @@ func existingPath(candidates ...string) string {
 // resolvePlacementPathWithFallback resolves a single timeline placement to the
 // best playable path: the rendered segment when it exists on disk, otherwise
 // the raw (unrendered, uncut) source file when that exists, otherwise "".
-func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collections map[string]project.Collection, idx *cache.Index, placement project.TimelinePlacement) string {
+func resolvePlacementPathWithFallback(scan *segmentScanner, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collections map[string]project.Collection, idx *cache.Index, placement project.TimelinePlacement) string {
 	if placement.SourceFile != "" {
 		raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
 		rendered := render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw)
@@ -259,7 +263,7 @@ func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, 
 	if !ok {
 		return ""
 	}
-	rendered := resolveRenderedSegmentPath(pp, cfg, pos, placement.Collection, coll, row)
+	rendered, _ := resolveRenderedSegmentPath(scan, pp, cfg, pos, placement.Collection, coll, row)
 	raw := resolveSourcePath(idx, pp.Root, row)
 	return existingPath(rendered, raw)
 }
@@ -279,9 +283,10 @@ func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg confi
 	}
 	pos := playback.NewPositionIndex(order)
 
+	scan := newSegmentScanner()
 	result := make([]string, 0, len(placements))
 	for _, placement := range placements {
-		result = append(result, resolvePlacementPathWithFallback(pp, cfg, pos, collections, idx, placement))
+		result = append(result, resolvePlacementPathWithFallback(scan, pp, cfg, pos, collections, idx, placement))
 	}
 	return result
 }
@@ -296,12 +301,13 @@ func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg con
 		return nil
 	}
 
+	scan := newSegmentScanner()
 	var result []string
 	for _, placement := range placements {
 		if placement.SequenceEntryIndex != seqIdx {
 			continue
 		}
-		result = append(result, resolvePlacementPathWithFallback(pp, cfg, pos, collections, idx, placement))
+		result = append(result, resolvePlacementPathWithFallback(scan, pp, cfg, pos, collections, idx, placement))
 	}
 	return result
 }
@@ -310,9 +316,10 @@ func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg con
 // row of a single collection, in plan order: the rendered segment when it
 // exists, otherwise the raw (unrendered, uncut) source file.
 func resolveCollectionAllPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, idx *cache.Index) []string {
+	scan := newSegmentScanner()
 	result := make([]string, 0, len(coll.Rows))
 	for _, row := range coll.Rows {
-		rendered := resolveRenderedSegmentPath(pp, cfg, pos, collName, coll, row)
+		rendered, _ := resolveRenderedSegmentPath(scan, pp, cfg, pos, collName, coll, row)
 		raw := resolveSourcePath(idx, pp.Root, row)
 		result = append(result, existingPath(rendered, raw))
 	}
@@ -326,4 +333,83 @@ func findCollectionRow(coll project.Collection, rowIndex int) (csvplan.Collectio
 		}
 	}
 	return csvplan.CollectionRow{}, false
+}
+
+// segmentScanner finds a row's rendered segment even when the playback order
+// has moved the row since it was rendered.
+//
+// The segment filename template may embed the playback position
+// ($INDEX_PAD3_$SAFE_TITLE by default), and so does the number burned into the
+// video. Reordering therefore invalidates a segment — but only its number. The
+// clip itself is still the right source, trimmed to the right length, so it is
+// far better to preview than the uncut source file. That is the middle state:
+// rendered, wrong number.
+//
+// Directory listings are memoized per scanner because a whole-timeline lookup
+// asks about the same handful of output directories once per slot.
+type segmentScanner struct {
+	dirs map[string][]string
+}
+
+func newSegmentScanner() *segmentScanner {
+	return &segmentScanner{dirs: make(map[string][]string)}
+}
+
+func (s *segmentScanner) list(dir string) []string {
+	if names, ok := s.dirs[dir]; ok {
+		return names
+	}
+	var names []string
+	if entries, err := os.ReadDir(dir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+	}
+	s.dirs[dir] = names
+	return names
+}
+
+// find returns the best rendered segment for seg and whether its burned-in
+// number matches the row's current playback position. An empty path means
+// nothing has been rendered for this row at any position.
+func (s *segmentScanner) find(tmpl string, seg render.Segment) (path string, numbered bool) {
+	if seg.OutputPath == "" {
+		return "", false
+	}
+	if _, err := os.Stat(seg.OutputPath); err == nil {
+		return seg.OutputPath, true
+	}
+
+	prefix, suffix, varies := render.SegmentNamePattern(tmpl, seg)
+	if !varies {
+		// The name carries no position, so the exact miss above was the
+		// only answer there is.
+		return "", false
+	}
+	// A row that has been reordered more than once leaves several segments on
+	// disk under different numbers. Take the newest: it was rendered from the
+	// most recent plan row, so its trim and overlays are the least stale.
+	ext := filepath.Ext(seg.OutputPath)
+	dir := filepath.Dir(seg.OutputPath)
+	var best string
+	var bestMod time.Time
+	for _, name := range s.list(dir) {
+		if len(name) < len(prefix)+len(suffix)+len(ext) {
+			continue
+		}
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix+ext) {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			continue
+		}
+		if best == "" || info.ModTime().After(bestMod) {
+			best, bestMod = candidate, info.ModTime()
+		}
+	}
+	return best, false
 }

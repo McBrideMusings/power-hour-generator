@@ -29,11 +29,15 @@ var (
 	fadeDim       = lipgloss.NewStyle().Faint(true)
 
 	// Playback-readiness dots (timeline PLAYBACK ORDER panel): green = rendered
-	// segment ready, amber = falls back to the raw/uncut source, red = nothing
-	// playable exists yet. Amber matches rowNotRendered's color (214) below —
-	// same meaning, same hue — rather than ANSI 3, which reads too close to
-	// red in many terminal themes.
-	dotCached      = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("●")
+	// segment ready at this position, yellow half-dot = rendered at an older
+	// position so only the burned-in number is stale, amber = falls back to
+	// the raw/uncut source, red = nothing playable exists yet. Amber matches
+	// rowNotRendered's color (214) below — same meaning, same hue — rather
+	// than ANSI 3, which reads too close to red in many terminal themes.
+	dotCached = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Render("●")
+	// Rendered, but while the row sat at a different playback position — the
+	// clip is right, the burned-in number is stale.
+	dotMisnumbered = lipgloss.NewStyle().Foreground(lipgloss.Color("3")).Render("◐")
 	dotFallback    = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("●")
 	dotUnavailable = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("●")
 
@@ -43,6 +47,9 @@ var (
 	lockedRowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	cycleSlotStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 	cycleArrowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	// The far side of a pending swap: italic, because the change is shown but
+	// not yet saved.
+	cyclePendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Italic(true)
 
 	// Collection view.
 	colHeader = lipgloss.NewStyle().Bold(true).Faint(true)
