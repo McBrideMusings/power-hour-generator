@@ -12,6 +12,7 @@ const (
 	overlayNone overlayKind = iota
 	overlayHelp
 	overlayDoctor
+	overlayPicker
 )
 
 var (
@@ -61,13 +62,18 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 	case "timeline":
 		section("Timeline View",
 			"r            Finalize: assemble the playback order into the final video (runs powerhour finalize)",
-			"a            Focus the Add slot (type a collection name or file path)",
-			"J/K          Reorder the selected entry",
-			"x            Delete the selected entry, or the output row",
-			"e            On an entry row: open powerhour.yaml (press u after editing)",
+			"e            open powerhour.yaml — the sequence panel is read-only (press u after editing)",
+			"x            On the output row: delete the finalized output",
 			"E            On the output row: open the finalized output file",
 			"v            Play the selected entry (or output) in VLC",
 			"V            Play the whole timeline as a VLC playlist",
+		)
+		section("Playback Order panel",
+			"s            once collection: mark this slot, then s on another slot of the same collection swaps them",
+			"             repeat collection: opens a picker over the pool; Enter replaces this slot's occupant",
+			"l            Toggle lock on the selected slot (locked slots are skipped by shuffle)",
+			"S            Shuffle the unlocked slots of the selected slot's collection",
+			"Esc          Clear a pending mark",
 		)
 	case "cache":
 		section("Cache View",

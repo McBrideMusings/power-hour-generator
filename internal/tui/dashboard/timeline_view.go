@@ -8,12 +8,10 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-runewidth"
 
 	"powerhour/internal/config"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
-
-	"powerhour/internal/tui"
 )
 
 // timelineHeaderLines is the timeline view's own chrome on top of
@@ -22,24 +20,36 @@ import (
 const timelineHeaderLines = 8
 
 // timelineView holds the state for the timeline view with output at the top,
-// sequence entries in the middle, and resolved preview at the bottom.
+// sequence entries in the middle, and resolved playback order at the bottom.
+//
+// The sequence panel is read-only: a sequence entry has seven fields
+// (collection, slice, interleave, file, fade, fade_in, fade_out) and this
+// view can display exactly one of them, order — editing lives in
+// powerhour.yaml. The playback order panel is the mutable one: every
+// gesture calls internal/playback directly (ADR 0003), never reimplementing
+// swap/set/lock/shuffle logic here.
 type timelineView struct {
 	sequence []config.SequenceEntry
 	resolved []project.TimelineEntry
+
+	// order mirrors the playback order 1:1 against resolved (playback.Placements
+	// guarantees one placement per slot, in slot order) so the panel can render
+	// lock state and mutate by index without holding any resolution logic of
+	// its own.
+	order playback.Order
 
 	// Data references for rendering labels.
 	collections     map[string]project.Collection
 	collectionNames []string
 
-	// Cursor and scroll for sequence entries panel.
-	seqCursor    int
-	seqScrollTop int
+	// Cursor for the read-only sequence entries panel. Fixed height, no scroll.
+	seqCursor int
 
-	// Scroll for resolved preview panel.
+	// Cursor and scroll for the playback order panel.
 	resCursor    int
 	resScrollTop int
 
-	// Which panel has focus: 0 = sequence entries, 1 = resolved preview.
+	// Which panel has focus: 0 = sequence entries, 1 = playback order.
 	focusPanel int
 
 	// Concat output.
@@ -55,13 +65,19 @@ type timelineView struct {
 	// model when modeConfirmDelete is active). Empty = no pending confirm.
 	confirmDelete string
 
-	// Add-slot state (set by model when modeAddSeq is active). Mirrors
-	// collectionView's addFocus/addBuffer/addCursor, but simplified — a
-	// timeline sequence entry is just a collection name or file path, so
-	// there's no suggestions/hint machinery to carry alongside it.
-	addFocus  bool
-	addBuffer string
-	addCursor int
+	// markedSlot is the playback-order slot pending a swap (a `once`
+	// collection's mark-and-swap gesture). -1 = no pending mark.
+	markedSlot int
+
+	// orderNote is a transient one-line result of the last playback-order
+	// gesture (swap confirmed, shuffle count, "file entries have no pool").
+	// Rendered through the footer ladder, never as a second status line.
+	orderNote string
+
+	// reconcileNote summarizes what playback.Reconcile changed the last time
+	// the order was resolved (dropped/added/filled slots). Empty when the
+	// stored order needed no reconciliation.
+	reconcileNote string
 
 	// Terminal dimensions for viewport calculation.
 	termWidth  int
@@ -81,6 +97,7 @@ func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collec
 		concatModTime:   concatModTime,
 		seqStatus:       make(map[int]string),
 		seqStatusUntil:  make(map[int]int),
+		markedSlot:      -1,
 	}
 }
 
@@ -111,26 +128,16 @@ func (v timelineView) sequenceLinesNeeded() int {
 	return lines
 }
 
-// seqPanelHeight returns height for the sequence entries panel. It sizes to
-// fit the sequence list exactly (so a short sequence doesn't leave dead
-// whitespace above the playback-order panel), capped at half the content
-// area so a long sequence still leaves room for playback order below it.
+// seqPanelHeight returns height for the read-only sequence entries panel: it
+// always fits the sequence list exactly, with no scrolling and no cap — a
+// real project's sequence is a handful of entries. The playback order panel
+// gets whatever height remains.
 func (v timelineView) seqPanelHeight() int {
-	total := v.contentHeight()
-	h := v.sequenceLinesNeeded()
-	if cap := max(total/2, 2); h > cap {
-		h = cap
-	}
-	if h > total-1 {
-		h = total - 1
-	}
-	if h < 1 {
-		h = 1
-	}
-	return h
+	return v.sequenceLinesNeeded()
 }
 
-// resPanelHeight returns height for the resolved preview panel (~60%).
+// resPanelHeight returns height for the playback order panel — the content
+// budget left over after the fixed-height sequence panel.
 func (v timelineView) resPanelHeight() int {
 	return v.contentHeight() - v.seqPanelHeight()
 }
@@ -161,38 +168,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 
-	// --- Sequence entries panel ---
+	// --- Sequence entries panel (read-only, fixed height) ---
 	b.WriteString(sectionLabel.Render("TIMELINE SEQUENCE"))
 	b.WriteByte('\n')
 
-	seqH := v.seqPanelHeight()
-	visibleSeq := max(seqH, 1)
-	startSeq := v.seqScrollTop
-
-	// Reserve a line for the up indicator if scrolled, and a line for the
-	// down indicator if there will be entries below — so that indicators
-	// don't push content past the footer.
-	if startSeq > 0 {
-		visibleSeq--
-	}
-	endSeq := min(startSeq+visibleSeq, len(v.sequence))
-	if endSeq < len(v.sequence) {
-		visibleSeq--
-		visibleSeq = max(visibleSeq, 0)
-		endSeq = min(startSeq+visibleSeq, len(v.sequence))
-	}
-
-	if startSeq > 0 {
-		b.WriteString(faint.Render(fmt.Sprintf("  ↑ %d more above", startSeq)))
-		b.WriteByte('\n')
-	}
-	rendered := endSeq - startSeq
-	if startSeq > 0 {
-		rendered++
-	}
-
-	for i := startSeq; i < endSeq; i++ {
-		entry := v.sequence[i]
+	for i, entry := range v.sequence {
 		cursor := "  "
 		if i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus {
 			cursor = cursorStyle.Render("▸ ")
@@ -224,27 +204,18 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		b.WriteByte('\n')
 	}
 
-	if endSeq < len(v.sequence) {
-		b.WriteString(faint.Render(fmt.Sprintf("  ↓ %d more below", len(v.sequence)-endSeq)))
-		b.WriteByte('\n')
-	}
-
-	// Pad remaining sequence panel lines.
-	if endSeq < len(v.sequence) {
-		rendered++
-	}
-	for rendered < seqH {
-		b.WriteByte('\n')
-		rendered++
-	}
-
-	// --- Resolved preview panel ---
+	// --- Playback order panel ---
 	totalDuration := 0
 	for _, e := range v.resolved {
 		totalDuration += v.entryDuration(e)
 	}
 	b.WriteString(sectionLabel.Render(fmt.Sprintf("PLAYBACK ORDER · %d clips · ~%s", len(v.resolved), formatDuration(totalDuration))))
 	b.WriteByte('\n')
+
+	if v.reconcileNote != "" {
+		b.WriteString(faint.Render("  " + v.reconcileNote))
+		b.WriteByte('\n')
+	}
 
 	resH := v.resPanelHeight()
 	visibleRes := max(resH, 1)
@@ -289,16 +260,30 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 			dot = dotFallback
 		}
 
+		locked := i < len(v.order.Slots) && v.order.Slots[i].Locked
+		lockCol := " "
+		if locked {
+			lockCol = lockGlyphStyle.Render("L")
+		}
+
+		displayLabel := label
+		switch {
+		case i == v.markedSlot:
+			displayLabel = markedSlotStyle.Render(label)
+		case locked:
+			displayLabel = lockedRowStyle.Render(label)
+		}
+
 		seqNum := faint.Render(fmt.Sprintf("%02d", e.Sequence))
 		sourceLabel := faint.Render(source)
 		durLabel := faint.Render(formatDuration(dur))
 
-		fmt.Fprintf(&b, "%s%s %s %s", cursor, dot, seqNum, label)
+		fmt.Fprintf(&b, "%s%s %s %s %s", cursor, dot, lockCol, seqNum, displayLabel)
 
 		// Right-align source and duration.
 		rightPart := fmt.Sprintf("%s · %s", sourceLabel, durLabel)
-		labelLen := 2 + 2 + 1 + 2 + 1 + len(tui.TruncateWithEllipsis(label, 999)) // cursor + dot + space + seq + space + label
-		padding := v.termWidth - labelLen - lipgloss.Width(rightPart) - 2
+		fixedWidth := lipgloss.Width(cursor) + lipgloss.Width(dot) + 1 + lipgloss.Width(lockCol) + 1 + lipgloss.Width(seqNum) + 1
+		padding := v.termWidth - fixedWidth - lipgloss.Width(displayLabel) - lipgloss.Width(rightPart) - 2
 		if padding > 0 {
 			b.WriteString(strings.Repeat(" ", padding))
 		} else {
@@ -320,74 +305,23 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 }
 
 // renderHelpRow returns the single inline help row for the timeline view.
-// Priority: the focused add-slot wins outright (it and confirm-delete are
-// mutually exclusive by construction — only one interaction mode is active
-// at a time), then confirm-delete, then any transient note on the focused
-// row, then a default action hint. Inline-edit still happens via a modal
-// (open powerhour.yaml), so it has no branch here.
+// Priority: confirm-delete, then a transient gesture note, then the
+// reconcile summary, then a panel-aware default hint. The sequence panel is
+// read-only, so its default advertises no mutation keys; the playback order
+// panel advertises the gestures.
 func (v timelineView) renderHelpRow() string {
-	// Focused add slot wins outright — it and confirm-delete are mutually
-	// exclusive by construction, so this is a short-circuit, not a source:
-	// renderAddSlot never produces multi-line output here (see its doc
-	// comment), but it still isn't a plain (text, style) pair.
-	if v.addFocus {
-		return v.renderAddSlot()
-	}
-
 	var sources []helpRowSource
 	sources = append(sources, helpRowSource{v.confirmDelete, confirmStyle})
+	sources = append(sources, helpRowSource{v.orderNote, editStyle})
+	sources = append(sources, helpRowSource{v.reconcileNote, faint})
 
-	if v.focusPanel == 0 && !v.concatFocus && v.seqCursor >= 0 && v.seqCursor < len(v.sequence) {
-		sources = append(sources, helpRowSource{inlineRowNote(v.seqStatus[v.seqCursor], 0), editStyle})
-	}
-
-	defaultText := "a add · d delete · J/K reorder · e edit · r finalize"
-	if len(v.sequence) == 0 {
-		defaultText = "no sequence entries — press a to add one"
+	defaultText := "s swap/pick · l lock · S shuffle · Esc clear"
+	if v.focusPanel == 0 && !v.concatFocus {
+		defaultText = "read-only — edit timeline.sequence in powerhour.yaml (e)"
 	}
 	sources = append(sources, helpRowSource{defaultText, faint})
 
 	return resolveHelpRow(v.termWidth, nil, sources...)
-}
-
-// renderAddSlot renders the focused timeline add-slot footer: the rendered
-// input with its cursor, plus a trailing keys hint on the same line. Unlike
-// collection's renderAddSlot, this never spans multiple lines — there are no
-// suggestions or dynamic detect hints to show, since a sequence entry is
-// just a collection name or file path.
-func (v timelineView) renderAddSlot() string {
-	cursor := cursorStyle.Render("▸ ")
-	keysHint := "Enter add · Esc cancel · collection name or file path"
-
-	// renderEditField appends a trailing cursor glyph (one visual column)
-	// when the cursor sits at or past the end of the buffer; account for
-	// that here so the budget matches what it actually renders.
-	cursorGlyphWidth := 0
-	if v.addCursor >= len(v.addBuffer) {
-		cursorGlyphWidth = 1
-	}
-
-	avail := max(v.termWidth-len(helpRowPrefix), 12)
-	remaining := avail - runewidth.StringWidth(v.addBuffer) - cursorGlyphWidth
-
-	const gapWidth = 2 // "  " separator before the trailing hint
-	keysWidth := gapWidth + runewidth.StringWidth(keysHint)
-
-	fittedKeys := ""
-	switch {
-	case remaining <= 0:
-		// No room for the hint; the buffer alone fills (or exceeds) the budget.
-	case keysWidth <= remaining:
-		fittedKeys = keysHint
-	default:
-		fittedKeys = tui.TruncateWithEllipsis(keysHint, remaining-gapWidth)
-	}
-
-	line := cursor + "+ " + renderEditField(v.addBuffer, v.addCursor)
-	if fittedKeys != "" {
-		line += "  " + faint.Render(fittedKeys)
-	}
-	return line
 }
 
 func timelineSliceLabel(raw string) string {
