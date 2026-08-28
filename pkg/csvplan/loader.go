@@ -477,7 +477,7 @@ func ParseStartTime(value string) (time.Duration, error) {
 func parseComponent(name, raw string, max int) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return 0, fmt.Errorf("%s is required", name)
+		return 0, nil
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
