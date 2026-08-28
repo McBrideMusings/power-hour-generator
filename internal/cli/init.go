@@ -37,7 +37,7 @@ defaults:
     duration: "5"
 rows: []
 `
-	songsPlanCSV         = `title,artist,name,start_time,duration,link
+	songsPlanCSV = `title,artist,name,start_time,duration,link
 Example Song 1,Example Artist,Example One,0:00,60,
 Example Song 2,Example Artist,Example Two,0:00,60,
 `
@@ -91,6 +91,7 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
+        selection: once                       # pool runs out once every row has played
         # field_map controls how yt-dlp cache fields fill this collection's
         # columns. Uncomment to override the defaults:
         # field_map:
@@ -106,6 +107,7 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
+        selection: repeat                      # pool cycles back to the start when exhausted
 timeline:
     sequence:
         # - file: videos/intro.mp4              # optional: play a video before songs start

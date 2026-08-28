@@ -20,8 +20,11 @@ type YAMLResult struct {
 }
 
 // LoadCollectionYAML reads a YAML plan file and returns a YAMLResult with
-// columns and rows. The file can be either the structured format (mapping with
-// "columns" and "rows" keys) or a bare YAML list for backward compatibility.
+// columns and rows. The file can be either the structured format (mapping
+// with "columns" and "rows" keys) or a bare YAML list for backward
+// compatibility. Any row lacking a stable id is assigned one and written
+// back to path (so a row hand-added in an external editor gets an id on the
+// next load).
 func LoadCollectionYAML(path string, opts CollectionOptions) (YAMLResult, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -32,16 +35,28 @@ func LoadCollectionYAML(path string, opts CollectionOptions) (YAMLResult, error)
 		return YAMLResult{}, errors.New("plan file is empty")
 	}
 
-	return loadCollectionYAMLStructured(data, opts)
+	result, assigned, loadErr := loadCollectionYAMLStructured(data, opts)
+	if assigned > 0 && len(result.Rows) > 0 {
+		// Write back using the declared columns as-is (WriteYAML merges in
+		// "id" and any other row-only fields for the on-disk file); the
+		// returned result.Columns stays exactly what the file declared —
+		// discovering row-only fields for display is discoverColumns' job,
+		// not this read path's.
+		_ = WriteYAML(path, result.Columns, result.Defaults, result.Rows)
+	}
+	return result, loadErr
 }
 
 // LoadCollectionYAMLData reads a bare YAML list from raw bytes. This is used
-// for importing pasted YAML snippets (not plan files).
+// for importing pasted YAML snippets (not plan files). Missing ids are
+// assigned in memory but never written back — the caller has no path to
+// write to.
 func LoadCollectionYAMLData(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
 	if len(data) == 0 {
 		return nil, errors.New("plan file is empty")
 	}
-	return loadCollectionYAMLBareList(data, opts)
+	rows, _, err := loadCollectionYAMLBareList(data, opts)
+	return rows, err
 }
 
 // yamlPlan is the structured YAML plan format with explicit column schema.
@@ -53,7 +68,9 @@ type yamlPlan struct {
 
 // loadCollectionYAMLStructured handles the structured format (columns + rows
 // mapping) used by plan files. Falls back to bare list for backward compat.
-func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResult, error) {
+// The returned int is the number of rows that were assigned a fresh stable
+// id (0 if every row already had one).
+func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResult, int, error) {
 	opts = normalizeYAMLOpts(opts)
 
 	var plan yamlPlan
@@ -68,46 +85,53 @@ func loadCollectionYAMLStructured(data []byte, opts CollectionOptions) (YAMLResu
 			}
 			defaults := normalizeYAMLDefaults(plan.Defaults)
 			rows, errs := parseYAMLRows(plan.Rows, defaults, opts)
+			assigned := assignRowIDs(rows)
 			result := YAMLResult{Columns: plan.Columns, Defaults: defaults, Rows: rows}
 			if len(errs) > 0 {
-				return result, errs
+				return result, assigned, errs
 			}
-			return result, nil
+			return result, assigned, nil
 		}
 
 		// Mapping with rows but no columns key - this is an error
 		if plan.Rows != nil {
-			return YAMLResult{}, errors.New("YAML plan has rows but is missing required columns key")
+			return YAMLResult{}, 0, errors.New("YAML plan has rows but is missing required columns key")
 		}
 	}
 
-	// Fall through to bare list parser for backward compat
-	rows, bareErr := loadCollectionYAMLBareList(data, opts)
-	return YAMLResult{Rows: rows}, bareErr
+	// Fall through to bare list parser for backward compat. Ids are still
+	// assigned in memory (assignRowIDs runs inside loadCollectionYAMLBareList),
+	// but the assigned count is not propagated here: a bare-list plan file
+	// stays a bare list on disk rather than being silently upgraded to the
+	// structured columns+rows format as a side effect of a read.
+	rows, _, bareErr := loadCollectionYAMLBareList(data, opts)
+	return YAMLResult{Rows: rows}, 0, bareErr
 }
 
 // loadCollectionYAMLBareList handles the legacy bare-list format (a YAML list
-// of maps) used for importing pasted snippets and old plan files.
-func loadCollectionYAMLBareList(data []byte, opts CollectionOptions) ([]CollectionRow, error) {
+// of maps) used for importing pasted snippets and old plan files. The
+// returned int is the number of rows assigned a fresh stable id.
+func loadCollectionYAMLBareList(data []byte, opts CollectionOptions) ([]CollectionRow, int, error) {
 	opts = normalizeYAMLOpts(opts)
 
 	var rawRows []map[string]any
 	if err := yaml.Unmarshal(data, &rawRows); err != nil {
-		return nil, fmt.Errorf("parse YAML: %w", err)
+		return nil, 0, fmt.Errorf("parse YAML: %w", err)
 	}
 
 	if len(rawRows) == 0 {
-		return nil, errors.New("no data rows found")
+		return nil, 0, errors.New("no data rows found")
 	}
 
 	rows, errs := parseYAMLRows(rawRows, nil, opts)
 	if len(rows) == 0 {
-		return nil, errors.New("no data rows found")
+		return nil, 0, errors.New("no data rows found")
 	}
+	assigned := assignRowIDs(rows)
 	if len(errs) > 0 {
-		return rows, errs
+		return rows, assigned, errs
 	}
-	return rows, nil
+	return rows, assigned, nil
 }
 
 func normalizeYAMLOpts(opts CollectionOptions) CollectionOptions {
@@ -250,6 +274,7 @@ func parseYAMLRow(raw map[string]any, defaults map[string]string, index int, opt
 
 	return CollectionRow{
 		Index:           index,
+		RowID:           strings.TrimSpace(fields["id"]),
 		Link:            link,
 		StartRaw:        startRaw,
 		Start:           startDur,

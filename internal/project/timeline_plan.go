@@ -3,6 +3,7 @@ package project
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"powerhour/internal/config"
 	"powerhour/pkg/csvplan"
@@ -13,6 +14,7 @@ type TimelinePlacement struct {
 	SequenceEntryIndex int
 	Collection         string
 	RowIndex           int
+	RowID              string
 	SourceFile         string
 	Interleaved        bool
 }
@@ -52,6 +54,7 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 					SequenceEntryIndex: entryIdx,
 					Collection:         entry.Collection,
 					RowIndex:           row.Index,
+					RowID:              row.RowID,
 				})
 			}
 			continue
@@ -63,7 +66,8 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 		}
 
 		ilTotal := len(secondary.Rows)
-		ilStart := cursor[entry.Interleave.Collection] % max(ilTotal, 1)
+		ilSelection := selectionOf(collections, entry.Interleave.Collection)
+		ilStart := advance(cursor, entry.Interleave.Collection, ilSelection, ilTotal)
 
 		every := entry.Interleave.Every
 		if every <= 0 {
@@ -76,12 +80,19 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 			if ilTotal <= 0 {
 				return
 			}
-			absIdx := (ilStart + ilIdx) % ilTotal
+			absIdx := ilStart + ilIdx
+			if ilSelection == "repeat" {
+				absIdx = absIdx % ilTotal
+			} else if absIdx >= ilTotal {
+				// "once" pool exhausted: stop silently rather than wrapping.
+				return
+			}
 			ilRow := secondary.Rows[absIdx]
 			placements = append(placements, TimelinePlacement{
 				SequenceEntryIndex: entryIdx,
 				Collection:         entry.Interleave.Collection,
 				RowIndex:           ilRow.Index,
+				RowID:              ilRow.RowID,
 				Interleaved:        true,
 			})
 			ilIdx++
@@ -100,6 +111,7 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 				SequenceEntryIndex: entryIdx,
 				Collection:         entry.Collection,
 				RowIndex:           row.Index,
+				RowID:              row.RowID,
 			})
 
 			switch placement {
@@ -119,11 +131,45 @@ func BuildTimelinePlacements(timeline config.TimelineConfig, collections map[str
 		}
 
 		if ilTotal > 0 {
-			cursor[entry.Interleave.Collection] = (ilStart + ilIdx) % ilTotal
+			if ilSelection == "repeat" {
+				cursor[entry.Interleave.Collection] = (ilStart + ilIdx) % ilTotal
+			} else {
+				cursor[entry.Interleave.Collection] = ilStart + ilIdx
+			}
 		}
 	}
 
 	return placements, nil
+}
+
+// selectionOf returns the pool-consumption mode ("once" or "repeat")
+// configured on the named collection, defaulting to "once" when the
+// collection is unknown or its selection is unset/unrecognized. Selection is
+// a property of the pool (CollectionConfig.Selection), never of the
+// sequence/interleave entry that references it, per ADR 0002.
+func selectionOf(collections map[string]Collection, name string) string {
+	coll, ok := collections[name]
+	if !ok {
+		return "once"
+	}
+	selection := strings.ToLower(strings.TrimSpace(coll.Config.Selection))
+	if selection != "once" && selection != "repeat" {
+		return "once"
+	}
+	return selection
+}
+
+// advance returns the starting index into a pool of size total for the next
+// interleave consumption, given the collection's current cursor and its
+// selection mode. "repeat" cycles via modulo, so the returned start always
+// lands inside [0, total). "once" returns the cursor unmodified so it can
+// run past total — the caller detects exhaustion and stops instead of
+// wrapping.
+func advance(cursor map[string]int, name, selection string, total int) int {
+	if selection == "repeat" {
+		return cursor[name] % max(total, 1)
+	}
+	return cursor[name]
 }
 
 type selectedCollectionRows struct {
@@ -164,7 +210,11 @@ func ApplySequenceEntryFades(cfg config.Config, clips []CollectionClip) {
 		sort.Slice(rows, func(i, j int) bool {
 			return rows[i].Index < rows[j].Index
 		})
-		collections[name] = Collection{Name: name, Rows: rows}
+		// Set Config from the real project config so selectionOf resolves the
+		// pool's actual selection here too — a zero-value Config would make
+		// every interleave pool look like "once", silently changing which
+		// rows receive sequence-entry fades.
+		collections[name] = Collection{Name: name, Rows: rows, Config: cfg.Collections[name]}
 	}
 
 	placements, err := BuildTimelinePlacements(cfg.Timeline, collections)

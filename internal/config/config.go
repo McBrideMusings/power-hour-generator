@@ -30,6 +30,11 @@ type CollectionConfig struct {
 	LinkHeader     string         `yaml:"link_header"`
 	StartHeader    string         `yaml:"start_header"`
 	DurationHeader string         `yaml:"duration_header"`
+	// Selection controls whether this collection's pool is consumed once
+	// ("once", the default — the pool runs out) or cycles ("repeat" —
+	// modulo wraparound). A property of the pool itself, not of any one
+	// sequence/interleave entry that references it.
+	Selection string `yaml:"selection,omitempty"`
 	// FieldMap describes how yt-dlp metadata fields back this collection's
 	// canonical columns. Keys are collection columns ("title", "artist",
 	// "link"); values are ordered lists of cache entry fields consulted to
@@ -345,6 +350,7 @@ func Default() Config {
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
+				Selection:      "once",
 			},
 			"interstitials": {
 				Plan:           "interstitials.yaml",
@@ -353,6 +359,7 @@ func Default() Config {
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
+				Selection:      "repeat",
 			},
 		},
 		Timeline: TimelineConfig{
@@ -704,6 +711,14 @@ func (c *Config) applyCollectionDefaults() {
 		if strings.TrimSpace(collection.OutputDir) == "" {
 			collection.OutputDir = name
 		}
+
+		// Apply default pool selection: "once" unless the collection asked
+		// to repeat/cycle its rows.
+		selection := strings.ToLower(strings.TrimSpace(collection.Selection))
+		if selection == "" {
+			selection = "once"
+		}
+		collection.Selection = selection
 
 		c.Collections[name] = collection
 	}

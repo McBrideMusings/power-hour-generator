@@ -8,13 +8,25 @@ import (
 	"powerhour/pkg/csvplan"
 )
 
-// makeCollectionWithRows builds a stub Collection with n synthetic rows (1-based Index).
+// makeCollectionWithRows builds a stub Collection with n synthetic rows
+// (1-based Index). Its Config is left zero-valued, so selectionOf defaults
+// it to "once" — matching the default any real config.ApplyDefaults call
+// produces for a collection that never set `selection`.
 func makeCollectionWithRows(name string, n int) Collection {
 	rows := make([]csvplan.CollectionRow, n)
 	for i := range rows {
 		rows[i] = csvplan.CollectionRow{Index: i + 1}
 	}
 	return Collection{Name: name, Rows: rows}
+}
+
+// makeRepeatingCollectionWithRows is makeCollectionWithRows but with
+// Config.Selection set to "repeat", for a pool a test needs to cycle past
+// its own row count (e.g. an interleave collection under placement=around).
+func makeRepeatingCollectionWithRows(name string, n int) Collection {
+	coll := makeCollectionWithRows(name, n)
+	coll.Config = config.CollectionConfig{Selection: "repeat"}
+	return coll
 }
 
 func TestResolveTimeline(t *testing.T) {
@@ -449,7 +461,7 @@ func TestResolveTimeline(t *testing.T) {
 			},
 			collections: map[string]Collection{
 				"songs":         makeCollectionWithRows("songs", 3),
-				"interstitials": makeCollectionWithRows("interstitials", 3),
+				"interstitials": makeRepeatingCollectionWithRows("interstitials", 3),
 			},
 			want: []entry{
 				{coll: "interstitials", idx: 1}, {coll: "songs", idx: 1},
