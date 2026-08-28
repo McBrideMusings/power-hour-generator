@@ -106,7 +106,6 @@ func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.Projec
 
 	outcomes := make([]fetchRowResult, 0, len(collectionRows))
 	counts := fetchCounts{}
-	dirty := false
 
 	fetchWork := func(send func(tea.Msg)) {
 		for _, collRow := range collectionRows {
@@ -156,7 +155,10 @@ func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.Projec
 				counts.Probed++
 			}
 			if result.Updated {
-				dirty = true
+				if err := cache.Save(pp, idx); err != nil {
+					logger.Printf("save cache index after row %03d: %v", row.Index, err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "warning: failed to save cache index: %v\n", err)
+				}
 			}
 
 			id := result.ID
@@ -198,12 +200,6 @@ func runCollectionFetch(ctx context.Context, cmd *cobra.Command, pp paths.Projec
 		glogf("TUI finished")
 	} else {
 		fetchWork(nil)
-	}
-
-	if dirty {
-		if err := cache.Save(pp, idx); err != nil {
-			return err
-		}
 	}
 
 	if mode == tui.ModeJSON {

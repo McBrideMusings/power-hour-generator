@@ -281,7 +281,6 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 	}
 
 	if len(missingIndices) > 0 && p.CacheService != nil {
-		dirty := false
 		for _, i := range missingIndices {
 			cc := clips[i]
 			row := cc.Clip.Row
@@ -298,7 +297,9 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 				continue
 			}
 			if result.Updated {
-				dirty = true
+				if err := cache.Save(p.Paths, p.Index); err != nil {
+					return CollectionJobResult{}, fmt.Errorf("save cache index after auto-fetch: %w", err)
+				}
 			}
 
 			segment, buildErr := BuildCollectionRenderSegment(p.Paths, p.Config, p.Index, cc)
@@ -319,11 +320,6 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 
 			if p.Reporter != nil {
 				p.Reporter.Fetched(cc, segment)
-			}
-		}
-		if dirty {
-			if err := cache.Save(p.Paths, p.Index); err != nil {
-				return CollectionJobResult{}, fmt.Errorf("save cache index after auto-fetch: %w", err)
 			}
 		}
 	}
