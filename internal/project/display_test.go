@@ -153,3 +153,20 @@ func TestTimelineEntryLabel(t *testing.T) {
 		t.Fatalf("TimelineEntryLabel (out of range): got %q, want %q", got, want)
 	}
 }
+
+// RenderRowTemplate is shared with overlay text (render.renderOverlayTemplate
+// delegates to it), so it must not apply label-specific presentation. Trimming
+// separator punctuation belongs in CollectionRowLabel; doing it here would eat
+// the deliberate dashes in an overlay template like "— {title} —".
+func TestRenderRowTemplateKeepsDeliberatePunctuation(t *testing.T) {
+	row := csvplan.Row{Title: "Crank"}
+
+	if got := RenderRowTemplate("— {title} —", row); got != "— Crank —" {
+		t.Fatalf("RenderRowTemplate stripped deliberate punctuation: got %q, want %q", got, "— Crank —")
+	}
+	// An unresolved token still renders empty rather than literally — that
+	// part is correct for both callers; burning "{artist}" into a video is a bug.
+	if got := RenderRowTemplate("{title} {artist}", row); got != "Crank" {
+		t.Fatalf("unresolved token not dropped: got %q, want %q", got, "Crank")
+	}
+}

@@ -48,10 +48,12 @@ func RenderRowTemplate(tmpl string, row csvplan.Row) string {
 	// CollectionRowLabel returns "{label}" instead of falling back.
 	rendered = unresolvedTokenPattern.ReplaceAllString(rendered, "")
 
-	// Dropping a token can strand the separator that joined it to its
-	// neighbour — "{title} – {artist}" with no artist would end "Miami –".
-	rendered = strings.Join(strings.Fields(rendered), " ")
-	return strings.Trim(rendered, " -–—")
+	// Collapse the whitespace a dropped token leaves behind, but do NOT trim
+	// separator punctuation here: this function also renders overlay text
+	// (render.renderOverlayTemplate delegates to it), where a template like
+	// "— {title} —" means those dashes. Stranded separators are a label
+	// concern and are trimmed in CollectionRowLabel.
+	return strings.TrimSpace(strings.Join(strings.Fields(rendered), " "))
 }
 
 // unresolvedTokenPattern matches a {token} left behind by replacement — a
@@ -103,7 +105,11 @@ func FallbackLabel(link string) string {
 // otherwise a cleaned fallback derived from the row's link.
 func CollectionRowLabel(cc config.CollectionConfig, row csvplan.CollectionRow) string {
 	if tmpl := strings.TrimSpace(cc.Display); tmpl != "" {
-		if s := strings.TrimSpace(RenderRowTemplate(tmpl, row.ToRow())); s != "" {
+		// A dropped token strands the separator that joined it to its
+		// neighbour — "{title} – {artist}" with no artist renders "Song –".
+		// Trimmed here rather than in RenderRowTemplate, which also renders
+		// overlay text where trailing punctuation is deliberate.
+		if s := strings.Trim(RenderRowTemplate(tmpl, row.ToRow()), " -–—"); s != "" {
 			return s
 		}
 	}
