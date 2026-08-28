@@ -19,6 +19,11 @@ import (
 // unified help row at the bottom.
 const timelineHeaderLines = 8
 
+// minPlaybackPanelLines is the floor the playback order panel keeps when the
+// sequence list is long enough to compete for the content budget. The
+// sequence panel is capped to whatever is left above it.
+const minPlaybackPanelLines = 5
+
 // timelineView holds the state for the timeline view with output at the top,
 // sequence entries in the middle, and resolved playback order at the bottom.
 //
@@ -133,7 +138,19 @@ func (v timelineView) sequenceLinesNeeded() int {
 // real project's sequence is a handful of entries. The playback order panel
 // gets whatever height remains.
 func (v timelineView) seqPanelHeight() int {
-	return v.sequenceLinesNeeded()
+	// The sequence list is short in any real project, so it normally fits
+	// exactly and this cap never binds. It exists so a long sequence — or a
+	// short terminal — cannot take the whole content budget: resPanelHeight
+	// is contentHeight minus this, and at zero the playback order panel
+	// vanishes with the footer under it.
+	budget := max(v.contentHeight()-minPlaybackPanelLines, 1)
+	return min(v.sequenceLinesNeeded(), budget)
+}
+
+// sequenceOverflow reports how many sequence entries the panel cannot show.
+// Non-zero only when the cap in seqPanelHeight binds.
+func (v timelineView) sequenceOverflow() int {
+	return max(len(v.sequence)-v.seqPanelHeight(), 0)
 }
 
 // resPanelHeight returns height for the playback order panel — the content
@@ -172,7 +189,15 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 	b.WriteString(sectionLabel.Render("TIMELINE SEQUENCE"))
 	b.WriteByte('\n')
 
-	for i, entry := range v.sequence {
+	shown := v.sequence
+	if over := v.sequenceOverflow(); over > 0 {
+		// Reserve the last line for the count, so a clipped list says so
+		// rather than silently ending early. Still not scrolling: the
+		// sequence is edited in powerhour.yaml, not here.
+		shown = v.sequence[:max(v.seqPanelHeight()-1, 0)]
+	}
+
+	for i, entry := range shown {
 		cursor := "  "
 		if i == v.seqCursor && v.focusPanel == 0 && !v.concatFocus {
 			cursor = cursorStyle.Render("▸ ")
@@ -197,6 +222,11 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		if fade != "" {
 			b.WriteString(fadeDim.Render("  " + fade))
 		}
+		b.WriteByte('\n')
+	}
+
+	if over := v.sequenceOverflow(); over > 0 {
+		b.WriteString(faint.Render(fmt.Sprintf("  + %d more — edit powerhour.yaml to see them all", over)))
 		b.WriteByte('\n')
 	}
 

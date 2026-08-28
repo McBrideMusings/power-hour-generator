@@ -248,3 +248,39 @@ func TestEntryLabelUsesCollectionDisplayTemplate(t *testing.T) {
 		t.Errorf("entryLabel falling back on empty label: got %q, want %q", fallback, want)
 	}
 }
+
+// A long sequence must not consume the whole content budget: resPanelHeight
+// is contentHeight minus seqPanelHeight, and at zero the playback order panel
+// disappears along with the footer beneath it.
+func TestSequencePanelCapLeavesRoomForPlaybackOrder(t *testing.T) {
+	v := timelineView{termHeight: 30}
+	for i := 0; i < 200; i++ {
+		v.sequence = append(v.sequence, config.SequenceEntry{Collection: "songs"})
+	}
+
+	if got := v.resPanelHeight(); got < minPlaybackPanelLines {
+		t.Fatalf("playback order panel starved: resPanelHeight()=%d, want >= %d", got, minPlaybackPanelLines)
+	}
+	if v.seqPanelHeight() >= v.contentHeight() {
+		t.Fatalf("sequence panel took the whole budget: seq=%d content=%d", v.seqPanelHeight(), v.contentHeight())
+	}
+	if v.sequenceOverflow() == 0 {
+		t.Fatal("200 entries in a 30-line terminal should report overflow")
+	}
+}
+
+// The cap must not bind for an ordinary project — the panel still fits its
+// entries exactly, with nothing clipped and no overflow line.
+func TestSequencePanelFitsExactlyWhenShort(t *testing.T) {
+	v := timelineView{termHeight: 40}
+	for i := 0; i < 4; i++ {
+		v.sequence = append(v.sequence, config.SequenceEntry{Collection: "songs"})
+	}
+
+	if got := v.seqPanelHeight(); got != 4 {
+		t.Fatalf("seqPanelHeight() = %d, want 4", got)
+	}
+	if got := v.sequenceOverflow(); got != 0 {
+		t.Fatalf("sequenceOverflow() = %d, want 0", got)
+	}
+}
