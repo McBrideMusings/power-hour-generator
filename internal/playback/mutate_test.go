@@ -294,3 +294,100 @@ func TestShuffleAllErrorsOnUnconfiguredCollection(t *testing.T) {
 		t.Fatal("expected error for a slot collection missing from collections map")
 	}
 }
+
+// cycleOrder builds a 4-slot order over one collection for the Cycle tests.
+func cycleOrder(ids ...string) *Order {
+	o := &Order{}
+	for _, id := range ids {
+		o.Slots = append(o.Slots, Slot{Collection: "c", RowID: id})
+	}
+	return o
+}
+
+// TestCycleOnceSwapsWithTheIncumbent verifies a `once` step exchanges slots
+// when the incoming row already holds one, so every row keeps exactly one
+// slot — the invariant `once` exists to state.
+func TestCycleOnceSwapsWithTheIncumbent(t *testing.T) {
+	o := cycleOrder("a", "b", "c")
+	pool := []string{"a", "b", "c"}
+
+	if err := Cycle(o, 0, config.SelectionOnce, pool, +1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if o.Slots[0].RowID != "b" || o.Slots[1].RowID != "a" {
+		t.Fatalf("slots = %q/%q, want b/a", o.Slots[0].RowID, o.Slots[1].RowID)
+	}
+	if o.Slots[2].RowID != "c" {
+		t.Fatalf("slot 2 = %q, want c untouched", o.Slots[2].RowID)
+	}
+}
+
+// TestCycleRepeatAssignsAndDuplicates verifies a `repeat` step assigns
+// without swapping, so two slots may hold the same row.
+func TestCycleRepeatAssignsAndDuplicates(t *testing.T) {
+	o := cycleOrder("a", "b", "c")
+	pool := []string{"a", "b", "c"}
+
+	if err := Cycle(o, 0, config.SelectionRepeat, pool, +1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if o.Slots[0].RowID != "b" || o.Slots[1].RowID != "b" {
+		t.Fatalf("slots = %q/%q, want b/b (repeat duplicates rather than swapping)", o.Slots[0].RowID, o.Slots[1].RowID)
+	}
+}
+
+// TestCycleWrapsBothDirections verifies the walk wraps at both ends.
+func TestCycleWrapsBothDirections(t *testing.T) {
+	pool := []string{"a", "b", "c"}
+
+	back := cycleOrder("a")
+	if err := Cycle(back, 0, config.SelectionRepeat, pool, -1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if back.Slots[0].RowID != "c" {
+		t.Fatalf("left from the first row = %q, want c", back.Slots[0].RowID)
+	}
+
+	fwd := cycleOrder("c")
+	if err := Cycle(fwd, 0, config.SelectionRepeat, pool, +1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if fwd.Slots[0].RowID != "a" {
+		t.Fatalf("right from the last row = %q, want a", fwd.Slots[0].RowID)
+	}
+}
+
+// TestCycleFromOutsideThePoolStepsIn verifies a slot holding a row that is
+// not in the pool lands on the first entry going forward, the last going back.
+func TestCycleFromOutsideThePoolStepsIn(t *testing.T) {
+	pool := []string{"a", "b", "c"}
+
+	fwd := cycleOrder("gone")
+	if err := Cycle(fwd, 0, config.SelectionRepeat, pool, +1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if fwd.Slots[0].RowID != "a" {
+		t.Fatalf("right from an unknown row = %q, want a", fwd.Slots[0].RowID)
+	}
+
+	back := cycleOrder("gone")
+	if err := Cycle(back, 0, config.SelectionRepeat, pool, -1); err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if back.Slots[0].RowID != "c" {
+		t.Fatalf("left from an unknown row = %q, want c", back.Slots[0].RowID)
+	}
+}
+
+// TestCycleRejectsFileSlotAndEmptyPool verifies the two refusals: a file slot
+// has no pool at all, and an empty pool has nothing to step to.
+func TestCycleRejectsFileSlotAndEmptyPool(t *testing.T) {
+	o := &Order{Slots: []Slot{{File: "/media/bumper.mp4"}, {Collection: "c", RowID: "a"}}}
+
+	if err := Cycle(o, 0, config.SelectionOnce, []string{"a"}, +1); err == nil {
+		t.Fatal("Cycle on a file slot returned nil, want an error")
+	}
+	if err := Cycle(o, 1, config.SelectionOnce, nil, +1); err == nil {
+		t.Fatal("Cycle with an empty pool returned nil, want an error")
+	}
+}

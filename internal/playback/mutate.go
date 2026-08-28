@@ -74,6 +74,69 @@ func Set(o *Order, slot int, rowID string) error {
 	return nil
 }
 
+// Cycle steps one slot's occupant to the next or previous row in pool order,
+// wrapping at both ends. delta is normally +1 or -1; 0 is a no-op.
+//
+// The step honours the collection's selection the same way Shuffle does:
+//
+//   - config.SelectionRepeat: the slot is simply reassigned. Two slots may
+//     end up holding the same row, which is what repeat means.
+//   - config.SelectionOnce: if the incoming row already occupies another
+//     slot, the two slots exchange occupants, so every row still holds
+//     exactly one slot. A row that occupies no slot is assigned directly.
+//
+// The occupant's position in pool is where the walk starts. A slot holding a
+// row that is not in pool starts before the first entry, so delta +1 lands on
+// pool[0].
+func Cycle(o *Order, slot int, sel config.Selection, pool []string, delta int) error {
+	if err := checkIndex(o, slot); err != nil {
+		return err
+	}
+	if err := mutableSlot(o, slot); err != nil {
+		return err
+	}
+	if len(pool) == 0 {
+		return fmt.Errorf("slot %d: cycle needs a non-empty pool", slot)
+	}
+	if delta == 0 {
+		return nil
+	}
+
+	cur := -1
+	for i, id := range pool {
+		if id == o.Slots[slot].RowID {
+			cur = i
+			break
+		}
+	}
+
+	n := len(pool)
+	var next int
+	if cur < 0 {
+		// Not in the pool: step in from whichever end delta points at.
+		if delta > 0 {
+			next = (delta - 1) % n
+		} else {
+			next = ((n+delta)%n + n) % n
+		}
+	} else {
+		next = ((cur+delta)%n + n) % n
+	}
+	target := pool[next]
+	if target == o.Slots[slot].RowID {
+		return nil
+	}
+
+	if config.ParseSelection(string(sel)) == config.SelectionOnce {
+		for i := range o.Slots {
+			if i != slot && o.Slots[i].Collection == o.Slots[slot].Collection && o.Slots[i].RowID == target {
+				return Swap(o, slot, i)
+			}
+		}
+	}
+	return Set(o, slot, target)
+}
+
 // SetLock sets a slot's locked state (0-based index). A file slot has
 // nothing to lock — it cannot move anyway — so it is rejected the same way
 // Swap and Set reject it.

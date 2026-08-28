@@ -80,74 +80,69 @@ func testOrderGestureModel(t *testing.T) Model {
 	return m
 }
 
-// TestOrderGestureSwap verifies the mark-and-swap gesture on a `once`
-// collection: s marks the cursor slot, s on a slot of the same collection
-// exchanges the two occupants and clears the mark, and the result is
-// persisted to playback-order.yaml.
-func TestOrderGestureSwap(t *testing.T) {
+// TestOrderGestureCycleOnce verifies cycle mode on a `once` collection: s
+// arms the cursor slot, → steps its occupant to the next pool row, and
+// because that row already holds another slot the two exchange — so every
+// row still occupies exactly one slot. The step is persisted immediately.
+func TestOrderGestureCycleOnce(t *testing.T) {
 	m := testOrderGestureModel(t)
 	m.timelineView.resCursor = 0 // songs A
 
-	marked, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
-	m = marked.(Model)
-	if m.timelineView.markedSlot != 0 {
-		t.Fatalf("markedSlot = %d, want 0", m.timelineView.markedSlot)
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = armed.(Model)
+	if !m.timelineView.cycling || m.timelineView.cycleSlot != 0 {
+		t.Fatalf("cycling=%v cycleSlot=%d, want true/0", m.timelineView.cycling, m.timelineView.cycleSlot)
 	}
 
-	m.timelineView.resCursor = 2 // songs C
-	swapped, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
-	got := swapped.(Model)
+	stepped, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	got := stepped.(Model)
 
-	if got.timelineView.markedSlot != -1 {
-		t.Fatalf("markedSlot = %d, want -1 after swap", got.timelineView.markedSlot)
+	if got.activeView != 0 {
+		t.Fatalf("activeView = %d, want 0 — cycle mode owns the arrows", got.activeView)
 	}
-	if got.order.Slots[0].RowID != "ccc333" || got.order.Slots[2].RowID != "aaa111" {
-		t.Fatalf("order not swapped: slot0=%q slot2=%q", got.order.Slots[0].RowID, got.order.Slots[2].RowID)
+	if got.order.Slots[0].RowID != "bbb222" || got.order.Slots[1].RowID != "aaa111" {
+		t.Fatalf("once cycle did not swap: slot0=%q slot1=%q", got.order.Slots[0].RowID, got.order.Slots[1].RowID)
+	}
+	if !got.timelineView.cycling || got.timelineView.cycleSlot != 0 {
+		t.Fatalf("cycling=%v cycleSlot=%d — a step must not leave cycle mode", got.timelineView.cycling, got.timelineView.cycleSlot)
 	}
 
 	onDisk, found, err := playback.Load(got.pp.Root)
 	if err != nil || !found {
 		t.Fatalf("playback.Load: found=%v err=%v", found, err)
 	}
-	if onDisk.Slots[0].RowID != "ccc333" {
-		t.Fatalf("persisted order slot0 = %q, want ccc333", onDisk.Slots[0].RowID)
+	if onDisk.Slots[0].RowID != "bbb222" {
+		t.Fatalf("persisted slot0 = %q, want bbb222", onDisk.Slots[0].RowID)
+	}
+
+	done, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if done.(Model).timelineView.cycling {
+		t.Fatal("still cycling after Enter, want cycle mode left")
 	}
 }
 
-// TestOrderGesturePickerOnRepeat verifies that s on a `repeat` collection's
-// slot opens the picker overlay (rather than marking) with the collection's
-// pool as candidates.
-func TestOrderGesturePickerOnRepeat(t *testing.T) {
+// TestOrderGestureCycleRepeat verifies cycle mode on a `repeat` collection:
+// the step assigns from the pool (playback.Cycle's repeat branch, covered
+// directly in internal/playback). ← wraps backwards off the first row.
+func TestOrderGestureCycleRepeat(t *testing.T) {
 	m := testOrderGestureModel(t)
 	m.timelineView.resCursor = 3 // ads A
 
-	got, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
-	gm := got.(Model)
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = armed.(Model)
+	stepped, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	got := stepped.(Model)
 
-	if gm.overlay != overlayPicker || gm.pickerOverlay == nil {
-		t.Fatalf("overlay = %v, pickerOverlay = %v; want overlayPicker with a picker", gm.overlay, gm.pickerOverlay)
+	if got.order.Slots[3].RowID != "eee555" {
+		t.Fatalf("slot 3 RowID = %q, want eee555 (next in the ads pool)", got.order.Slots[3].RowID)
 	}
-	if gm.pickerOverlay.slot != 3 {
-		t.Fatalf("picker slot = %d, want 3", gm.pickerOverlay.slot)
-	}
-	if len(gm.pickerOverlay.items) != 2 {
-		t.Fatalf("picker items = %d, want 2 (ads pool)", len(gm.pickerOverlay.items))
-	}
-	if gm.timelineView.markedSlot != -1 {
-		t.Fatalf("markedSlot = %d, want -1 (repeat never marks)", gm.timelineView.markedSlot)
-	}
-
-	// Enter applies the highlighted item via playback.Set.
-	applied, _ := gm.pickerOverlay.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	if !applied {
-		t.Fatal("handleKey(Enter) apply = false, want true")
-	}
-	final := gm.applyOrderPicker()
-	if final.overlay != overlayNone || final.pickerOverlay != nil {
-		t.Fatalf("overlay = %v, pickerOverlay = %v after apply, want cleared", final.overlay, final.pickerOverlay)
-	}
-	if final.order.Slots[3].RowID != "ddd444" {
-		t.Fatalf("slot 3 RowID = %q, want ddd444 (first pool item)", final.order.Slots[3].RowID)
+	// ← from the first pool row wraps to the last.
+	m2 := testOrderGestureModel(t)
+	m2.timelineView.resCursor = 3
+	armed2, _ := m2.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	back, _ := armed2.(Model).handleKey(tea.KeyMsg{Type: tea.KeyLeft})
+	if got := back.(Model).order.Slots[3].RowID; got != "eee555" {
+		t.Fatalf("slot 3 RowID = %q after left-wrap, want eee555", got)
 	}
 }
 
@@ -164,8 +159,8 @@ func TestOrderGestureFileSlotHasNoPool(t *testing.T) {
 	if gm.timelineView.orderNote != "file entries have no pool" {
 		t.Fatalf("orderNote = %q, want the file-slot note", gm.timelineView.orderNote)
 	}
-	if gm.timelineView.markedSlot != -1 {
-		t.Fatalf("markedSlot = %d, want -1", gm.timelineView.markedSlot)
+	if gm.timelineView.cycling {
+		t.Fatal("a file slot armed cycle mode, want it refused")
 	}
 }
 
@@ -251,16 +246,16 @@ func TestOrderGestureShuffleSkipsLockedSlots(t *testing.T) {
 	}
 }
 
-// TestOrderGestureEscClearsMark verifies Esc clears a pending mark without
+// TestOrderGestureEscLeavesCycleMode verifies Esc leaves cycle mode without
 // quitting the dashboard, and without touching the order.
-func TestOrderGestureEscClearsMark(t *testing.T) {
+func TestOrderGestureEscLeavesCycleMode(t *testing.T) {
 	m := testOrderGestureModel(t)
 	m.timelineView.resCursor = 0
 
-	marked, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
-	m = marked.(Model)
-	if m.timelineView.markedSlot != 0 {
-		t.Fatalf("markedSlot = %d, want 0", m.timelineView.markedSlot)
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = armed.(Model)
+	if !m.timelineView.cycling || m.timelineView.cycleSlot != 0 {
+		t.Fatalf("cycling=%v cycleSlot=%d, want true/0", m.timelineView.cycling, m.timelineView.cycleSlot)
 	}
 
 	before := append([]playback.Slot(nil), m.order.Slots...)
@@ -268,14 +263,14 @@ func TestOrderGestureEscClearsMark(t *testing.T) {
 	result, cmd := m.handleKey(tea.KeyMsg{Type: tea.KeyEscape})
 	got := result.(Model)
 	if cmd != nil {
-		t.Fatal("Esc with a pending mark returned a quit cmd, want nil (no quit)")
+		t.Fatal("Esc while cycling returned a quit cmd, want nil (no quit)")
 	}
-	if got.timelineView.markedSlot != -1 {
-		t.Fatalf("markedSlot = %d, want -1 after Esc", got.timelineView.markedSlot)
+	if got.timelineView.cycling {
+		t.Fatal("still cycling after Esc, want cycle mode left")
 	}
-	for i, s := range got.order.Slots {
-		if s.RowID != before[i].RowID {
-			t.Fatalf("order mutated by Esc at slot %d: got %q, want %q", i, s.RowID, before[i].RowID)
+	for i, sl := range got.order.Slots {
+		if sl.RowID != before[i].RowID {
+			t.Fatalf("order mutated by Esc at slot %d: got %q, want %q", i, sl.RowID, before[i].RowID)
 		}
 	}
 }
@@ -287,7 +282,7 @@ func TestFooterHidesMutationKeysInSequencePanel(t *testing.T) {
 	m.timelineView.focusPanel = 0
 
 	seqFooter := renderFooter(m)
-	for _, key := range []string{"a add", "x del", "J/K reorder", "s swap", "l lock", "S shuffle"} {
+	for _, key := range []string{"a add", "x del", "J/K reorder", "s change", "l lock", "S shuffle"} {
 		if strings.Contains(seqFooter, key) {
 			t.Fatalf("sequence-panel footer = %q, should not advertise %q", seqFooter, key)
 		}
@@ -295,7 +290,7 @@ func TestFooterHidesMutationKeysInSequencePanel(t *testing.T) {
 
 	m.timelineView.focusPanel = 1
 	orderFooter := renderFooter(m)
-	if !strings.Contains(orderFooter, "s swap/pick") || !strings.Contains(orderFooter, "l lock") || !strings.Contains(orderFooter, "S shuffle") {
+	if !strings.Contains(orderFooter, "s change") || !strings.Contains(orderFooter, "l lock") || !strings.Contains(orderFooter, "S shuffle") {
 		t.Fatalf("playback-order footer = %q, want the s/l/S gesture keys", orderFooter)
 	}
 }

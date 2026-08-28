@@ -120,8 +120,7 @@ type Model struct {
 	overlay           overlayKind
 	toolStatuses      []ToolStatus
 	doctorOverlay     *cacheDoctorOverlay
-	doctorInstanceSeq int                 // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
-	pickerOverlay     *orderPickerOverlay // the playback-order slot picker for `repeat`-selection collections
+	doctorInstanceSeq int // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
 
 	// Tool update queue. `U` fills it; each toolUpdateDoneMsg pops the next
 	// one, so package managers never run two at a time on the same terminal.
@@ -638,17 +637,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.overlay == overlayPicker && m.pickerOverlay != nil {
-			done, apply := m.pickerOverlay.handleKey(msg)
-			if apply {
-				m = m.applyOrderPicker()
-			}
-			if done {
-				m.overlay = overlayNone
-				m.pickerOverlay = nil
-			}
-			return m, nil
-		}
 		// Non-input overlay (help). q/Esc/Ctrl+C quit so the root-level
 		// contract holds anywhere text input is not active; `?` closes it.
 		key := msg.String()
@@ -689,12 +677,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	key := msg.String()
 
-	// A pending playback-order mark takes Esc before the global quit binding
-	// so clearing it doesn't also quit the dashboard.
-	if key == "esc" && m.activeView == 0 && m.timelineView.markedSlot >= 0 {
-		m.timelineView.markedSlot = -1
-		m.timelineView.orderNote = ""
-		return m, nil
+	// Cycle mode owns ←/→ (which are otherwise view switching), and Enter and
+	// Esc (which are otherwise quit), for as long as a slot is being cycled.
+	// It claims them before the global bindings, or the gesture could never
+	// reach the keys it is defined in terms of.
+	if m.activeView == 0 && m.timelineView.cycling {
+		switch key {
+		case "left":
+			return m.handleOrderCycle(m.timelineView, -1)
+		case "right":
+			return m.handleOrderCycle(m.timelineView, +1)
+		case "enter", "esc":
+			m.timelineView.cycling = false
+			m.timelineView.orderNote = ""
+			return m, nil
+		}
 	}
 
 	// The tools view claims r/u/U and cursor movement before the global
@@ -1919,6 +1916,14 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 	v := m.timelineView
 	key := msg.String()
 
+	// Cycle mode is about one slot, so anything that moves the cursor off it
+	// — or leaves the panel — ends it. The arrows it does own never reach
+	// here; handleKey claims them first.
+	if v.cycling && key != "s" {
+		v.cycling = false
+		v.orderNote = ""
+	}
+
 	switch key {
 	case "r":
 		c := execCommand("powerhour", "finalize", "--project", m.pp.Root)
@@ -1997,7 +2002,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return m, nil
 
 	case "s":
-		return m.handleOrderMarkOrPick(v)
+		return m.handleOrderCycleToggle(v)
 
 	case "l":
 		return m.handleOrderToggleLock(v)
@@ -2123,12 +2128,13 @@ func currentOrderSlot(m Model, v timelineView) (int, playback.Slot, bool) {
 	return slot, m.order.Slots[slot], true
 }
 
-// handleOrderMarkOrPick implements the `s` gesture: mark-and-swap for a
-// `once` collection's slot, or open the repeat picker for a `repeat`
-// collection's slot, per ADR 0002 (branches on selection, never on a
-// collection name). Holds no domain logic itself — every mutation is a
-// single call into internal/playback.
-func (m Model) handleOrderMarkOrPick(v timelineView) (tea.Model, tea.Cmd) {
+// handleOrderCycleToggle implements the `s` gesture: enter or leave cycle
+// mode on the cursor slot. While cycling, ←/→ walk the slot's occupant
+// through its collection's pool and write on every press; Enter, s or Esc
+// leave. Selection only decides what a step means (playback.Cycle), never
+// whether the gesture exists — per ADR 0002 it never branches on a
+// collection name.
+func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 	slot, sl, ok := currentOrderSlot(m, v)
 	if !ok {
 		return m, nil
@@ -2145,42 +2151,49 @@ func (m Model) handleOrderMarkOrPick(v timelineView) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch coll.Config.SelectionValue() {
-	case config.SelectionRepeat:
-		items := buildOrderPickerItems(coll)
-		m.pickerOverlay = newOrderPickerOverlay(slot, sl.Collection, items, m.termWidth, m.termHeight)
-		m.overlay = overlayPicker
-		return m, nil
-
-	default: // config.SelectionOnce
-		if v.markedSlot < 0 {
-			v.markedSlot = slot
-			v.orderNote = ""
-			m.timelineView = v
-			return m, nil
-		}
-		if v.markedSlot == slot {
-			v.markedSlot = -1
-			m.timelineView = v
-			return m, nil
-		}
-		marked := m.order.Slots[v.markedSlot]
-		if marked.Collection != sl.Collection {
-			v.markedSlot = -1
-			v.orderNote = "can only swap slots within the same collection"
-			m.timelineView = v
-			return m, nil
-		}
-		if err := playback.Swap(&m.order, v.markedSlot, slot); err != nil {
-			v.markedSlot = -1
-			v.orderNote = err.Error()
-			m.timelineView = v
-			return m, nil
-		}
-		v.markedSlot = -1
+	if len(playback.Pool(coll)) == 0 {
+		v.orderNote = fmt.Sprintf("collection %q has no rows to choose from", sl.Collection)
 		m.timelineView = v
-		return m.persistOrder("swapped"), nil
+		return m, nil
 	}
+
+	if v.cycling && v.cycleSlot == slot {
+		v.cycling = false
+		v.orderNote = ""
+	} else {
+		v.cycling = true
+		v.cycleSlot = slot
+		v.orderNote = "←/→ change · Enter or s to finish"
+	}
+	m.timelineView = v
+	return m, nil
+}
+
+// handleOrderCycle steps the cycling slot's occupant by delta and writes the
+// result immediately. The step itself is playback.Cycle — this holds no
+// logic beyond finding the collection and its pool (ADR 0003).
+func (m Model) handleOrderCycle(v timelineView, delta int) (tea.Model, tea.Cmd) {
+	slot := v.cycleSlot
+	if !v.cycling || slot < 0 || slot >= len(m.order.Slots) {
+		v.cycling = false
+		m.timelineView = v
+		return m, nil
+	}
+	sl := m.order.Slots[slot]
+	coll, ok := m.collections[sl.Collection]
+	if !ok {
+		v.cycling = false
+		v.orderNote = fmt.Sprintf("collection %q is not configured", sl.Collection)
+		m.timelineView = v
+		return m, nil
+	}
+	if err := playback.Cycle(&m.order, slot, coll.Config.SelectionValue(), playback.Pool(coll), delta); err != nil {
+		v.orderNote = err.Error()
+		m.timelineView = v
+		return m, nil
+	}
+	m.timelineView = v
+	return m.persistOrder("←/→ change · Enter or s to finish"), nil
 }
 
 // handleOrderToggleLock implements the `l` gesture.
@@ -2242,26 +2255,6 @@ func (m Model) handleOrderShuffle(v timelineView) (tea.Model, tea.Cmd) {
 	}
 	m.timelineView = v
 	return m.persistOrder(fmt.Sprintf("shuffled %d slots", touched)), nil
-}
-
-// applyOrderPicker applies the currently-selected picker item to its target
-// slot via playback.Set, then closes the overlay and persists.
-func (m Model) applyOrderPicker() Model {
-	if m.pickerOverlay == nil {
-		return m
-	}
-	slot := m.pickerOverlay.slot
-	rowID, ok := m.pickerOverlay.selected()
-	m.overlay = overlayNone
-	m.pickerOverlay = nil
-	if !ok {
-		return m
-	}
-	if err := playback.Set(&m.order, slot, rowID); err != nil {
-		m.timelineView.orderNote = err.Error()
-		return m
-	}
-	return m.persistOrder("set")
 }
 
 // persistOrder writes the mutated order via playback.Save, then re-resolves
@@ -2817,8 +2810,6 @@ func (m Model) View() string {
 	var content string
 	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
 		content = m.doctorOverlay.view()
-	} else if m.overlay == overlayPicker && m.pickerOverlay != nil {
-		content = m.pickerOverlay.view()
 	} else {
 		switch m.viewKind(m.activeView) {
 		case "timeline":
@@ -2856,8 +2847,6 @@ func (m Model) View() string {
 	// Footer / input / confirm.
 	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
 		b.WriteString(m.doctorOverlay.doctorFooter())
-	} else if m.overlay == overlayPicker && m.pickerOverlay != nil {
-		b.WriteString(m.pickerOverlay.pickerFooter())
 	} else {
 		switch m.mode {
 		case modeInput:

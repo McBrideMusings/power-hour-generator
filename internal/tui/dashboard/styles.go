@@ -41,7 +41,8 @@ var (
 	// currently marked for a swap.
 	lockGlyphStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	lockedRowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	markedSlotStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	cycleSlotStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	cycleArrowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 
 	// Collection view.
 	colHeader = lipgloss.NewStyle().Bold(true).Faint(true)

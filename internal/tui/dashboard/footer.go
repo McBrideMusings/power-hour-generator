@@ -20,8 +20,14 @@ func renderFooter(m Model) string {
 			return footerStyle.Render("←/→ views  ↑/↓ move  u refresh") + vlc + footerStyle.Render("  e/E open  x del  r finalize  o open  ? help  q/Esc quit")
 		case tv.focusPanel == 0:
 			return footerStyle.Render("←/→ views  ↑/↓ move  u refresh") + vlc + footerStyle.Render("  e edit  r finalize  o open  ? help  q/Esc quit")
+		case tv.cycling:
+			// While cycling, ←/→ belong to the slot, not to view switching —
+			// so the footer must not still advertise them as "views".
+			// Every step is already written, so leaving is "done", never
+			// "cancel" — there is nothing left to discard.
+			return footerStyle.Render("←/→ change this slot  Enter/s/Esc done")
 		default:
-			return footerStyle.Render("←/→ views  ↑/↓ move  s swap/pick  l lock  S shuffle  u refresh") + vlc + footerStyle.Render("  r finalize  o open  ? help  q/Esc quit")
+			return footerStyle.Render("←/→ views  ↑/↓ move  s change  l lock  S shuffle  u refresh") + vlc + footerStyle.Render("  r finalize  o open  ? help  q/Esc quit")
 		}
 	case "collection":
 		altV := ""

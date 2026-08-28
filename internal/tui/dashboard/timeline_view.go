@@ -70,9 +70,11 @@ type timelineView struct {
 	// model when modeConfirmDelete is active). Empty = no pending confirm.
 	confirmDelete string
 
-	// markedSlot is the playback-order slot pending a swap (a `once`
-	// collection's mark-and-swap gesture). -1 = no pending mark.
-	markedSlot int
+	// cycling reports whether cycleSlot is live. It is a separate flag rather
+	// than a -1 sentinel because a timelineView built as a zero value would
+	// otherwise read as "cycling slot 0" and draw the ‹ › arrows unasked.
+	cycling   bool
+	cycleSlot int
 
 	// orderNote is a transient one-line result of the last playback-order
 	// gesture (swap confirmed, shuffle count, "file entries have no pool").
@@ -102,7 +104,6 @@ func newTimelineView(cfg config.Config, resolved []project.TimelineEntry, collec
 		concatModTime:   concatModTime,
 		seqStatus:       make(map[int]string),
 		seqStatusUntil:  make(map[int]int),
-		markedSlot:      -1,
 	}
 }
 
@@ -298,8 +299,9 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 
 		displayLabel := label
 		switch {
-		case i == v.markedSlot:
-			displayLabel = markedSlotStyle.Render(label)
+		case v.cycling && i == v.cycleSlot:
+			// Arrows on both sides say ←/→ change this row right now.
+			displayLabel = cycleArrowStyle.Render("‹ ") + cycleSlotStyle.Render(label) + cycleArrowStyle.Render(" ›")
 		case locked:
 			displayLabel = lockedRowStyle.Render(label)
 		}
@@ -345,7 +347,7 @@ func (v timelineView) renderHelpRow() string {
 	sources = append(sources, helpRowSource{v.orderNote, editStyle})
 	sources = append(sources, helpRowSource{v.reconcileNote, faint})
 
-	defaultText := "s swap/pick · l lock · S shuffle · Esc clear"
+	defaultText := "s change · l lock · S shuffle"
 	if v.focusPanel == 0 && !v.concatFocus {
 		defaultText = "read-only — edit timeline.sequence in powerhour.yaml (e)"
 	}
