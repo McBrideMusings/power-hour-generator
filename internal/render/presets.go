@@ -371,13 +371,37 @@ func optBool(opts map[string]string, key string, fallback bool) bool {
 	return fallback
 }
 
+// fontPathCache memoizes fc-match lookups for the life of the process.
+//
+// The mapping from a fontconfig pattern to a file is fixed while we run, but
+// the lookup is a process spawn: without this, every overlay element of every
+// segment spawns its own fc-match. A 60-song project with three text elements
+// per clip spawns ~200 of them, which measured as 3.7s of CPU on `status`
+// alone. Guarded by a mutex because the render service resolves overlays from
+// parallel workers.
+var (
+	fontPathCache   = map[string]string{}
+	fontPathCacheMu sync.Mutex
+)
+
 // fontFilePath resolves a fontconfig pattern to an absolute font file path.
 func fontFilePath(pattern string) string {
-	out, err := exec.Command("fc-match", "--format=%{file}", pattern).Output()
-	if err != nil {
-		return ""
+	fontPathCacheMu.Lock()
+	if path, ok := fontPathCache[pattern]; ok {
+		fontPathCacheMu.Unlock()
+		return path
 	}
-	return strings.TrimSpace(string(out))
+	fontPathCacheMu.Unlock()
+
+	path := ""
+	if out, err := exec.Command("fc-match", "--format=%{file}", pattern).Output(); err == nil {
+		path = strings.TrimSpace(string(out))
+	}
+
+	fontPathCacheMu.Lock()
+	fontPathCache[pattern] = path
+	fontPathCacheMu.Unlock()
+	return path
 }
 
 // fontAvailable checks whether a font family is known to fontconfig.

@@ -209,11 +209,34 @@ func resolveRenderedSegmentPath(scan *segmentScanner, pp paths.ProjectPaths, cfg
 // its lifetime is a reload. Anything that changes what a link resolves to —
 // a fetch, an edit, a refresh — rebuilds the model and gets a fresh cache.
 type sourceCache struct {
-	paths map[string]string
+	paths  map[string]string
+	exists map[string]bool
 }
 
 func newSourceCache() *sourceCache {
-	return &sourceCache{paths: make(map[string]string)}
+	return &sourceCache{
+		paths:  make(map[string]string),
+		exists: make(map[string]bool),
+	}
+}
+
+// fileExists is the same memo for a path that is not a collection row's link
+// — an inline `file:` timeline entry, say. Whether it is on disk cannot
+// change because slots moved, so a gesture must not re-stat it.
+func (c *sourceCache) fileExists(path string) bool {
+	if path == "" {
+		return false
+	}
+	if c == nil {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+	if ok, seen := c.exists[path]; seen {
+		return ok
+	}
+	_, err := os.Stat(path)
+	c.exists[path] = err == nil
+	return err == nil
 }
 
 // resolve returns the row's source path, consulting the memo first. A nil

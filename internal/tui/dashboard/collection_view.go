@@ -3,7 +3,6 @@ package dashboard
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -156,8 +155,8 @@ func discoverColumns(rows []csvplan.CollectionRow, declaredColumns []string) []c
 	return cols
 }
 
-func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState) collectionView {
-	states := computeRowStates(coll, pp, cfg, pos, idx, rs)
+func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState, src *sourceCache) collectionView {
+	states := computeRowStates(coll, pp, cfg, pos, idx, rs, src)
 	return collectionView{
 		name:           coll.Name,
 		planPath:       coll.Plan,
@@ -170,7 +169,12 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 	}
 }
 
-func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState) []rowState {
+// computeRowStates classifies every row of a collection for the row-colour
+// legend. src memoizes source resolution across calls: this runs again after
+// every plan write, so without it reordering one row re-stats every row's
+// source — and a plan whose links sit on a mounted share pays for that in
+// whole seconds. May be nil, which resolves without memoizing.
+func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState, src *sourceCache) []rowState {
 	states := make([]rowState, len(coll.Rows))
 	filenameTemplate := cfg.SegmentFilenameTemplate()
 	fades := project.EffectiveCollectionFades(cfg, coll)
@@ -185,12 +189,9 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 				_, cached = idx.LookupLink(link)
 			}
 		} else {
-			path := strings.Trim(link, "'\"")
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(pp.Root, path)
-			}
-			_, err := os.Stat(path)
-			cached = err == nil
+			// The same resolution the readiness dot uses, so the two
+			// surfaces cannot disagree about whether a source exists.
+			cached = src.resolve(idx, pp.Root, row) != ""
 		}
 
 		if !cached {

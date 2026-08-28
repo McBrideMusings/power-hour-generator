@@ -216,15 +216,18 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 	order, _, _ := playback.ResolveOrder(pp.Root, cfg, collections)
 	pos := playback.NewPositionIndex(order)
 
+	// One memo for the whole load: every surface below resolves the same
+	// rows' sources, and on a mounted share each cold stat costs real time.
+	srcCache := newSourceCache()
+
 	// Build collection views.
 	collViews := make([]collectionView, len(names))
 	for i, name := range names {
-		collViews[i] = newCollectionView(collections[name], pp, cfg, pos, idx, rs)
+		collViews[i] = newCollectionView(collections[name], pp, cfg, pos, idx, rs, srcCache)
 	}
 
 	// Build summaries and cache status.
-	summaries := buildSummaries(collections, names, idx, pp, cfg, pos, rs)
-	srcCache := newSourceCache()
+	summaries := buildSummaries(collections, names, idx, pp, cfg, pos, rs, srcCache)
 	cacheStatus := buildCacheStatus(cfg, collections, pos, idx, pp, srcCache)
 
 	m := Model{
@@ -3799,7 +3802,7 @@ func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLo
 func reResolve(m Model) Model {
 	m = syncPlaybackOrder(m)
 
-	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.positions(), m.renderState)
+	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.positions(), m.renderState, m.srcCache)
 	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp, m.srcCache)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
 	oldShowAll := m.cacheView.showAll
@@ -3828,12 +3831,12 @@ func reloadState(m Model) Model {
 	m.cacheView.termHeight = oldH
 	m.cacheView.showAll = oldShowAll
 	pos := m.positions()
-	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, pos, rs)
+	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, pos, rs, m.srcCache)
 	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, pos, idx, m.pp, m.srcCache)
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
 		coll := m.collections[collName]
-		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, pos, idx, rs)
+		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, pos, idx, rs, m.srcCache)
 	}
 	return m
 }
@@ -3969,7 +3972,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	m.collections[collName] = coll
 	m.collectionViews[cvIdx].rows = rows
 	m.collectionViews[cvIdx].columns = discoverColumns(rows, coll.Headers)
-	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.positions(), m.cacheIdx, m.renderState)
+	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.positions(), m.cacheIdx, m.renderState, m.srcCache)
 	if m.collectionViews[cvIdx].cursor >= len(rows) {
 		m.collectionViews[cvIdx].cursor = max(0, len(rows)-1)
 	}
@@ -4007,7 +4010,10 @@ func markRowRenderedLive(m Model, cvIdx, rowIndex int) Model {
 }
 
 // buildSummaries computes per-collection cache/render counts.
-func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, rs *state.RenderState) map[string]collectionSummary {
+// buildSummaries counts cached and rendered rows per collection. src carries
+// the same memo computeRowStates uses, for the same reason: this recomputes
+// on every refresh and must not re-stat sources that cannot have changed.
+func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, rs *state.RenderState, src *sourceCache) map[string]collectionSummary {
 	summaries := make(map[string]collectionSummary, len(names))
 	for _, name := range names {
 		coll := collections[name]
@@ -4022,7 +4028,7 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 					_, cached = idx.LookupLink(link)
 				}
 			} else {
-				cached = checkFileExists(link, pp.Root)
+				cached = src.resolve(idx, pp.Root, row) != ""
 			}
 
 			if cached {
@@ -4033,7 +4039,7 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 		}
 
 		// Count rendered segments using the same state classification as collectionView.
-		states := computeRowStates(coll, pp, cfg, pos, idx, rs)
+		states := computeRowStates(coll, pp, cfg, pos, idx, rs, src)
 		for _, state := range states {
 			if state == rowRendered {
 				s.Rendered++
@@ -4075,7 +4081,7 @@ func buildCacheStatus(cfg config.Config, collections map[string]project.Collecti
 		}
 		raw := render.ResolveInlineFilePath(pp.Root, entry.File)
 		state := "missing"
-		if _, err := os.Stat(raw); err == nil {
+		if src.fileExists(raw) {
 			state = "rendered"
 		}
 		status["file:"+entry.File] = state
@@ -4116,17 +4122,6 @@ func buildCollectionLinks(collections map[string]project.Collection) map[string]
 		}
 	}
 	return collLinks
-}
-
-func checkFileExists(path, root string) bool {
-	if path == "" {
-		return false
-	}
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
-	}
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // deleteWordBackward returns the position where word deletion should start.
