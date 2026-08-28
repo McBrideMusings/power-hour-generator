@@ -35,6 +35,10 @@ type segmentInput struct {
 func SegmentInputHash(seg Segment, filenameTemplate string) string {
 	var fields []fieldEntry
 	for k, v := range seg.Clip.Row.CustomFields {
+		if k == "label" {
+			// Presentational only (display templates) — never invalidates a segment.
+			continue
+		}
 		fields = append(fields, fieldEntry{Key: k, Value: v})
 	}
 	sort.Slice(fields, func(i, j int) bool {

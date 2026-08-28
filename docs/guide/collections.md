@@ -38,6 +38,7 @@ Each collection supports:
 | `link_header` | No | `"link"` | CSV column name for video link |
 | `start_header` | No | `"start_time"` | CSV column name for start time |
 | `duration_header` | No | `"duration"` | CSV column name for duration |
+| `display` | No | — | Presentational label template for this collection's rows, using `{token}` syntax (any declared column, plus `{index}`). Shown in the TUI playback order panel. When unset or the template renders empty, the label falls back to a cleaned basename of the row's link. Purely presentational — it never affects rendering or segment hashing |
 
 ## Project Layout with Collections
 

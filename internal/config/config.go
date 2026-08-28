@@ -35,6 +35,12 @@ type CollectionConfig struct {
 	// modulo wraparound). A property of the pool itself, not of any one
 	// sequence/interleave entry that references it.
 	Selection string `yaml:"selection,omitempty"`
+	// Display is a presentational label template for this collection's rows,
+	// using the same {token} syntax as overlay text. Any declared column or
+	// defaults value is a valid token. Purely presentational — never affects
+	// segment hashing or rendering. Empty renders fall back to a cleaned
+	// basename of the row's link.
+	Display string `yaml:"display,omitempty"`
 	// FieldMap describes how yt-dlp metadata fields back this collection's
 	// canonical columns. Keys are collection columns ("title", "artist",
 	// "link"); values are ordered lists of cache entry fields consulted to
@@ -351,6 +357,7 @@ func Default() Config {
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
 				Selection:      "once",
+				Display:        "{title} – {artist}",
 			},
 			"interstitials": {
 				Plan:           "interstitials.yaml",
@@ -360,6 +367,7 @@ func Default() Config {
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
 				Selection:      "repeat",
+				Display:        "{label}",
 			},
 		},
 		Timeline: TimelineConfig{

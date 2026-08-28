@@ -188,19 +188,19 @@ func TestDefaultPlanSchemaColumns(t *testing.T) {
 			name:        "interstitials-yaml",
 			template:    interstitialsPlanYAML,
 			kind:        "yaml",
-			wantColumns: []string{"link", "start_time", "duration"},
+			wantColumns: []string{"label", "link", "start_time", "duration"},
 		},
 		{
 			name:        "interstitials-csv",
 			template:    interstitialsPlanCSV,
 			kind:        "csv",
-			wantColumns: []string{"link", "start_time", "duration"},
+			wantColumns: []string{"label", "link", "start_time", "duration"},
 		},
 		{
 			name:        "interstitials-tsv",
 			template:    interstitialsPlanTSV,
 			kind:        "tsv",
-			wantColumns: []string{"link", "start_time", "duration"},
+			wantColumns: []string{"label", "link", "start_time", "duration"},
 		},
 	}
 

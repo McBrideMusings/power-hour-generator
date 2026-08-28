@@ -199,6 +199,116 @@ func TestValidateStrict_PlanPaths_AllExist(t *testing.T) {
 	}
 }
 
+func TestValidateDisplayTemplates_UndeclaredColumnErrors(t *testing.T) {
+	dir := t.TempDir()
+	planYAML := "columns:\n  - link\n  - start_time\nrows:\n  - link: https://youtu.be/x\n    start_time: \"0:00\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "plan.yaml"), []byte(planYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"interstitials": {Plan: "plan.yaml", Display: "{label}"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	var errs []ValidationResult
+	for _, r := range results {
+		if r.Level == "error" {
+			errs = append(errs, r)
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error for undeclared display column, got %d: %v", len(errs), results)
+	}
+}
+
+func TestValidateDisplayTemplates_DefaultsSuppliedColumnPasses(t *testing.T) {
+	dir := t.TempDir()
+	planYAML := "columns:\n  - link\n  - start_time\ndefaults:\n  label: \"\"\nrows:\n  - link: https://youtu.be/x\n    start_time: \"0:00\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "plan.yaml"), []byte(planYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"interstitials": {Plan: "plan.yaml", Display: "{label}"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected no errors for column supplied via defaults, got %v", results)
+	}
+}
+
+func TestValidateDisplayTemplates_IndexAlwaysAllowed(t *testing.T) {
+	dir := t.TempDir()
+	planYAML := "columns:\n  - link\n  - start_time\nrows:\n  - link: https://youtu.be/x\n    start_time: \"0:00\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "plan.yaml"), []byte(planYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"interstitials": {Plan: "plan.yaml", Display: "{index}"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected {index} to always be allowed, got %v", results)
+	}
+}
+
+func TestValidateDisplayTemplates_DeclaredColumnPasses(t *testing.T) {
+	dir := t.TempDir()
+	planYAML := "columns:\n  - title\n  - artist\n  - link\n  - start_time\nrows:\n  - title: Song\n    artist: Artist\n    link: https://youtu.be/x\n    start_time: \"0:00\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "plan.yaml"), []byte(planYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"songs": {Plan: "plan.yaml", Display: "{title} – {artist}"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected no errors for declared columns, got %v", results)
+	}
+}
+
+func TestValidateDisplayTemplates_FileCollectionSkipped(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"opening": {File: "missing.mp4", Display: "{whatever}"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected file: collections to be skipped, got %v", results)
+	}
+}
+
+func TestValidateDisplayTemplates_UnsetDisplaySkipped(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Collections: map[string]CollectionConfig{
+			"songs": {Plan: "missing.yaml"},
+		},
+	}
+
+	results := cfg.validateDisplayTemplates(dir)
+	if len(results) != 0 {
+		t.Fatalf("expected collections without a display template to be skipped, got %v", results)
+	}
+}
+
 var testTokens = []string{"INDEX", "INDEX_PAD3", "SAFE_TITLE", "ARTIST"}
 
 func TestValidateStrict_SegmentTemplate_ValidTokens(t *testing.T) {
@@ -628,6 +738,32 @@ func TestExtractTemplateTokens(t *testing.T) {
 		for i := range got {
 			if got[i] != tt.want[i] {
 				t.Errorf("extractTemplateTokens(%q)[%d] = %q, want %q", tt.template, i, got[i], tt.want[i])
+			}
+		}
+	}
+}
+
+func TestExtractBraceTokens(t *testing.T) {
+	tests := []struct {
+		template string
+		want     []string
+	}{
+		{"{title} – {artist}", []string{"title", "artist"}},
+		{"{label}", []string{"label"}},
+		{"no-tokens-here", nil},
+		{"{index}", []string{"index"}},
+		{"{}", nil},
+	}
+
+	for _, tt := range tests {
+		got := extractBraceTokens(tt.template)
+		if len(got) != len(tt.want) {
+			t.Errorf("extractBraceTokens(%q) = %v, want %v", tt.template, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("extractBraceTokens(%q)[%d] = %q, want %q", tt.template, i, got[i], tt.want[i])
 			}
 		}
 	}
