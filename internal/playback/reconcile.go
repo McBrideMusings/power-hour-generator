@@ -62,6 +62,30 @@ func Reconcile(prev Order, cfg config.Config, collections map[string]project.Col
 		canonicalByKind[k] = append(canonicalByKind[k], cs)
 	}
 
+	// A repeat collection's kind is constrained only by how many slots the
+	// timeline demands, never by how many times a particular row appears:
+	// Materialize cycles the pool to fill those slots, so the counts it
+	// happens to produce are an artifact of cycling, not a rule. Holding a
+	// stored slot to them makes any hand-picked occupant that is already "at
+	// quota" fail to resolve — it is dropped and a leftover canonical row
+	// takes the position, so the choice silently reverts on the next load.
+	repeatKind := make(map[string]bool, len(canonicalByKind))
+	poolOf := make(map[string]map[string]bool, len(collections))
+	for name, coll := range collections {
+		if coll.Config.SelectionValue() != config.SelectionRepeat {
+			continue
+		}
+		repeatKind["collection:"+name] = true
+		ids := make(map[string]bool, len(coll.Rows))
+		for _, row := range coll.Rows {
+			if row.RowID != "" {
+				ids[row.RowID] = true
+			}
+		}
+		poolOf[name] = ids
+	}
+	takenByKind := make(map[string]int, len(canonicalByKind))
+
 	// remaining[kind][identity] tracks how many more canonical occupants of
 	// that identity are still unclaimed — the multiset a stored slot must
 	// draw against to "resolve". identity is the row id for a collection
@@ -85,6 +109,20 @@ func Reconcile(prev Order, cfg config.Config, collections map[string]project.Col
 	for _, s := range prev.Slots {
 		k := kindOf(s)
 		id := identityOf(s)
+		if repeatKind[k] {
+			// Any pool row is a legal occupant of any slot of this kind; the
+			// only limit is the number of slots the timeline demands.
+			if poolOf[s.Collection][id] && takenByKind[k] < len(canonicalByKind[k]) {
+				takenByKind[k]++
+				survivorsByKind[k] = append(survivorsByKind[k], s)
+				continue
+			}
+			changes = append(changes, Change{
+				Kind: ChangeDropped, Collection: s.Collection, RowID: s.RowID, File: s.File,
+				Detail: "no longer resolves against the current timeline/pools",
+			})
+			continue
+		}
 		if remaining[k][id] > 0 {
 			remaining[k][id]--
 			survivorsByKind[k] = append(survivorsByKind[k], s)
@@ -100,6 +138,13 @@ func Reconcile(prev Order, cfg config.Config, collections map[string]project.Col
 	// claimed theirs, in canonical order.
 	fillerByKind := make(map[string][]Slot, len(canonicalByKind))
 	for k, list := range canonicalByKind {
+		if repeatKind[k] {
+			// Positions the survivors do not cover take the canonical
+			// occupant Materialize put there, which keeps the cycling
+			// pattern for the tail of the run.
+			fillerByKind[k] = list[min(takenByKind[k], len(list)):]
+			continue
+		}
 		left := make(map[string]int, len(remaining[k]))
 		for id, n := range remaining[k] {
 			left[id] = n
