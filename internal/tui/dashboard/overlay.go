@@ -68,11 +68,11 @@ func renderHelpOverlay(viewKind string, width, height int) string {
 			"V            Play the whole timeline as a VLC playlist",
 		)
 		section("Playback Order panel",
-			"s            Start changing this slot: ‹ › arrows appear around it",
-			"←/→          While changing: step to the previous/next row of the collection",
-			"             once collection: the incoming row swaps in from wherever it sits",
-			"             repeat collection: the row is simply assigned, duplicates allowed",
-			"Enter / s    Finish changing this slot",
+			"s            repeat collection: start changing this slot in place",
+			"←/→          While changing: step through the collection's pool",
+			"Enter / s    Commit the change   ·   Esc: undo it",
+			"s            once collection: mark this slot (⇅), then ↑/↓ to the",
+			"             slot to trade with and s or Enter to swap; Esc cancels",
 			"l            Toggle lock on the selected slot (locked slots are skipped by shuffle)",
 			"S            Shuffle the unlocked slots of the selected slot's collection",
 		)

@@ -20,6 +20,10 @@ func renderFooter(m Model) string {
 			return footerStyle.Render("←/→ views  ↑/↓ move  u refresh") + vlc + footerStyle.Render("  e/E open  x del  r finalize  o open  ? help  q/Esc quit")
 		case tv.focusPanel == 0:
 			return footerStyle.Render("←/→ views  ↑/↓ move  u refresh") + vlc + footerStyle.Render("  e edit  r finalize  o open  ? help  q/Esc quit")
+		case tv.marked:
+			// ↑/↓ still move the cursor here — that is how the partner is
+			// named — so the footer keeps them and drops only "views".
+			return footerStyle.Render("↑/↓ pick the slot to trade with  s/Enter swap  Esc cancel")
 		case tv.cycling:
 			// While cycling, ←/→ belong to the slot, not to view switching —
 			// so the footer must not still advertise them as "views".

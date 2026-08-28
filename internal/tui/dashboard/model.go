@@ -684,6 +684,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// "nothing is written until Enter" true: no other key can leave the mode,
 	// so none of them can decide the pending edit's fate by accident. Ctrl+C
 	// still quits, because a modal state must never be able to trap the user.
+	// A marked slot takes Esc before the global quit binding, so cancelling a
+	// pending swap does not also quit the dashboard. Unlike cycle mode this
+	// claims nothing else: ↑/↓ have to keep moving the cursor, since naming
+	// the partner is the whole gesture.
+	if key == "esc" && m.activeView == 0 && m.timelineView.marked {
+		m.timelineView.marked = false
+		m.timelineView.orderNote = ""
+		return m, nil
+	}
+
 	if m.activeView == 0 && m.timelineView.cycling {
 		switch key {
 		case "left":
@@ -2000,7 +2010,13 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		return m, nil
 
 	case "s":
-		return m.handleOrderCycleToggle(v)
+		return m.handleOrderSelect(v)
+
+	case "enter":
+		if v.marked {
+			return m.handleOrderSelect(v)
+		}
+		return m, nil
 
 	case "l":
 		return m.handleOrderToggleLock(v)
@@ -2126,13 +2142,16 @@ func currentOrderSlot(m Model, v timelineView) (int, playback.Slot, bool) {
 	return slot, m.order.Slots[slot], true
 }
 
-// handleOrderCycleToggle implements the `s` gesture: enter or leave cycle
-// mode on the cursor slot. While cycling, ←/→ walk the slot's occupant
-// through its collection's pool IN MEMORY ONLY; Enter or s commits the result
-// to playback-order.yaml and Esc restores the snapshot taken here. Selection
-// only decides what a step means (playback.Cycle), never whether the gesture
-// exists — per ADR 0002 it never branches on a collection name.
-func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
+// handleOrderSelect implements the `s` gesture. Which of the two modes it
+// arms comes from the collection's `selection`, never from its name (ADR
+// 0002), because the two selections make different questions answerable:
+//
+//   - repeat: the pool cycles, so "what plays here?" has a list of answers
+//     and no other slot is implicated. ←/→ walk that list in place.
+//   - once: every row holds exactly one slot, so changing one slot always
+//     means trading with another. Mark this slot, move the cursor to the
+//     slot you want to trade with, press s or Enter.
+func (m Model) handleOrderSelect(v timelineView) (tea.Model, tea.Cmd) {
 	slot, sl, ok := currentOrderSlot(m, v)
 	if !ok {
 		return m, nil
@@ -2155,6 +2174,10 @@ func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if coll.Config.SelectionValue() != config.SelectionRepeat {
+		return m.markOrSwap(v, slot, sl)
+	}
+
 	// Snapshot before the first step so Esc has something exact to restore.
 	// The pending edit lives only in m.order until Enter, which is what makes
 	// the preview honest: nothing on disk has changed yet.
@@ -2165,6 +2188,46 @@ func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 	v.orderNote = cycleNote
 	m.timelineView = v
 	return m, nil
+}
+
+// markNote is the footer line the mark-and-swap mode holds while a slot is
+// marked and waiting for its partner.
+const markNote = "↑/↓ to the slot to trade with · s or Enter to swap · Esc to cancel"
+
+// markOrSwap is the `once` half of the `s` gesture. Unlike cycle mode it is
+// not modal — the whole point is to move the cursor while a slot is marked —
+// so it claims no keys beyond s, Enter and Esc. The swap itself commits
+// immediately, because there is no intermediate state to preview: the second
+// press names the partner and the trade is complete.
+func (m Model) markOrSwap(v timelineView, slot int, sl playback.Slot) (tea.Model, tea.Cmd) {
+	if !v.marked {
+		v.marked = true
+		v.markedSlot = slot
+		v.orderNote = markNote
+		m.timelineView = v
+		return m, nil
+	}
+	if v.markedSlot == slot {
+		v.marked = false
+		v.orderNote = ""
+		m.timelineView = v
+		return m, nil
+	}
+	if m.order.Slots[v.markedSlot].Collection != sl.Collection {
+		v.marked = false
+		v.orderNote = "can only swap slots within the same collection"
+		m.timelineView = v
+		return m, nil
+	}
+	if err := playback.Swap(&m.order, v.markedSlot, slot); err != nil {
+		v.marked = false
+		v.orderNote = err.Error()
+		m.timelineView = v
+		return m, nil
+	}
+	v.marked = false
+	m.timelineView = v
+	return m.persistOrder("swapped"), nil
 }
 
 // handleOrderCycle steps the cycling slot's occupant by delta. The step is

@@ -70,6 +70,13 @@ type timelineView struct {
 	// model when modeConfirmDelete is active). Empty = no pending confirm.
 	confirmDelete string
 
+	// marked reports whether markedSlot is live: the `once` mode, where a slot
+	// waits for the cursor to name the slot it trades with. Separate from
+	// cycling — the two modes are mutually exclusive but arm different state,
+	// and a zero-value timelineView must be neither.
+	marked     bool
+	markedSlot int
+
 	// cycling reports whether cycleSlot is live. It is a separate flag rather
 	// than a -1 sentinel because a timelineView built as a zero value would
 	// otherwise read as "cycling slot 0" and draw the ‹ › arrows unasked.
@@ -318,6 +325,9 @@ func (v timelineView) view(cacheStatus map[string]string) string {
 		case v.cycling && i == v.cycleSlot:
 			// Arrows on both sides say ←/→ change this row.
 			displayLabel = cycleArrowStyle.Render("‹ ") + cycleSlotStyle.Render(label) + cycleArrowStyle.Render(" ›")
+		case v.marked && i == v.markedSlot:
+			// Held, waiting for the cursor to name its partner.
+			displayLabel = cycleArrowStyle.Render("⇅ ") + cycleSlotStyle.Render(label)
 		case v.cyclePending(i):
 			// The other end of a pending swap. Italic says "not saved yet",
 			// so the row does not read as a change that already happened.
