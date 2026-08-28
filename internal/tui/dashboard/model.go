@@ -3783,10 +3783,9 @@ func reloadCollection(m Model, cvIdx int) Model {
 	return reResolve(m)
 }
 
-// markRowRenderedLive flips a single row's in-memory state to rendered and
-// bumps its collection's header summary count, so the row's color and the
-// "rendered: N/M" header tick up as each segment finishes during a batch
-// render job instead of only jumping at job completion (reloadState).
+// markRowRenderedLive flips one row's in-memory state to rendered and bumps its
+// collection's summary count, so row color and the "rendered: N/M" header tick
+// up as each segment finishes instead of only at job completion (reloadState).
 func markRowRenderedLive(m Model, cvIdx, rowIndex int) Model {
 	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
 		return m
@@ -3796,18 +3795,19 @@ func markRowRenderedLive(m Model, cvIdx, rowIndex int) Model {
 		if row.Index != rowIndex {
 			continue
 		}
-		if i < len(v.states) && v.states[i] != rowRendered {
-			v.states[i] = rowRendered
-			if cvIdx < len(m.collectionNames) {
-				collName := m.collectionNames[cvIdx]
-				if s, ok := m.summaries[collName]; ok {
-					s.Rendered++
-					s.Missing = s.Total - s.Rendered
-					m.summaries[collName] = s
-				}
+		if i >= len(v.states) || v.states[i] == rowRendered {
+			return m
+		}
+		v.states[i] = rowRendered
+		if cvIdx < len(m.collectionNames) {
+			collName := m.collectionNames[cvIdx]
+			if s, ok := m.summaries[collName]; ok {
+				s.Rendered++
+				s.Missing = s.Total - s.Rendered
+				m.summaries[collName] = s
 			}
 		}
-		break
+		return m
 	}
 	return m
 }
