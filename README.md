@@ -1,6 +1,6 @@
 # Power Hour Generator
 
-Power Hour Generator is a cross-platform CLI, written in Go, that orchestrates `yt-dlp` and `ffmpeg` to produce a finished power hour video. It ingests a structured CSV or YAML plan describing each clip, manages project-local caches of source footage, renders normalized MP4 segments with consistent overlays, and concatenates them into a single final video following the project's configured timeline.
+Power Hour Generator is a cross-platform CLI, written in Go, that orchestrates `yt-dlp` and `ffmpeg` to produce a finished power hour video. It ingests a structured CSV or YAML plan describing each clip, manages project-local caches of source footage, renders normalized MP4 segments with consistent overlays, and assembles them into a single final video following the project's playback order.
 
 ## Project status
 
@@ -17,7 +17,7 @@ The project is in active development. The Go rewrite has fully replaced the earl
 - Configurable video/audio encoding parameters and overlay styling via optional YAML.
 - Normalized output: H.264 video at CRF 20 (`veryfast`) with AAC audio (192 kbps, 48 kHz) by default.
 - Multi-codec support: H.264, H.265 (HEVC), VP9, and AV1 families with automatic hardware encoder detection (VideoToolbox, NVENC, AMF).
-- Concatenation: assembles rendered segments into a final video following the project timeline, with stream-copy or re-encode fallback.
+- Finalize: assembles rendered segments into a final video following the project's playback order, with stream-copy or re-encode fallback.
 - Global encoding defaults stored per-user and configurable via an interactive TUI carousel (`powerhour tools encoding`).
 
 ## Workflow overview
@@ -25,7 +25,7 @@ The project is in active development. The Go rewrite has fully replaced the earl
 1. Create a project directory with `powerhour init`. By default it scaffolds YAML collection plans; use `--plan-format csv` or `--plan-format tsv` to start with delimiter-based plans instead.
 2. Fill in your collection plan files and adjust `powerhour.yaml` as needed for overlays, timing, or encoding defaults.
 3. Run the CLI pointing at the project directory; the tool will download sources into `cache/`, render segments into `segments/`, write logs under `logs/`, and maintain metadata in `.powerhour/index.json`.
-4. Run `powerhour concat --project <dir>` to assemble the final export from the configured timeline sequence.
+4. Run `powerhour finalize --project <dir>` to assemble the final export from the playback order.
 
 Currently implemented commands cover project scaffolding, validation, cache population, tool management, and segment rendering.
 
@@ -45,7 +45,7 @@ Currently implemented commands cover project scaffolding, validation, cache popu
 - `powerhour cache doctor [--all] [--write] [--yes] [--requery] [--artist <name>] [--index <n|n-m>] [--json]` – inspect and repair cached title/artist metadata, including malformed uploader-derived artist names. Interactive by default in a TTY; non-interactive in report mode unless `--write` is provided.
 - `powerhour render --project <dir> [--concurrency N] [--force] [--no-progress] [--index <n|n-m>] [--json]` – render cached rows into `segments/`, applying scaling, fades, overlays, audio resampling, and loudness normalization. `--concurrency` limits parallel ffmpeg processes, `--force` overwrites existing segment files, `--no-progress` disables the interactive progress table, `--index` restricts work to specific plan rows (single values or ranges, repeatable), and `--json` emits structured output.
 - `powerhour sample <time> [--index <n>] [--collection <name>] [--output <path>]` – extract a single frame for previewing overlays. Without `--index`, the time is an absolute position in the concatenated timeline. With `--index`, the time is relative to that clip. Add `--collection` to narrow `--index` to a specific collection's rows.
-- `powerhour concat --project <dir> [--output <path>] [--dry-run]` – concatenate rendered segments into a final video following the timeline sequence. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
+- `powerhour finalize --project <dir> [--output <path>] [--dry-run]` – assemble rendered segments into a final video following the playback order. Tries stream copy first; falls back to re-encoding using resolved encoding defaults. `--dry-run` lists segment order without concatenating.
 - `powerhour convert --project <dir> [--output <path>] [--dry-run]` – convert a CSV/TSV plan file to YAML format with permissive column detection.
 - `powerhour add --project <dir> --collection <name> [--file <path>] [text]` – add a single URL/path row or append YAML, CSV, or TSV rows into an existing collection. Without `text` or `--file`, reads the input block from stdin.
 - `powerhour cache add <file-or-id> [--url <url>] [--title "..."] [--artist "..."] [--dry-run] [--no-probe]` – register a local video file or download by YouTube ID into the project cache. The positional argument can be a local file path, a yt-dlp-style filename, or a bare YouTube ID. URLs are auto-detected or supplied via `--url`. Useful for age-restricted or geo-blocked content that yt-dlp cannot fetch automatically.

@@ -23,5 +23,5 @@ features:
   - title: Collections System
     details: Organize songs, interstitials, bumpers, and outros as independent collections with custom CSV headers and output directories.
   - title: Interactive Dashboard
-    details: Run `powerhour tui` for a full-screen dashboard covering fetch, render, and concat in one interface.
+    details: Run `powerhour tui` for a full-screen dashboard covering fetch, render, and finalize in one interface.
 ---

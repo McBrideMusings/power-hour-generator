@@ -13,6 +13,7 @@ import (
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/pkg/csvplan"
@@ -264,7 +265,7 @@ func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, 
 // otherwise the raw (unrendered, uncut) source file when that exists, otherwise
 // "" (dropped by playPlaylistInVLC's own existence filter).
 func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index) []string {
-	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
+	placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
 	if err != nil {
 		return nil
 	}
@@ -317,4 +318,3 @@ func findCollectionRow(coll project.Collection, rowIndex int) (csvplan.Collectio
 	}
 	return csvplan.CollectionRow{}, false
 }
-

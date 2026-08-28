@@ -44,7 +44,7 @@ Some packages have no test files (`cmd/powerhour`, `internal/cachedoctor`) and s
 powerhour --help
 ```
 
-Verifies the binary is installed and all top-level subcommands are present: `init`, `add`, `fetch`, `render`, `concat`, `tui` (workflow), plus `status`, `sample`, `validate`, `doctor`, `check`, `export`, `config` (inspect), and `cache`, `library`, `clean`, `tools`, `convert` (manage).
+Verifies the binary is installed and all top-level subcommands are present: `init`, `add`, `fetch`, `render`, `finalize`, `tui` (workflow), plus `status`, `sample`, `validate`, `doctor`, `check`, `export`, `config` (inspect), and `cache`, `library`, `clean`, `tools`, `convert` (manage).
 
 ```bash
 powerhour check

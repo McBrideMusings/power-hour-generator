@@ -10,6 +10,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render/state"
 	"powerhour/internal/tui"
@@ -72,11 +73,12 @@ func runTui(cmd *cobra.Command, _ []string) error {
 	sw.Update("Resolving timeline...")
 	var timeline []project.TimelineEntry
 	if len(cfg.Timeline.Sequence) > 0 {
-		timeline, err = project.ResolveTimeline(cfg.Timeline, collections)
+		placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
 		if err != nil {
 			sw.Stop()
 			return fmt.Errorf("resolve timeline: %w", err)
 		}
+		timeline = project.EntriesFromPlacements(placements)
 	}
 
 	sw.Update("Detecting tools...")

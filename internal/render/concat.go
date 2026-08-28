@@ -14,6 +14,7 @@ import (
 
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/tools"
 	"powerhour/pkg/csvplan"
@@ -35,7 +36,7 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 		return resolveSegmentsFallback(pp)
 	}
 
-	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
+	placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
 	if err != nil {
 		return nil, err
 	}

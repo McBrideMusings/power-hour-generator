@@ -20,6 +20,7 @@ import (
 	"powerhour/internal/cachedoctor"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/job"
@@ -469,9 +470,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = reloadState(m)
 		return m, nil
 
-	case concatDoneMsg:
+	case finalizeDoneMsg:
 		if msg.err != nil {
-			m.statusMsg = fmt.Sprintf("Concat error: %v", msg.err)
+			m.statusMsg = fmt.Sprintf("Finalize error: %v", msg.err)
 		}
 		m = reloadState(m)
 		m.timelineView.concatPath, m.timelineView.concatExists, m.timelineView.concatSize, m.timelineView.concatModTime = findConcatOutput(m.pp.Root)
@@ -675,11 +676,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "?":
 		m.overlay = overlayHelp
 		return m, nil
-	case "c":
-		c := execCommand("powerhour", "concat", "--project", m.pp.Root)
-		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			return concatDoneMsg{err: err}
-		})
 	case "o":
 		name, args := revealCommand(m.pp.Root)
 		_ = execCommand(name, args...).Start()
@@ -1970,9 +1966,9 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 	switch key {
 	case "r":
-		c := execCommand("powerhour", "render", "--project", m.pp.Root)
+		c := execCommand("powerhour", "finalize", "--project", m.pp.Root)
 		return m, tea.ExecProcess(c, func(err error) tea.Msg {
-			return renderDoneMsg{err: err}
+			return finalizeDoneMsg{err: err}
 		})
 
 	case "up", "k":
@@ -2110,7 +2106,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case "e", "E":
 		if v.concatFocus {
 			if !v.concatExists {
-				m.statusMsg = "Not yet exported — press c to concatenate"
+				m.statusMsg = "Not yet exported — press r to finalize"
 				return m, nil
 			}
 			if err := openExternalPath(v.concatPath); err != nil {
@@ -2140,7 +2136,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			} else {
-				m.statusMsg = "Not yet exported — press c to concatenate"
+				m.statusMsg = "Not yet exported — press r to finalize"
 			}
 			return m, nil
 		}
@@ -2190,7 +2186,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 					m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 				}
 			} else {
-				m.statusMsg = "Not yet exported — press c to concatenate"
+				m.statusMsg = "Not yet exported — press r to finalize"
 			}
 			return m, nil
 		}
@@ -2788,7 +2784,7 @@ type renderDoneMsg struct {
 	err    error
 	status string
 }
-type concatDoneMsg struct{ err error }
+type finalizeDoneMsg struct{ err error }
 type fetchDoneMsg struct {
 	err    error
 	status string
@@ -3598,11 +3594,12 @@ func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLo
 // reResolve re-resolves the timeline after mutations.
 func reResolve(m Model) Model {
 	if len(m.cfg.Timeline.Sequence) > 0 {
-		timeline, err := project.ResolveTimeline(m.cfg.Timeline, m.collections)
+		placements, err := playback.OrderedPlacements(m.pp.Root, m.cfg, m.collections)
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Timeline error: %v", err)
 			return m
 		}
+		timeline := project.EntriesFromPlacements(placements)
 		m.timeline = timeline
 		m.timelineView.resolved = timeline
 	}
@@ -3677,11 +3674,12 @@ func (m Model) refreshFromDisk() Model {
 
 	var timeline []project.TimelineEntry
 	if len(cfg.Timeline.Sequence) > 0 {
-		timeline, err = project.ResolveTimeline(cfg.Timeline, collections)
+		placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
 		if err != nil {
 			m.statusMsg = fmt.Sprintf("Refresh error: %v", err)
 			return m
 		}
+		timeline = project.EntriesFromPlacements(placements)
 	}
 
 	refreshed := NewModel(cfg, pp, collections, timeline, idx, rs, m.toolWarning, m.toolStatuses)

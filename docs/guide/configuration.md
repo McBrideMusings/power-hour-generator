@@ -132,7 +132,7 @@ timeline:
       fade_in: 0.5
 ```
 
-Use `timeline.sequence` to define the final playback order for `powerhour concat` and the timeline TUI.
+Use `timeline.sequence` to seed the playback order: `powerhour order` materializes it into `playback-order.yaml`, which is what `powerhour finalize` and the timeline TUI actually read. `slice` and `interleave` describe how the order gets built, not the order itself — once materialized, `powerhour order` (swap/lock/shuffle) is what moves rows around.
 
 Collection entries support `slice`, which selects rows relative to that collection's remaining cursor:
 

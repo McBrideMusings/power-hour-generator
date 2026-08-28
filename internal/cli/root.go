@@ -56,7 +56,7 @@ func newRootCmd() *cobra.Command {
 		newAddCmd(),
 		newFetchCmd(),
 		newRenderCmd(),
-		newConcatCmd(),
+		newFinalizeCmd(),
 		newTuiCmd(),
 	)
 
