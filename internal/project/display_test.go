@@ -43,6 +43,26 @@ func TestCollectionRowLabel(t *testing.T) {
 			want: "Song – Artist",
 		},
 		{
+			// A declared-but-blank column is absent from CustomFields, so the
+			// token survives replacement unless it is stripped — and a literal
+			// "{label}" is non-empty, which would suppress the fallback.
+			name: "display whose only token is unset falls back",
+			cc:   config.CollectionConfig{Display: "{label}"},
+			row: csvplan.CollectionRow{
+				Link: "/media/Spaced.(1999).S01E06.Epiphanies.WEBDL-1080p.x264.AAC.[EN].MuTT.mkv",
+			},
+			want: "Spaced (1999) S01E06 Epiphanies",
+		},
+		{
+			name: "unset token drops its stranded separator",
+			cc:   config.CollectionConfig{Display: "{title} – {artist}"},
+			row: csvplan.CollectionRow{
+				Link:         "https://youtu.be/x",
+				CustomFields: map[string]string{"title": "Song"},
+			},
+			want: "Song",
+		},
+		{
 			name: "unset display falls back to fallback label",
 			cc:   config.CollectionConfig{},
 			row: csvplan.CollectionRow{

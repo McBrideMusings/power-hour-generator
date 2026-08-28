@@ -39,8 +39,24 @@ func RenderRowTemplate(tmpl string, row csvplan.Row) string {
 	}
 
 	replacer := strings.NewReplacer(replacements...)
-	return strings.TrimSpace(replacer.Replace(tmpl))
+	rendered := replacer.Replace(tmpl)
+
+	// A token naming a column the row does not carry a value for renders
+	// empty, not as its own literal text. A declared-but-blank column is
+	// absent from CustomFields, so without this a display of "{label}" on a
+	// row whose label is unset survives replacement intact — non-empty, so
+	// CollectionRowLabel returns "{label}" instead of falling back.
+	rendered = unresolvedTokenPattern.ReplaceAllString(rendered, "")
+
+	// Dropping a token can strand the separator that joined it to its
+	// neighbour — "{title} – {artist}" with no artist would end "Miami –".
+	rendered = strings.Join(strings.Fields(rendered), " ")
+	return strings.Trim(rendered, " -–—")
 }
+
+// unresolvedTokenPattern matches a {token} left behind by replacement — a
+// brace-wrapped run of the characters a column name may contain.
+var unresolvedTokenPattern = regexp.MustCompile(`\{[A-Za-z0-9_.-]*\}`)
 
 // releaseTagPattern matches common scene/release-group noise tokens found in
 // downloaded media filenames (resolution, codec, audio format, source, and
