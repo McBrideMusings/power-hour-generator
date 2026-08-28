@@ -119,7 +119,8 @@ func TestTimelineViewWastesNoRowWithoutScrollIndicators(t *testing.T) {
 	}
 
 	m.collections["songs"] = project.Collection{
-		Name: "songs",
+		Name:   "songs",
+		Config: config.CollectionConfig{Display: "{title}"},
 		Rows: []csvplan.CollectionRow{
 			{
 				Index:           0,
@@ -225,5 +226,39 @@ func TestConfirmDeletePromptRoutesThroughFooterInConfirmStyle(t *testing.T) {
 	}
 	if footerLine == "" {
 		t.Errorf("footer line not found; no line contains ANSI escape codes in view:\n%s", with)
+	}
+}
+
+// TestEntryLabelUsesCollectionDisplayTemplate verifies that the playback
+// order label is driven by the collection's display template (ADR 0002) —
+// no hardcoded title/artist ladder — and that an unset display falls back to
+// a cleaned basename of the row's link.
+func TestEntryLabelUsesCollectionDisplayTemplate(t *testing.T) {
+	m := testTimelineModel(t)
+
+	m.collections["interstitials"] = project.Collection{
+		Name:   "interstitials",
+		Config: config.CollectionConfig{Display: "{label}"},
+		Rows: []csvplan.CollectionRow{
+			{
+				Link:         "/media/Spaced.(1999).S01E06.Epiphanies.WEBDL-1080p.x264.AAC.[EN].MuTT.mkv",
+				CustomFields: map[string]string{"label": "Epiphanies clip"},
+			},
+			{
+				Link:         "/media/Spaced.(1999).S01E06.Epiphanies.WEBDL-1080p.x264.AAC.[EN].MuTT.mkv",
+				CustomFields: map[string]string{"label": ""},
+			},
+		},
+	}
+	m.timelineView.collections = m.collections
+
+	withLabel := m.timelineView.entryLabel(project.TimelineEntry{Collection: "interstitials", Index: 1})
+	if want := "Epiphanies clip"; withLabel != want {
+		t.Errorf("entryLabel with display template: got %q, want %q", withLabel, want)
+	}
+
+	fallback := m.timelineView.entryLabel(project.TimelineEntry{Collection: "interstitials", Index: 2})
+	if want := "Spaced (1999) S01E06 Epiphanies"; fallback != want {
+		t.Errorf("entryLabel falling back on empty label: got %q, want %q", fallback, want)
 	}
 }

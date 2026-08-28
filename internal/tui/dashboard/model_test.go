@@ -1253,7 +1253,8 @@ func TestTimelineViewRendersPlaybackOrderCursor(t *testing.T) {
 	m.timelineView.termWidth = 120
 	m.timelineView.termHeight = 30
 	m.collections["songs"] = project.Collection{
-		Name: "songs",
+		Name:   "songs",
+		Config: config.CollectionConfig{Display: "{title}"},
 		Rows: []csvplan.CollectionRow{{
 			Index:           1,
 			DurationSeconds: 60,

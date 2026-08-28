@@ -399,22 +399,7 @@ func timelineSliceLabel(raw string) string {
 }
 
 func (v timelineView) entryLabel(e project.TimelineEntry) string {
-	if e.SourceFile != "" {
-		return filepath.Base(e.SourceFile)
-	}
-	if c, ok := v.collections[e.Collection]; ok && e.Index >= 1 && e.Index <= len(c.Rows) {
-		row := c.Rows[e.Index-1]
-		title := sanitize(row.CustomFields["title"])
-		artist := sanitize(row.CustomFields["artist"])
-		if title != "" && artist != "" {
-			return title + " – " + artist
-		}
-		if title != "" {
-			return title
-		}
-		return filepath.Base(row.Link)
-	}
-	return e.Collection
+	return sanitize(project.TimelineEntryLabel(e, v.collections))
 }
 
 func (v timelineView) entrySource(e project.TimelineEntry) string {

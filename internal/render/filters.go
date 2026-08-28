@@ -215,35 +215,10 @@ func buildDrawText(opts drawTextOptions) string {
 	return "drawtext=" + strings.Join(values, ":")
 }
 
+// renderOverlayTemplate delegates to project.RenderRowTemplate, the single
+// {token} rendering engine shared with collection display labels.
 func renderOverlayTemplate(tmpl string, row csvplan.Row) string {
-	tmpl = strings.TrimSpace(tmpl)
-	if tmpl == "" {
-		return ""
-	}
-
-	// Start with standard fields
-	replacements := []string{
-		"{title}", row.Title,
-		"{artist}", row.Artist,
-		"{name}", row.Name,
-		"{index}", strconv.Itoa(row.Index),
-	}
-
-	// Add custom fields from Row.CustomFields
-	if row.CustomFields != nil {
-		for key, value := range row.CustomFields {
-			// Support both lowercase and original case
-			replacements = append(replacements, "{"+key+"}", value)
-			lowerKey := strings.ToLower(key)
-			if lowerKey != key {
-				replacements = append(replacements, "{"+lowerKey+"}", value)
-			}
-		}
-	}
-
-	replacer := strings.NewReplacer(replacements...)
-	rendered := strings.TrimSpace(replacer.Replace(tmpl))
-	return rendered
+	return project.RenderRowTemplate(tmpl, row)
 }
 
 func alphaExpression(start, end, fadeIn, fadeOut float64) string {

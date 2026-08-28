@@ -31,19 +31,19 @@ rows:
     duration: "60"
     link: ""
 `
-	interstitialsPlanYAML = `columns: [link, start_time, duration]
+	interstitialsPlanYAML = `columns: [label, link, start_time, duration]
 defaults:
     start_time: "0:00"
     duration: "5"
 rows: []
 `
-	songsPlanCSV         = `title,artist,name,start_time,duration,link
+	songsPlanCSV = `title,artist,name,start_time,duration,link
 Example Song 1,Example Artist,Example One,0:00,60,
 Example Song 2,Example Artist,Example Two,0:00,60,
 `
 	songsPlanTSV         = "title\tartist\tname\tstart_time\tduration\tlink\nExample Song 1\tExample Artist\tExample One\t0:00\t60\t\nExample Song 2\tExample Artist\tExample Two\t0:00\t60\t\n"
-	interstitialsPlanCSV = "link,start_time,duration\n"
-	interstitialsPlanTSV = "link\tstart_time\tduration\n"
+	interstitialsPlanCSV = "label,link,start_time,duration\n"
+	interstitialsPlanTSV = "label\tlink\tstart_time\tduration\n"
 )
 
 var initPlanFormat string
@@ -91,6 +91,7 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
+        display: "{title} – {artist}"
         # field_map controls how yt-dlp cache fields fill this collection's
         # columns. Uncomment to override the defaults:
         # field_map:
@@ -106,6 +107,7 @@ collections:
         link_header: link
         start_header: start_time
         duration_header: duration
+        display: "{label}"
 timeline:
     sequence:
         # - file: videos/intro.mp4              # optional: play a video before songs start

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"powerhour/pkg/csvplan"
 )
 
 // ValidationResult captures a single validation finding.
@@ -31,6 +33,7 @@ func (c Config) ValidateStrict(projectRoot string, knownSegmentTokens []string) 
 	results = append(results, c.validateOverlayEntries()...)
 	results = append(results, c.validateCacheConfig()...)
 	results = append(results, c.validatePlanPaths(projectRoot)...)
+	results = append(results, c.validateDisplayTemplates(projectRoot)...)
 	results = append(results, c.validateSegmentTemplate(knownSegmentTokens)...)
 	results = append(results, c.validateTimeline(projectRoot)...)
 	return results
@@ -216,6 +219,71 @@ func (c Config) validatePlanPaths(projectRoot string) []ValidationResult {
 	return results
 }
 
+// validateDisplayTemplates errors when a collection's display template
+// references a column the collection never declares (and has no defaults
+// value for). Collections using file: instead of plan:, or whose plan file
+// is missing/unparseable, are skipped silently — validatePlanPaths already
+// reports a missing plan, and double-erroring would make validate noisy.
+func (c Config) validateDisplayTemplates(projectRoot string) []ValidationResult {
+	var results []ValidationResult
+	for name, coll := range c.Collections {
+		tmpl := strings.TrimSpace(coll.Display)
+		if tmpl == "" {
+			continue
+		}
+		if strings.TrimSpace(coll.File) != "" {
+			continue
+		}
+		plan := strings.TrimSpace(coll.Plan)
+		if plan == "" {
+			continue
+		}
+		resolved := plan
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(projectRoot, resolved)
+		}
+
+		known := map[string]bool{"index": true}
+		switch strings.ToLower(filepath.Ext(resolved)) {
+		case ".yaml", ".yml":
+			result, err := csvplan.LoadCollectionYAML(resolved, csvplan.CollectionOptions{
+				LinkHeader:  coll.LinkHeader,
+				StartHeader: coll.StartHeader,
+			})
+			if err != nil && result.Columns == nil && len(result.Defaults) == 0 {
+				continue
+			}
+			for _, col := range result.Columns {
+				known[strings.ToLower(strings.TrimSpace(col))] = true
+			}
+			for key := range result.Defaults {
+				known[strings.ToLower(strings.TrimSpace(key))] = true
+			}
+		case ".csv", ".tsv":
+			headers, _, err := csvplan.ReadHeaders(resolved)
+			if err != nil {
+				continue
+			}
+			for _, h := range headers {
+				known[strings.ToLower(strings.TrimSpace(h))] = true
+			}
+		default:
+			continue
+		}
+
+		for _, tok := range extractBraceTokens(tmpl) {
+			normalized := strings.ToLower(tok)
+			if !known[normalized] {
+				results = append(results, ValidationResult{
+					Level:   "error",
+					Message: fmt.Sprintf("collection %q: display template references unknown column %q", name, tok),
+				})
+			}
+		}
+	}
+	return results
+}
+
 func (c Config) validateSegmentTemplate(knownTokens []string) []ValidationResult {
 	tmpl := strings.TrimSpace(c.Outputs.SegmentTemplate)
 	if tmpl == "" {
@@ -384,6 +452,27 @@ func extractTemplateTokens(template string) []string {
 			tokens = append(tokens, template[i+1:j])
 		}
 		i = j
+	}
+	return tokens
+}
+
+// extractBraceTokens parses {name} patterns from a display template string,
+// the {token} sibling of extractTemplateTokens' $TOKEN parsing.
+func extractBraceTokens(template string) []string {
+	var tokens []string
+	for i := 0; i < len(template); i++ {
+		if template[i] != '{' {
+			continue
+		}
+		end := strings.IndexByte(template[i+1:], '}')
+		if end < 0 {
+			break
+		}
+		name := strings.TrimSpace(template[i+1 : i+1+end])
+		if name != "" {
+			tokens = append(tokens, name)
+		}
+		i += end + 1
 	}
 	return tokens
 }

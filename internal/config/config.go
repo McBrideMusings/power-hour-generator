@@ -30,6 +30,12 @@ type CollectionConfig struct {
 	LinkHeader     string         `yaml:"link_header"`
 	StartHeader    string         `yaml:"start_header"`
 	DurationHeader string         `yaml:"duration_header"`
+	// Display is a presentational label template for this collection's rows,
+	// using the same {token} syntax as overlay text. Any declared column or
+	// defaults value is a valid token. Purely presentational — never affects
+	// segment hashing or rendering. Empty renders fall back to a cleaned
+	// basename of the row's link.
+	Display string `yaml:"display,omitempty"`
 	// FieldMap describes how yt-dlp metadata fields back this collection's
 	// canonical columns. Keys are collection columns ("title", "artist",
 	// "link"); values are ordered lists of cache entry fields consulted to
@@ -345,6 +351,7 @@ func Default() Config {
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
+				Display:        "{title} – {artist}",
 			},
 			"interstitials": {
 				Plan:           "interstitials.yaml",
@@ -353,6 +360,7 @@ func Default() Config {
 				LinkHeader:     "link",
 				StartHeader:    "start_time",
 				DurationHeader: "duration",
+				Display:        "{label}",
 			},
 		},
 		Timeline: TimelineConfig{
