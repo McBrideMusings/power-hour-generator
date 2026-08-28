@@ -933,3 +933,82 @@ func TestRenderAddSlotBudgetsPlainTextBeforeStyling(t *testing.T) {
 		})
 	}
 }
+
+// TestComputeColumnWidthsDistributesLeftoverToCappedColumns verifies that
+// when the natural (content-based) total fits inside the available width,
+// the leftover goes only to columns whose content was truncated by
+// columnMaxWidth — a short column (floored to columnMinWidth) does not grow
+// just because there happens to be room.
+func TestComputeColumnWidthsDistributesLeftoverToCappedColumns(t *testing.T) {
+	rows := []csvplan.CollectionRow{
+		{CustomFields: map[string]string{
+			"short": "ab",
+			"link":  strings.Repeat("x", 200),
+		}},
+	}
+	v := collectionView{
+		rows: rows,
+		columns: []collectionColumn{
+			{header: "S", field: "short"},
+			{header: "LINK", field: "link"},
+		},
+	}
+
+	// natural: short -> floored to columnMinWidth (6); link -> capped to
+	// columnMaxWidth (45). natural total = 51. baseWidth = 0 for simplicity,
+	// so available = tableWidth. Give it 10 extra columns of leftover.
+	widths := v.computeColumnWidths(51+10, 0)
+
+	if got, want := widths[0], columnMinWidth; got != want {
+		t.Errorf("short column width = %d, want %d (floored, not grown)", got, want)
+	}
+	if got, want := widths[1], columnMaxWidth+10; got != want {
+		t.Errorf("link column width = %d, want %d (capped column absorbs all leftover)", got, want)
+	}
+}
+
+// TestComputeColumnWidthsShrinksProportionallyUnderPressure verifies that
+// when the natural total exceeds the available width, columns give up width
+// proportional to their slack above columnMinWidth — a wider column loses
+// more absolute width than a narrower one.
+func TestComputeColumnWidthsShrinksProportionallyUnderPressure(t *testing.T) {
+	rows := []csvplan.CollectionRow{
+		{CustomFields: map[string]string{
+			"a": strings.Repeat("a", 20),
+			"b": strings.Repeat("b", 30),
+		}},
+	}
+	v := collectionView{
+		rows: rows,
+		columns: []collectionColumn{
+			{header: "A", field: "a"},
+			{header: "B", field: "b"},
+		},
+	}
+
+	// natural: a=20, b=30, total=50. available=30, deficit=20.
+	// slack: a=20-6=14, b=30-6=24, totalSlack=38.
+	// cut_a = 20*14/38 = 7, cut_b = 20*24/38 = 12.
+	widths := v.computeColumnWidths(30, 0)
+
+	if got, want := widths[0], 20-7; got != want {
+		t.Errorf("column a width = %d, want %d", got, want)
+	}
+	if got, want := widths[1], 30-12; got != want {
+		t.Errorf("column b width = %d, want %d", got, want)
+	}
+	for i, w := range widths {
+		if w < columnMinWidth {
+			t.Errorf("column %d width %d fell below columnMinWidth %d", i, w, columnMinWidth)
+		}
+	}
+}
+
+// TestComputeColumnWidthsNoColumns verifies the empty-columns case returns
+// nil rather than an empty-but-allocated slice or panicking.
+func TestComputeColumnWidthsNoColumns(t *testing.T) {
+	v := collectionView{}
+	if widths := v.computeColumnWidths(100, 0); widths != nil {
+		t.Errorf("computeColumnWidths with no columns = %v, want nil", widths)
+	}
+}

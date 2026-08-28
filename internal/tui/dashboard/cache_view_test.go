@@ -315,3 +315,63 @@ func TestCacheAddSlotShowsClassificationHint(t *testing.T) {
 		t.Errorf("renderAddSlot did not fall back to the default keys hint when addHint is empty.\ngot: %q", gotDefault)
 	}
 }
+
+// TestComputeCacheColumnWidthsDistributesLeftoverToCappedColumns mirrors
+// TestComputeColumnWidthsDistributesLeftoverToCappedColumns for the cache
+// view's column-width function: a short configured column stays floored at
+// columnMinWidth while the FILE column (whose basename was truncated by
+// columnMaxWidth) absorbs the leftover.
+func TestComputeCacheColumnWidthsDistributesLeftoverToCappedColumns(t *testing.T) {
+	headers := []string{"SHORT", "FILE"}
+	entries := []cacheEntry{
+		{Values: []string{"ab"}, CachedPath: strings.Repeat("x", 200)},
+	}
+
+	// natural: SHORT -> floored to columnMinWidth (6); FILE -> capped to
+	// columnMaxWidth (45). natural total = 51. baseWidth = 0, so available =
+	// tableWidth. Give it 10 extra columns of leftover.
+	widths := computeCacheColumnWidths(headers, entries, 51+10, 0)
+
+	if got, want := widths[0], columnMinWidth; got != want {
+		t.Errorf("short column width = %d, want %d (floored, not grown)", got, want)
+	}
+	if got, want := widths[1], columnMaxWidth+10; got != want {
+		t.Errorf("file column width = %d, want %d (capped column absorbs all leftover)", got, want)
+	}
+}
+
+// TestComputeCacheColumnWidthsShrinksProportionallyUnderPressure mirrors
+// TestComputeColumnWidthsShrinksProportionallyUnderPressure for the cache
+// view: under a width deficit, both the configured column and the FILE
+// column give up width proportional to their slack above columnMinWidth.
+func TestComputeCacheColumnWidthsShrinksProportionallyUnderPressure(t *testing.T) {
+	headers := []string{"A", "FILE"}
+	entries := []cacheEntry{
+		{Values: []string{strings.Repeat("a", 20)}, CachedPath: strings.Repeat("b", 30)},
+	}
+
+	// natural: A=20, FILE=30, total=50. available=30, deficit=20.
+	// slack: A=20-6=14, FILE=30-6=24, totalSlack=38.
+	// cut_A = 20*14/38 = 7, cut_FILE = 20*24/38 = 12.
+	widths := computeCacheColumnWidths(headers, entries, 30, 0)
+
+	if got, want := widths[0], 20-7; got != want {
+		t.Errorf("column A width = %d, want %d", got, want)
+	}
+	if got, want := widths[1], 30-12; got != want {
+		t.Errorf("FILE column width = %d, want %d", got, want)
+	}
+	for i, w := range widths {
+		if w < columnMinWidth {
+			t.Errorf("column %d width %d fell below columnMinWidth %d", i, w, columnMinWidth)
+		}
+	}
+}
+
+// TestComputeCacheColumnWidthsNoColumns verifies the empty-headers case
+// returns nil rather than an empty-but-allocated slice or panicking.
+func TestComputeCacheColumnWidthsNoColumns(t *testing.T) {
+	if widths := computeCacheColumnWidths(nil, nil, 100, 0); widths != nil {
+		t.Errorf("computeCacheColumnWidths with no headers = %v, want nil", widths)
+	}
+}
