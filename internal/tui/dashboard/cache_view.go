@@ -465,11 +465,18 @@ func (v cacheView) view() string {
 		}
 
 		cells := make([]string, 0, dataColCount)
+		// skipUntil is the last column swallowed by an inline-edit cell that
+		// grew past its own column. Columns after it still render.
+		skipUntil := -1
 		for j, val := range e.Values {
+			if j <= skipUntil {
+				continue
+			}
 			if isEditRow && j == v.editFieldIdx {
-				_, overflowWidth := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth)
-				cells = append(cells, renderEditCell(v.editValue, v.editCursor, overflowWidth))
-				break
+				_, cellWidth, covered := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth, runewidth.StringWidth(v.editValue))
+				cells = append(cells, renderEditCell(v.editValue, v.editCursor, cellWidth))
+				skipUntil = j + covered
+				continue
 			}
 			style := faint
 			if j == 0 && !isEditRow {
@@ -488,11 +495,16 @@ func (v cacheView) view() string {
 			}
 			cells = append(cells, renderCell(display, widths[j], style))
 		}
-		fileStyle := faint
-		if isEditRow {
-			fileStyle = editRowStyle
+		// The trailing file column is rendered outside the value loop, so it
+		// needs the same skip check: an edit cell wide enough to swallow it
+		// has already drawn over its space.
+		if skipUntil < dataColCount-1 {
+			fileStyle := faint
+			if isEditRow {
+				fileStyle = editRowStyle
+			}
+			cells = append(cells, renderCell(filepath.Base(e.CachedPath), widths[dataColCount-1], fileStyle))
 		}
-		cells = append(cells, renderCell(filepath.Base(e.CachedPath), widths[dataColCount-1], fileStyle))
 
 		b.WriteString(gutter)
 		gap := strings.Repeat(" ", gutterGapWidth)

@@ -99,6 +99,9 @@ type collectionView struct {
 var knownFieldOrder = []struct {
 	field string
 }{
+	// label leads: it is the row's human-readable identity, and a column
+	// you read to find a row belongs before columns you read once you have.
+	{"label"},
 	{"title"},
 	{"artist"},
 	{"name"},
@@ -253,19 +256,50 @@ func (v collectionView) addSlotExtraLines() int {
 	return lines
 }
 
-// editOverflowExtent computes the horizontal position (xOffset) and
-// available width (overflowWidth) for an inline-edit cell on column
-// editIdx. The edit cell overflows past its own column into the columns
-// to its right, stretching to the terminal's right margin, so xOffset
-// must account for the gutter, the gutter gap, and every preceding
-// column's width plus its trailing gap.
-func editOverflowExtent(widths []int, editIdx, gutterWidth, gutterGapWidth, columnGapWidth, termWidth int) (xOffset, overflowWidth int) {
+// editHeadroom is the typing room an inline-edit cell keeps past the end of
+// its buffer: one column for the cursor block sitting after the last
+// character, plus a few so the cell does not resize on every keystroke.
+const editHeadroom = 4
+
+// editOverflowExtent computes the horizontal position (xOffset), the width
+// (cellWidth) and the number of columns to the right that an inline-edit
+// cell on column editIdx swallows (covered).
+//
+// The cell is sized to its content, not to the terminal: a short value stays
+// inside its own column and every column to its right keeps rendering, which
+// is what makes it possible to read a row's link while typing its label. A
+// value longer than its column grows rightwards, but only as far as it
+// needs, and it always snaps out to a whole column boundary so the columns
+// still on screen stay aligned with their headers. The terminal's right
+// margin (less a 2-column pad) is the hard cap.
+func editOverflowExtent(widths []int, editIdx, gutterWidth, gutterGapWidth, columnGapWidth, termWidth, valueWidth int) (xOffset, cellWidth, covered int) {
 	xOffset = gutterWidth + gutterGapWidth
 	for k := range editIdx {
 		xOffset += widths[k] + columnGapWidth
 	}
-	overflowWidth = max(widths[editIdx], termWidth-xOffset-2)
-	return xOffset, overflowWidth
+
+	own := widths[editIdx]
+	maxWidth := max(own, termWidth-xOffset-2)
+
+	desired := min(max(own, valueWidth+editHeadroom), maxWidth)
+
+	// Grow a whole column at a time so what remains on screen stays aligned.
+	cellWidth = own
+	for cellWidth < desired && editIdx+covered+1 < len(widths) {
+		next := columnGapWidth + widths[editIdx+covered+1]
+		if cellWidth+next > maxWidth {
+			break
+		}
+		cellWidth += next
+		covered++
+	}
+	// The last column has nothing to its right to snap to, so it takes the
+	// leftover margin directly.
+	if editIdx+covered+1 >= len(widths) {
+		cellWidth = max(cellWidth, desired)
+	}
+
+	return xOffset, cellWidth, covered
 }
 
 // columnMaxWidth caps how wide a single flex column (e.g. LINK) is allowed
@@ -464,26 +498,32 @@ func (v collectionView) view() string {
 			gutter = editRowBgOnly.Width(gutterWidth).Render(gutter)
 		}
 		parts := []string{gutter}
+		// skipUntil is the last column index swallowed by an inline-edit
+		// cell that grew past its own column. Columns after it still render.
+		skipUntil := -1
 		for j, col := range v.columns {
+			if j <= skipUntil {
+				continue
+			}
 			val := sanitize(row.CustomFields[col.field])
 			w := widths[j]
 
-			// Inline edit: show edit buffer with cursor on the active field.
-			// The edit cell overflows into adjacent columns: compute X offset of
-			// this column and stretch to the terminal right margin, then stop
-			// rendering further columns (they fall within the overflow region).
+			// Inline edit: show the edit buffer with the cursor on the active
+			// field, in a cell sized to the buffer rather than to the
+			// terminal, so a short edit leaves the rest of the row readable.
 			if isEditRow && j == v.editFieldIdx {
-				_, overflowWidth := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth)
-				parts = append(parts, renderEditCell(v.editValue, v.editCursor, overflowWidth))
+				_, cellWidth, covered := editOverflowExtent(widths, j, gutterWidth, gutterGapWidth, columnGapWidth, v.termWidth, runewidth.StringWidth(v.editValue))
+				parts = append(parts, renderEditCell(v.editValue, v.editCursor, cellWidth))
+				skipUntil = j + covered
 
-				// Append a faint hint if columns are hidden by the overflow region.
-				hiddenColumns := len(v.columns) - v.editFieldIdx - 1
-				if hiddenColumns > 0 {
-					hint := fmt.Sprintf("+%d fields", hiddenColumns)
-					hintStyled := editRowBgOnly.Render(faint.Render(hint))
-					parts = append(parts, hintStyled)
+				// The hint only makes sense when the cell runs to the end of
+				// the row; with columns still to render after it, a mid-row
+				// hint would push them out of alignment.
+				if j+covered == len(v.columns)-1 && covered > 0 {
+					hint := fmt.Sprintf("+%d fields", covered)
+					parts = append(parts, editRowBgOnly.Render(faint.Render(hint)))
 				}
-				break
+				continue
 			}
 			// Inline edit: highlight other fields on the edit row (before the edit field).
 			if isEditRow {
