@@ -623,6 +623,9 @@ func (s *Service) queryRemoteID(ctx context.Context, link string) (remoteIDInfo,
 
 	res, err := s.Runner.Run(ctx, s.ytDLP, args, RunOptions{Dir: s.Paths.Root})
 	if err != nil {
+		if stderr := bytes.TrimSpace(res.Stderr); len(stderr) > 0 {
+			return remoteIDInfo{}, fmt.Errorf("yt-dlp id probe: %w: %s", err, stderr)
+		}
 		return remoteIDInfo{}, fmt.Errorf("yt-dlp id probe: %w", err)
 	}
 
