@@ -104,6 +104,41 @@ func TestLoadAllowsDotSeparatedStartTime(t *testing.T) {
 	}
 }
 
+func TestParseStartTimeBlankComponents(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{name: "blank minutes", input: ":19", want: 19 * time.Second},
+		{name: "blank minutes with two digit seconds", input: ":48", want: 48 * time.Second},
+		{name: "blank hours", input: ":05:30", want: 5*time.Minute + 30*time.Second},
+		{name: "blank hours and minutes", input: "::15", want: 15 * time.Second},
+		{name: "non-blank minutes still parsed", input: "1:23", want: time.Minute + 23*time.Second},
+		{name: "non-numeric minutes still errors", input: "abc:19", wantErr: true},
+		{name: "out of range minutes still errors", input: "60:00", wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseStartTime(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q, got duration %v", tc.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tc.input, err)
+			}
+			if got != tc.want {
+				t.Fatalf("unexpected duration for %q: got %v want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadAggregatesErrors(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "powerhour.csv")
