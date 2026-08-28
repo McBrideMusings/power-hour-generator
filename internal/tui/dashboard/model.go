@@ -2145,18 +2145,18 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, nil
 		}
 		if v.focusPanel == 0 && len(v.sequence) > 0 {
-			paths := resolveSequenceEntrySegmentPaths(m.pp, m.cfg, m.collections, v.seqCursor)
+			paths := resolveSequenceEntrySegmentPathsWithFallback(m.pp, m.cfg, m.collections, m.cacheIdx, v.seqCursor)
 			if len(paths) == 0 {
 				m.statusMsg = "No segments for this entry"
 				return m, nil
 			}
 			if len(paths) == 1 {
-				if _, err := os.Stat(paths[0]); err == nil {
+				if paths[0] != "" {
 					if err := playFileInVLC(vlcPath, paths[0]); err != nil {
 						m.statusMsg = fmt.Sprintf("vlc error: %v", err)
 					}
 				} else {
-					m.statusMsg = "Segment not yet rendered"
+					m.statusMsg = "No rendered or cached file found"
 				}
 			} else {
 				tmpDir := filepath.Join(m.pp.MetaDir, "tmp")

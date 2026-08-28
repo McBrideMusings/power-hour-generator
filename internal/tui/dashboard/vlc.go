@@ -236,6 +236,29 @@ func existingPath(candidates ...string) string {
 	return ""
 }
 
+// resolvePlacementPathWithFallback resolves a single timeline placement to the
+// best playable path: the rendered segment when it exists on disk, otherwise
+// the raw (unrendered, uncut) source file when that exists, otherwise "".
+func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index, placement project.TimelinePlacement) string {
+	if placement.SourceFile != "" {
+		raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
+		rendered := render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw)
+		return existingPath(rendered, raw)
+	}
+
+	coll, ok := collections[placement.Collection]
+	if !ok {
+		return ""
+	}
+	row, ok := findCollectionRow(coll, placement.RowIndex)
+	if !ok {
+		return ""
+	}
+	rendered := resolveRenderedSegmentPath(pp, cfg, placement.Collection, coll, row)
+	raw := resolveSourcePath(idx, pp.Root, row)
+	return existingPath(rendered, raw)
+}
+
 // resolveAllTimelineSegmentPathsWithFallback returns the best playable path for
 // every entry in timeline order: the rendered segment when it exists on disk,
 // otherwise the raw (unrendered, uncut) source file when that exists, otherwise
@@ -246,26 +269,29 @@ func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg confi
 		return nil
 	}
 
+	result := make([]string, 0, len(placements))
+	for _, placement := range placements {
+		result = append(result, resolvePlacementPathWithFallback(pp, cfg, collections, idx, placement))
+	}
+	return result
+}
+
+// resolveSequenceEntrySegmentPathsWithFallback returns the best playable path
+// for every clip belonging to a single sequence entry at seqIdx (0-based) —
+// same rendered/raw-source fallback semantics as
+// resolveAllTimelineSegmentPathsWithFallback, scoped to one entry.
+func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index, seqIdx int) []string {
+	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
+	if err != nil {
+		return nil
+	}
+
 	var result []string
 	for _, placement := range placements {
-		if placement.SourceFile != "" {
-			raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
-			rendered := render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw)
-			result = append(result, existingPath(rendered, raw))
+		if placement.SequenceEntryIndex != seqIdx {
 			continue
 		}
-
-		coll, ok := collections[placement.Collection]
-		if !ok {
-			continue
-		}
-		row, ok := findCollectionRow(coll, placement.RowIndex)
-		if !ok {
-			continue
-		}
-		rendered := resolveRenderedSegmentPath(pp, cfg, placement.Collection, coll, row)
-		raw := resolveSourcePath(idx, pp.Root, row)
-		result = append(result, existingPath(rendered, raw))
+		result = append(result, resolvePlacementPathWithFallback(pp, cfg, collections, idx, placement))
 	}
 	return result
 }
@@ -292,52 +318,3 @@ func findCollectionRow(coll project.Collection, rowIndex int) (csvplan.Collectio
 	return csvplan.CollectionRow{}, false
 }
 
-// resolveSequenceEntrySegmentPaths returns the rendered segment paths for a single
-// sequence entry at seqIdx (0-based). It resolves all timeline segments then picks
-// the slice that belongs to the given entry by counting how many clips each entry
-// contributes.
-func resolveSequenceEntrySegmentPaths(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, seqIdx int) []string {
-	allSegs, err := render.ResolveTimelineSegments(pp, cfg, collections)
-	if err != nil {
-		return nil
-	}
-
-	// Also resolve the timeline entries to get the same ordering with collection metadata.
-	timeline, err := project.ResolveTimeline(cfg.Timeline, collections)
-	if err != nil {
-		return nil
-	}
-
-	// Both allSegs and timeline should have the same length and ordering.
-	if len(allSegs) != len(timeline) {
-		return nil
-	}
-
-	// Map each timeline entry to its originating sequence entry index.
-	// Replay the cursor to determine which sequence entry produced each timeline entry.
-	seqEntryForTimeline := assignTimelineToSequenceEntries(cfg.Timeline, collections, len(timeline))
-
-	var result []string
-	for i, assignment := range seqEntryForTimeline {
-		if assignment == seqIdx && i < len(allSegs) {
-			result = append(result, allSegs[i].Path)
-		}
-	}
-	return result
-}
-
-// assignTimelineToSequenceEntries returns a slice mapping each timeline position
-// to the index of its originating sequence entry. Replays the same cursor logic
-// as ResolveTimeline.
-func assignTimelineToSequenceEntries(timeline config.TimelineConfig, collections map[string]project.Collection, totalEntries int) []int {
-	result := make([]int, 0, totalEntries)
-	placements, err := project.BuildTimelinePlacements(timeline, collections)
-	if err != nil {
-		return result
-	}
-	result = make([]int, 0, min(totalEntries, len(placements)))
-	for _, placement := range placements {
-		result = append(result, placement.SequenceEntryIndex)
-	}
-	return result
-}
