@@ -43,18 +43,26 @@ type PositionIndex struct {
 
 // NewPositionIndex builds the lookup for a resolved order.
 //
+// The position is counted WITHIN the row's own collection, not across the
+// whole order: the 12th song is 12 even when 11 interstitials and two file
+// bookends play before it. A power hour numbers its drinks, and an
+// interstitial is not one — counting every slot makes the number a slot
+// index, which is not a fact about the song and is not what gets burned in.
+//
 // A row that occupies several slots (a repeat-selection pool) takes the
 // first of them: one row produces one rendered file, so it can only burn in
 // one number.
 func NewPositionIndex(o Order) PositionIndex {
 	slots := make(map[[2]string]int, len(o.Slots))
-	for i, s := range o.Slots {
+	counts := make(map[string]int)
+	for _, s := range o.Slots {
 		if s.File != "" {
 			continue
 		}
+		counts[s.Collection]++
 		k := [2]string{s.Collection, s.RowID}
 		if _, seen := slots[k]; !seen {
-			slots[k] = i + 1
+			slots[k] = counts[s.Collection]
 		}
 	}
 	return PositionIndex{slots: slots}
