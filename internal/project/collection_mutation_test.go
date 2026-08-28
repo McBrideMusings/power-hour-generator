@@ -46,6 +46,54 @@ func TestDuplicateCollectionRowAppendsDeepCopy(t *testing.T) {
 	}
 }
 
+func TestDedupeImportedRowsSkipsExistingYouTubeLinks(t *testing.T) {
+	coll := Collection{
+		Rows: []csvplan.CollectionRow{
+			{Link: "https://www.youtube.com/watch?v=abc123&si=tracking"},
+			{Link: "https://youtu.be/def456"},
+		},
+	}
+	imported := []csvplan.CollectionRow{
+		{Link: "https://youtu.be/abc123?si=other-tracking"}, // same video as row 1, different URL shape
+		{Link: "https://www.youtube.com/watch?v=def456"},    // same video as row 2
+		{Link: "https://www.youtube.com/watch?v=new789"},    // genuinely new
+		{Link: "https://www.youtube.com/watch?v=new789"},    // duplicated within the pasted batch itself
+	}
+
+	deduped, skipped := DedupeImportedRows(coll, imported)
+
+	if len(deduped) != 1 {
+		t.Fatalf("deduped rows = %d, want 1", len(deduped))
+	}
+	if deduped[0].Link != "https://www.youtube.com/watch?v=new789" {
+		t.Fatalf("deduped row link = %q, want new789", deduped[0].Link)
+	}
+	if skipped != 3 {
+		t.Fatalf("skipped = %d, want 3", skipped)
+	}
+}
+
+func TestDedupeImportedRowsFallsBackToExactLinkForNonYouTube(t *testing.T) {
+	coll := Collection{
+		Rows: []csvplan.CollectionRow{
+			{Link: "/local/path/song.mp4"},
+		},
+	}
+	imported := []csvplan.CollectionRow{
+		{Link: "/local/path/song.mp4"},       // exact duplicate
+		{Link: "/local/path/other-song.mp4"}, // new
+	}
+
+	deduped, skipped := DedupeImportedRows(coll, imported)
+
+	if len(deduped) != 1 || deduped[0].Link != "/local/path/other-song.mp4" {
+		t.Fatalf("deduped = %+v, want only other-song.mp4", deduped)
+	}
+	if skipped != 1 {
+		t.Fatalf("skipped = %d, want 1", skipped)
+	}
+}
+
 func TestBuildCollectionRowUsesSchemaDefaults(t *testing.T) {
 	coll := Collection{
 		Config: config.CollectionConfig{

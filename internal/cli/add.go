@@ -69,7 +69,8 @@ func newAddCmd() *cobra.Command {
 				return fmt.Errorf("add %s: %w", name, err)
 			}
 
-			coll = project.AppendCollectionRows(coll, rows)
+			deduped, skipped := project.DedupeImportedRows(coll, rows)
+			coll = project.AppendCollectionRows(coll, deduped)
 			if err := project.WriteCollectionPlan(coll); err != nil {
 				return err
 			}
@@ -78,23 +79,29 @@ func newAddCmd() *cobra.Command {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
 					Collection    string `json:"collection"`
 					AddedRows     int    `json:"added_rows"`
+					SkippedDupes  int    `json:"skipped_duplicates"`
 					SourceFormat  string `json:"source_format"`
 					StorageFormat string `json:"storage_format"`
 					Plan          string `json:"plan"`
 				}{
 					Collection:    name,
-					AddedRows:     len(rows),
+					AddedRows:     len(deduped),
+					SkippedDupes:  skipped,
 					SourceFormat:  string(format),
 					StorageFormat: coll.PlanFormat,
 					Plan:          coll.Plan,
 				})
 			}
 
-			if len(rows) == 1 && format == "single" {
+			if len(deduped) == 1 && format == "single" && skipped == 0 {
 				fmt.Fprintf(cmd.OutOrStdout(), "Added 1 row to %s\n", name)
 				return nil
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Added %d rows to %s (%s -> %s)\n", len(rows), name, format, coll.PlanFormat)
+			if skipped > 0 {
+				fmt.Fprintf(cmd.OutOrStdout(), "Added %d rows to %s (%s -> %s), skipped %d duplicates\n", len(deduped), name, format, coll.PlanFormat, skipped)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Added %d rows to %s (%s -> %s)\n", len(deduped), name, format, coll.PlanFormat)
 			return nil
 		},
 	}

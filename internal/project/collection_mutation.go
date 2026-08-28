@@ -2,8 +2,10 @@ package project
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
+	"powerhour/internal/cache"
 	"powerhour/pkg/csvplan"
 )
 
@@ -33,6 +35,51 @@ func AppendCollectionRows(coll Collection, imported []csvplan.CollectionRow) Col
 	coll.Rows = rows
 	coll.Headers = csvplan.MergeHeaders(coll.Headers, rows)
 	return coll
+}
+
+// DedupeImportedRows filters imported rows whose link already matches an
+// existing row in the collection, using the same YouTube video-ID extraction
+// the cache index uses to canonicalize links (cache.ExtractYouTubeID) — so
+// re-pasting the same sheet still matches even if tracking params or v=
+// ordering differ. Links that aren't recognized YouTube URLs (other hosts,
+// local paths) fall back to an exact trimmed-link comparison. Duplicates
+// within the imported batch itself are also collapsed. Returns the rows that
+// are actually new, plus how many were skipped as duplicates.
+func DedupeImportedRows(coll Collection, imported []csvplan.CollectionRow) ([]csvplan.CollectionRow, int) {
+	keyFor := func(link string) string {
+		link = strings.TrimSpace(link)
+		if link == "" {
+			return ""
+		}
+		if id := cache.ExtractYouTubeID(link); id != "" {
+			return "yt:" + id
+		}
+		return link
+	}
+
+	seen := make(map[string]struct{}, len(coll.Rows)+len(imported))
+	for _, row := range coll.Rows {
+		if key := keyFor(row.Link); key != "" {
+			seen[key] = struct{}{}
+		}
+	}
+
+	deduped := make([]csvplan.CollectionRow, 0, len(imported))
+	skipped := 0
+	for _, row := range imported {
+		key := keyFor(row.Link)
+		if key == "" {
+			deduped = append(deduped, row)
+			continue
+		}
+		if _, dup := seen[key]; dup {
+			skipped++
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, row)
+	}
+	return deduped, skipped
 }
 
 // BuildCollectionRow initializes a single collection row from the collection's
