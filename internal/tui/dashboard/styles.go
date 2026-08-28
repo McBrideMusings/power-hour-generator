@@ -37,6 +37,12 @@ var (
 	dotFallback    = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("●")
 	dotUnavailable = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("●")
 
+	// Playback order panel: lock glyph, a locked slot's label, and the slot
+	// currently marked for a swap.
+	lockGlyphStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	lockedRowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	markedSlotStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+
 	// Collection view.
 	colHeader = lipgloss.NewStyle().Bold(true).Faint(true)
 

@@ -54,7 +54,6 @@ const (
 	modeInlineEdit                      // editing a row's fields inline
 	modeCacheInlineEdit                 // editing a cache entry's fields inline
 	modeAddClip                         // add-clip slot focused (paste link/path/CSV)
-	modeAddSeq                          // timeline add-slot focused (collection name or file path)
 	modeAddCache                        // cache add-slot focused (paste URL, YouTube ID, or local path)
 )
 
@@ -65,6 +64,7 @@ type Model struct {
 	pp          paths.ProjectPaths
 	collections map[string]project.Collection
 	timeline    []project.TimelineEntry
+	order       playback.Order // the resolved playback order; mirrors timeline 1:1 (playback.Placements)
 	cacheIdx    *cache.Index
 	renderState *state.RenderState
 
@@ -120,7 +120,8 @@ type Model struct {
 	overlay           overlayKind
 	toolStatuses      []ToolStatus
 	doctorOverlay     *cacheDoctorOverlay
-	doctorInstanceSeq int // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
+	doctorInstanceSeq int                 // incremented each time a doctor overlay is opened; stamped onto the overlay and every in-flight requery it dispatches
+	pickerOverlay     *orderPickerOverlay // the playback-order slot picker for `repeat`-selection collections
 
 	// Tool update queue. `U` fills it; each toolUpdateDoneMsg pops the next
 	// one, so package managers never run two at a time on the same terminal.
@@ -223,6 +224,12 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 		cacheView:       newCacheView(cfg, idx, buildCollectionLinks(collections)),
 		toolsView:       newToolsView(toolStatuses),
 	}
+
+	// Resolve the playback order through the same function `finalize` uses
+	// (playback.ResolveOrder / playback.Placements, per ADR 0003), so the
+	// panel's order field and lock state agree with what a render would
+	// actually produce.
+	m = syncPlaybackOrder(m)
 
 	return m
 }
@@ -617,6 +624,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.overlay == overlayPicker && m.pickerOverlay != nil {
+			done, apply := m.pickerOverlay.handleKey(msg)
+			if apply {
+				m = m.applyOrderPicker()
+			}
+			if done {
+				m.overlay = overlayNone
+				m.pickerOverlay = nil
+			}
+			return m, nil
+		}
 		// Non-input overlay (help). q/Esc/Ctrl+C quit so the root-level
 		// contract holds anywhere text input is not active; `?` closes it.
 		key := msg.String()
@@ -641,8 +659,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleCacheInlineEditKey(msg)
 	case modeAddClip:
 		return m.handleAddClipKey(msg)
-	case modeAddSeq:
-		return m.handleAddSeqKey(msg)
 	case modeAddCache:
 		return m.handleAddCacheKey(msg)
 	}
@@ -658,6 +674,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	key := msg.String()
+
+	// A pending playback-order mark takes Esc before the global quit binding
+	// so clearing it doesn't also quit the dashboard.
+	if key == "esc" && m.activeView == 0 && m.timelineView.markedSlot >= 0 {
+		m.timelineView.markedSlot = -1
+		m.timelineView.orderNote = ""
+		return m, nil
+	}
 
 	// The tools view claims r/u/U and cursor movement before the global
 	// bindings, because `u` updates a tool here and refreshes from disk
@@ -743,10 +767,7 @@ func (m Model) handleConfirmDeleteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.processDeleteCacheEntry()
 		}
 		if m.activeView == 0 {
-			if m.timelineView.concatFocus {
-				return m.processDeleteTimelineOutput(), nil
-			}
-			return m.processDeleteTimelineEntry()
+			return m.processDeleteTimelineOutput(), nil
 		}
 		return m.processDeleteRow()
 	default:
@@ -1267,90 +1288,9 @@ func (m Model) cancelAddClip() Model {
 	return m
 }
 
-// handleAddSeqKey drives the timeline's persistent add-slot. It mirrors
-// handleAddClipKey but trimmed down: a timeline sequence entry is just a
-// collection name or file path (classified by processAddTimelineEntry), so
-// there is no cache lookup, suggestions, or URL/CSV detection to drive.
-func (m Model) handleAddSeqKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	v := m.timelineView
-
-	switch msg.Type {
-	case tea.KeyEscape:
-		return m.cancelAddSeq(), nil
-
-	case tea.KeyEnter:
-		trimmed := strings.TrimSpace(v.addBuffer)
-		m.resetSeqAddInput(false)
-		m.mode = modeNormal
-		if trimmed == "" {
-			return m, nil
-		}
-		return m.processAddTimelineEntry(trimmed)
-
-	case tea.KeyRight:
-		if v.addCursor < len(v.addBuffer) {
-			v.addCursor++
-		}
-		m.timelineView = v
-		return m, nil
-
-	case tea.KeyLeft:
-		if v.addCursor > 0 {
-			v.addCursor--
-		}
-		m.timelineView = v
-		return m, nil
-
-	case tea.KeyBackspace:
-		if v.addCursor > 0 && len(v.addBuffer) > 0 {
-			v.addBuffer = v.addBuffer[:v.addCursor-1] + v.addBuffer[v.addCursor:]
-			v.addCursor--
-		}
-		m.timelineView = v
-		return m, nil
-
-	case tea.KeyCtrlU:
-		// Unix-style kill-to-start-of-line: drop everything before the cursor.
-		v.addBuffer = v.addBuffer[v.addCursor:]
-		v.addCursor = 0
-		m.timelineView = v
-		return m, nil
-
-	case tea.KeyRunes:
-		ch := string(msg.Runes)
-		v.addBuffer = v.addBuffer[:v.addCursor] + ch + v.addBuffer[v.addCursor:]
-		v.addCursor += len(ch)
-		m.timelineView = v
-		return m, nil
-
-	case tea.KeySpace:
-		v.addBuffer = v.addBuffer[:v.addCursor] + " " + v.addBuffer[v.addCursor:]
-		v.addCursor++
-		m.timelineView = v
-		return m, nil
-	}
-
-	return m, nil
-}
-
-// resetSeqAddInput clears the timeline add-slot buffer, optionally keeping
-// it focused so another entry can be typed immediately.
-func (m *Model) resetSeqAddInput(keepFocus bool) {
-	m.timelineView.addFocus = keepFocus
-	m.timelineView.addBuffer = ""
-	m.timelineView.addCursor = 0
-}
-
-// cancelAddSeq returns to normal mode, clearing the timeline add-slot focus.
-func (m Model) cancelAddSeq() Model {
-	m.resetSeqAddInput(false)
-	m.mode = modeNormal
-	return m
-}
-
-// handleAddCacheKey drives the cache view's persistent add-slot. It mirrors
-// handleAddSeqKey's simpler shape — no suggestions or cache-lookup machinery,
-// since the cache view IS the cache — but classifies the trimmed buffer as a
+// handleAddCacheKey drives the cache view's persistent add-slot: no
+// suggestions or cache-lookup machinery, since the cache view IS the cache —
+// but classifies the trimmed buffer as a
 // URL, a bare YouTube ID, or a local file path and dispatches a background
 // job through the same job-channel machinery fetch/render already use.
 func (m Model) handleAddCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1977,7 +1917,6 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		} else if v.focusPanel == 0 {
 			if v.seqCursor > 0 {
 				v.seqCursor--
-				v.autoScrollSeq()
 			} else {
 				v.concatFocus = true
 			}
@@ -1988,7 +1927,6 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			} else if len(v.sequence) > 0 {
 				v.focusPanel = 0
 				v.seqCursor = len(v.sequence) - 1
-				v.autoScrollSeq()
 			} else {
 				v.focusPanel = 0
 				v.concatFocus = true
@@ -2003,7 +1941,6 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			if len(v.sequence) > 0 {
 				v.focusPanel = 0
 				v.seqCursor = 0
-				v.autoScrollSeq()
 			} else if len(v.resolved) > 0 {
 				v.focusPanel = 1
 				v.resCursor = 0
@@ -2012,7 +1949,6 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		} else if v.focusPanel == 0 {
 			if v.seqCursor < len(v.sequence)-1 {
 				v.seqCursor++
-				v.autoScrollSeq()
 			} else if len(v.resolved) > 0 {
 				v.focusPanel = 1
 				if v.resCursor >= len(v.resolved) {
@@ -2032,36 +1968,6 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 		m.timelineView = v
 		return m, nil
 
-	case "J", "shift+down":
-		if v.concatFocus {
-			return m, nil
-		}
-		if v.focusPanel == 0 && v.seqCursor < len(v.sequence)-1 {
-			v.sequence[v.seqCursor], v.sequence[v.seqCursor+1] = v.sequence[v.seqCursor+1], v.sequence[v.seqCursor]
-			v.seqCursor++
-			v.autoScrollSeq()
-			m.timelineView = v
-			m.cfg.Timeline.Sequence = v.sequence
-			m = saveConfigAndReResolve(m)
-			return m, nil
-		}
-		return m, nil
-
-	case "K", "shift+up":
-		if v.concatFocus {
-			return m, nil
-		}
-		if v.focusPanel == 0 && v.seqCursor > 0 {
-			v.sequence[v.seqCursor], v.sequence[v.seqCursor-1] = v.sequence[v.seqCursor-1], v.sequence[v.seqCursor]
-			v.seqCursor--
-			v.autoScrollSeq()
-			m.timelineView = v
-			m.cfg.Timeline.Sequence = v.sequence
-			m = saveConfigAndReResolve(m)
-			return m, nil
-		}
-		return m, nil
-
 	case "x":
 		if v.concatFocus {
 			if !v.concatExists {
@@ -2073,35 +1979,16 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			m.timelineView = v
 			return m, nil
 		}
-		if v.focusPanel == 0 && len(v.sequence) > 0 {
-			entry := v.sequence[v.seqCursor]
-			desc := "sequence entry"
-			if entry.File != "" {
-				desc = fmt.Sprintf("file: %s", entry.File)
-			} else if entry.Collection != "" {
-				desc = fmt.Sprintf("%s %s", entry.Collection, timelineSliceLabel(entry.Slice))
-			}
-			m.deleteDesc = desc
-			m.mode = modeConfirmDelete
-			v.confirmDelete = fmt.Sprintf("Delete %s? [y/n]", desc)
-			m.timelineView = v
-			return m, nil
-		}
 		return m, nil
 
-	case "a":
-		if v.concatFocus {
-			return m, nil
-		}
-		if v.focusPanel == 0 {
-			m.mode = modeAddSeq
-			v.addFocus = true
-			v.addBuffer = ""
-			v.addCursor = 0
-			m.timelineView = v
-			return m, nil
-		}
-		return m, nil
+	case "s":
+		return m.handleOrderMarkOrPick(v)
+
+	case "l":
+		return m.handleOrderToggleLock(v)
+
+	case "S":
+		return m.handleOrderShuffle(v)
 
 	case "e", "E":
 		if v.concatFocus {
@@ -2205,6 +2092,227 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 
 	m.timelineView = v
 	return m, nil
+}
+
+// currentOrderSlot returns the cursor's playback-order slot, or ok=false
+// when the cursor isn't on a mutable playback-order row (wrong panel, the
+// concat row, or out of range).
+func currentOrderSlot(m Model, v timelineView) (int, playback.Slot, bool) {
+	if v.focusPanel != 1 || v.concatFocus {
+		return 0, playback.Slot{}, false
+	}
+	slot := v.resCursor
+	if slot < 0 || slot >= len(m.order.Slots) {
+		return 0, playback.Slot{}, false
+	}
+	return slot, m.order.Slots[slot], true
+}
+
+// handleOrderMarkOrPick implements the `s` gesture: mark-and-swap for a
+// `once` collection's slot, or open the repeat picker for a `repeat`
+// collection's slot, per ADR 0002 (branches on selection, never on a
+// collection name). Holds no domain logic itself — every mutation is a
+// single call into internal/playback.
+func (m Model) handleOrderMarkOrPick(v timelineView) (tea.Model, tea.Cmd) {
+	slot, sl, ok := currentOrderSlot(m, v)
+	if !ok {
+		return m, nil
+	}
+	if sl.File != "" {
+		v.orderNote = "file entries have no pool"
+		m.timelineView = v
+		return m, nil
+	}
+	coll, ok := m.collections[sl.Collection]
+	if !ok {
+		v.orderNote = fmt.Sprintf("collection %q is not configured", sl.Collection)
+		m.timelineView = v
+		return m, nil
+	}
+
+	switch coll.Config.SelectionValue() {
+	case config.SelectionRepeat:
+		items := buildOrderPickerItems(coll)
+		m.pickerOverlay = newOrderPickerOverlay(slot, sl.Collection, items, m.termWidth, m.termHeight)
+		m.overlay = overlayPicker
+		return m, nil
+
+	default: // config.SelectionOnce
+		if v.markedSlot < 0 {
+			v.markedSlot = slot
+			v.orderNote = ""
+			m.timelineView = v
+			return m, nil
+		}
+		if v.markedSlot == slot {
+			v.markedSlot = -1
+			m.timelineView = v
+			return m, nil
+		}
+		marked := m.order.Slots[v.markedSlot]
+		if marked.Collection != sl.Collection {
+			v.markedSlot = -1
+			v.orderNote = "can only swap slots within the same collection"
+			m.timelineView = v
+			return m, nil
+		}
+		if err := playback.Swap(&m.order, v.markedSlot, slot); err != nil {
+			v.markedSlot = -1
+			v.orderNote = err.Error()
+			m.timelineView = v
+			return m, nil
+		}
+		v.markedSlot = -1
+		m.timelineView = v
+		return m.persistOrder("swapped"), nil
+	}
+}
+
+// handleOrderToggleLock implements the `l` gesture.
+func (m Model) handleOrderToggleLock(v timelineView) (tea.Model, tea.Cmd) {
+	slot, sl, ok := currentOrderSlot(m, v)
+	if !ok {
+		return m, nil
+	}
+	if sl.File != "" {
+		v.orderNote = "file entries have no pool"
+		m.timelineView = v
+		return m, nil
+	}
+	locked := !sl.Locked
+	if err := playback.SetLock(&m.order, slot, locked); err != nil {
+		v.orderNote = err.Error()
+		m.timelineView = v
+		return m, nil
+	}
+	note := "locked"
+	if !locked {
+		note = "unlocked"
+	}
+	m.timelineView = v
+	return m.persistOrder(note), nil
+}
+
+// handleOrderShuffle implements the `S` gesture: shuffle the unlocked slots
+// of the cursor slot's collection. Scope is global across the whole order,
+// not the sequence entry — see playback.Shuffle's doc comment.
+func (m Model) handleOrderShuffle(v timelineView) (tea.Model, tea.Cmd) {
+	_, sl, ok := currentOrderSlot(m, v)
+	if !ok {
+		return m, nil
+	}
+	if sl.File != "" {
+		v.orderNote = "file entries have no pool"
+		m.timelineView = v
+		return m, nil
+	}
+	coll, ok := m.collections[sl.Collection]
+	if !ok {
+		v.orderNote = fmt.Sprintf("collection %q is not configured", sl.Collection)
+		m.timelineView = v
+		return m, nil
+	}
+
+	touched := 0
+	for _, s := range m.order.Slots {
+		if s.Collection == sl.Collection && !s.Locked {
+			touched++
+		}
+	}
+
+	if err := playback.Shuffle(&m.order, sl.Collection, coll.Config.SelectionValue(), playback.Pool(coll), nil); err != nil {
+		v.orderNote = err.Error()
+		m.timelineView = v
+		return m, nil
+	}
+	m.timelineView = v
+	return m.persistOrder(fmt.Sprintf("shuffled %d slots", touched)), nil
+}
+
+// applyOrderPicker applies the currently-selected picker item to its target
+// slot via playback.Set, then closes the overlay and persists.
+func (m Model) applyOrderPicker() Model {
+	if m.pickerOverlay == nil {
+		return m
+	}
+	slot := m.pickerOverlay.slot
+	rowID, ok := m.pickerOverlay.selected()
+	m.overlay = overlayNone
+	m.pickerOverlay = nil
+	if !ok {
+		return m
+	}
+	if err := playback.Set(&m.order, slot, rowID); err != nil {
+		m.timelineView.orderNote = err.Error()
+		return m
+	}
+	return m.persistOrder("set")
+}
+
+// persistOrder writes the mutated order via playback.Save, then re-resolves
+// through the same syncPlaybackOrder helper NewModel/reResolve use — so the
+// panel and `finalize` never disagree — and recomputes the readiness dots,
+// since a mutation can go stale relative to already-rendered segments.
+func (m Model) persistOrder(note string) Model {
+	if err := playback.Save(m.pp.Root, m.order); err != nil {
+		m.statusMsg = fmt.Sprintf("Save playback order error: %v", err)
+		return m
+	}
+	m = syncPlaybackOrder(m)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.cacheIdx, m.pp)
+	m.timelineView.orderNote = note
+	return m
+}
+
+// syncPlaybackOrder resolves the playback order through playback.ResolveOrder
+// / playback.Placements — the same function `finalize` calls (ADR 0003) — and
+// refreshes every field derived from it: the timeline, the panel's resolved
+// preview, its order (for lock glyphs and mutation), and the reconcile
+// summary. Never resolves or reconciles independently.
+func syncPlaybackOrder(m Model) Model {
+	if len(m.cfg.Timeline.Sequence) == 0 {
+		return m
+	}
+	order, changes, err := playback.ResolveOrder(m.pp.Root, m.cfg, m.collections)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Playback order error: %v", err)
+		return m
+	}
+	placements, err := playback.Placements(order, m.cfg, m.collections)
+	if err != nil {
+		m.statusMsg = fmt.Sprintf("Playback order error: %v", err)
+		return m
+	}
+	timeline := project.EntriesFromPlacements(placements)
+	m.order = order
+	m.timeline = timeline
+	m.timelineView.resolved = timeline
+	m.timelineView.order = order
+	m.timelineView.reconcileNote = summarizeOrderChanges(changes)
+	return m
+}
+
+// summarizeOrderChanges renders playback.Reconcile's changes as a one-line
+// panel note ("reconciled: 2 dropped, 1 filled"), or "" when there were none.
+func summarizeOrderChanges(changes []playback.Change) string {
+	if len(changes) == 0 {
+		return ""
+	}
+	counts := make(map[playback.ChangeKind]int)
+	for _, c := range changes {
+		counts[c.Kind]++
+	}
+	var parts []string
+	if n := counts[playback.ChangeDropped]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d dropped", n))
+	}
+	if n := counts[playback.ChangeAdded]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d added", n))
+	}
+	if n := counts[playback.ChangeFilled]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d filled", n))
+	}
+	return "reconciled: " + strings.Join(parts, ", ")
 }
 
 func (m Model) handleCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -2656,15 +2764,6 @@ func (m Model) applyCurrentDoctorEntry() Model {
 	return m
 }
 
-func (v *timelineView) autoScrollSeq() {
-	visible := scrollAutoScrollBudget(v.seqPanelHeight())
-	if v.seqCursor < v.seqScrollTop {
-		v.seqScrollTop = v.seqCursor
-	} else if v.seqCursor >= v.seqScrollTop+visible {
-		v.seqScrollTop = v.seqCursor - visible + 1
-	}
-}
-
 func (v *collectionView) autoScroll() {
 	visible := scrollAutoScrollBudget(v.visibleRowCount())
 	if v.cursor < v.scrollTop {
@@ -2699,10 +2798,12 @@ func (m Model) View() string {
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 
-	// Content — doctor overlay replaces the content area when active.
+	// Content — doctor/picker overlays replace the content area when active.
 	var content string
 	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
 		content = m.doctorOverlay.view()
+	} else if m.overlay == overlayPicker && m.pickerOverlay != nil {
+		content = m.pickerOverlay.view()
 	} else {
 		switch m.viewKind(m.activeView) {
 		case "timeline":
@@ -2740,6 +2841,8 @@ func (m Model) View() string {
 	// Footer / input / confirm.
 	if m.overlay == overlayDoctor && m.doctorOverlay != nil {
 		b.WriteString(m.doctorOverlay.doctorFooter())
+	} else if m.overlay == overlayPicker && m.pickerOverlay != nil {
+		b.WriteString(m.pickerOverlay.pickerFooter())
 	} else {
 		switch m.mode {
 		case modeInput:
@@ -2753,8 +2856,6 @@ func (m Model) View() string {
 		case modeInlineEdit:
 			b.WriteString("")
 		case modeAddClip:
-			b.WriteString("")
-		case modeAddSeq:
 			b.WriteString("")
 		case modeAddCache:
 			b.WriteString("")
@@ -3089,76 +3190,6 @@ func (r *dashboardRenderReporter) Fetched(clip project.CollectionClip, seg rende
 
 func (r *dashboardRenderReporter) FetchError(clip project.CollectionClip, err error) {
 	r.events <- jobRowStatusEvent{collectionIdx: r.collectionIdx, rowIndex: clip.Clip.Row.Index, status: "note:ERROR - " + strings.TrimSpace(err.Error())}
-}
-
-// processAddTimelineEntry adds a new sequence entry to the timeline.
-func (m Model) processAddTimelineEntry(value string) (tea.Model, tea.Cmd) {
-	v := m.timelineView
-
-	// If value starts with "c" or is a collection name, add a collection entry.
-	// If it starts with "f" or looks like a file path, add a file entry.
-	var entry config.SequenceEntry
-
-	if value == "c" || value == "C" {
-		// Need a second prompt for collection name — for now, add the first collection using the default slice.
-		if len(m.collectionNames) > 0 {
-			entry = config.SequenceEntry{Collection: m.collectionNames[0]}
-		} else {
-			m.statusMsg = "No collections available"
-			return m, nil
-		}
-	} else {
-		// Check if it's a known collection name.
-		isCollection := false
-		for _, name := range m.collectionNames {
-			if strings.EqualFold(value, name) {
-				entry = config.SequenceEntry{Collection: name}
-				isCollection = true
-				break
-			}
-		}
-		if !isCollection {
-			// Treat as file path.
-			entry = config.SequenceEntry{File: value}
-		}
-	}
-
-	v.sequence = append(v.sequence, entry)
-	v.seqCursor = len(v.sequence) - 1
-	v.autoScrollSeq()
-	m.timelineView = v
-	m.cfg.Timeline.Sequence = v.sequence
-	m = saveConfigAndReResolve(m)
-	m = m.setTimelineSequenceNote(v.seqCursor, "added")
-	return m, nil
-}
-
-// processDeleteTimelineEntry deletes the sequence entry at the cursor.
-func (m Model) processDeleteTimelineEntry() (tea.Model, tea.Cmd) {
-	v := m.timelineView
-	if len(v.sequence) == 0 {
-		return m, nil
-	}
-
-	idx := v.seqCursor
-	desc := "removed entry"
-	if entry := v.sequence[idx]; entry.File != "" {
-		desc = "removed file entry"
-	} else if entry.Collection != "" {
-		desc = "removed " + entry.Collection
-	}
-	v.sequence = append(v.sequence[:idx], v.sequence[idx+1:]...)
-
-	if v.seqCursor >= len(v.sequence) && v.seqCursor > 0 {
-		v.seqCursor = len(v.sequence) - 1
-	}
-	m.timelineView = v
-	m.cfg.Timeline.Sequence = v.sequence
-	m = saveConfigAndReResolve(m)
-	if len(m.timelineView.sequence) > 0 {
-		m = m.setTimelineSequenceNote(m.timelineView.seqCursor, desc)
-	}
-	return m, nil
 }
 
 func (m Model) processDeleteTimelineOutput() Model {
@@ -3593,16 +3624,7 @@ func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLo
 
 // reResolve re-resolves the timeline after mutations.
 func reResolve(m Model) Model {
-	if len(m.cfg.Timeline.Sequence) > 0 {
-		placements, err := playback.OrderedPlacements(m.pp.Root, m.cfg, m.collections)
-		if err != nil {
-			m.statusMsg = fmt.Sprintf("Timeline error: %v", err)
-			return m
-		}
-		timeline := project.EntriesFromPlacements(placements)
-		m.timeline = timeline
-		m.timelineView.resolved = timeline
-	}
+	m = syncPlaybackOrder(m)
 
 	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.renderState)
 	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.cacheIdx, m.pp)

@@ -103,7 +103,11 @@ func TestHandleConfirmDeleteKeyClearsInlinePrompt(t *testing.T) {
 	}
 }
 
-func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
+// TestHandleTimelineKeyWithMutationsSequencePanelXIsNoOp verifies that the
+// sequence panel is read-only: x no longer deletes a sequence entry, since a
+// sequence entry has seven fields and the TUI can edit exactly one of them
+// (order) — editing lives in powerhour.yaml.
+func TestHandleTimelineKeyWithMutationsSequencePanelXIsNoOp(t *testing.T) {
 	m := Model{
 		activeView: 0,
 		timelineView: timelineView{
@@ -120,14 +124,11 @@ func TestHandleTimelineKeyWithMutationsDeleteUsesX(t *testing.T) {
 	})
 	got := gotModel.(Model)
 
-	if got.mode != modeConfirmDelete {
-		t.Fatalf("mode = %v, want %v", got.mode, modeConfirmDelete)
+	if got.mode == modeConfirmDelete {
+		t.Fatal("mode = modeConfirmDelete, want unchanged — sequence panel is read-only")
 	}
-	if !strings.Contains(got.deleteDesc, "songs") {
-		t.Fatalf("deleteDesc = %q, want songs", got.deleteDesc)
-	}
-	if got.timelineView.confirmDelete == "" {
-		t.Fatal("confirmDelete empty, want inline prompt set on the timeline view")
+	if len(got.timelineView.sequence) != 1 {
+		t.Fatalf("sequence len = %d, want unchanged 1", len(got.timelineView.sequence))
 	}
 }
 
@@ -1033,118 +1034,10 @@ func TestProcessDeleteRowUsesInlineNoteOnRemainingRow(t *testing.T) {
 	}
 }
 
-func TestProcessAddTimelineEntryUsesInlineNote(t *testing.T) {
-	m := testTimelineModel(t)
-
-	gotModel, _ := m.processAddTimelineEntry("songs")
-	got := gotModel.(Model)
-
-	if len(got.timelineView.sequence) != 2 {
-		t.Fatalf("sequence len = %d, want 2", len(got.timelineView.sequence))
-	}
-	if got.timelineView.seqStatus[1] != "note:added" {
-		t.Fatalf("seq status = %q, want note:added", got.timelineView.seqStatus[1])
-	}
-}
-
-func TestTimelineAKeyFocusesAddSlot(t *testing.T) {
-	m := testTimelineModel(t)
-
-	gotModel, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
-	got := gotModel.(Model)
-
-	if got.mode != modeAddSeq {
-		t.Fatalf("mode = %v, want modeAddSeq", got.mode)
-	}
-	if !got.timelineView.addFocus {
-		t.Fatal("timelineView.addFocus = false, want true")
-	}
-}
-
-func TestHandleAddSeqKeyTypesAndAddsEntry(t *testing.T) {
-	m := testTimelineModel(t)
-	m.mode = modeAddSeq
-	m.timelineView.addFocus = true
-
-	for _, ch := range "songs" {
-		gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{ch}})
-		m = gotModel.(Model)
-	}
-	if m.timelineView.addBuffer != "songs" {
-		t.Fatalf("addBuffer = %q, want %q", m.timelineView.addBuffer, "songs")
-	}
-
-	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyEnter})
-	got := gotModel.(Model)
-
-	if got.mode != modeNormal {
-		t.Fatalf("mode = %v, want modeNormal", got.mode)
-	}
-	if got.timelineView.addFocus {
-		t.Fatal("addFocus = true, want false after Enter")
-	}
-	if len(got.timelineView.sequence) != 2 {
-		t.Fatalf("sequence len = %d, want 2", len(got.timelineView.sequence))
-	}
-}
-
-func TestHandleAddSeqKeyEscCancels(t *testing.T) {
-	m := testTimelineModel(t)
-	m.mode = modeAddSeq
-	m.timelineView.addFocus = true
-	m.timelineView.addBuffer = "partial"
-	m.timelineView.addCursor = len(m.timelineView.addBuffer)
-
-	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyEscape})
-	got := gotModel.(Model)
-
-	if got.mode != modeNormal {
-		t.Fatalf("mode = %v, want modeNormal", got.mode)
-	}
-	if got.timelineView.addFocus {
-		t.Fatal("addFocus = true, want false after Esc")
-	}
-	if got.timelineView.addBuffer != "" {
-		t.Fatalf("addBuffer = %q, want empty after Esc", got.timelineView.addBuffer)
-	}
-	if len(got.timelineView.sequence) != 1 {
-		t.Fatalf("sequence len = %d, want unchanged 1", len(got.timelineView.sequence))
-	}
-}
-
-func TestHandleAddSeqKeyCtrlUKillsToStartOfLine(t *testing.T) {
-	m := testTimelineModel(t)
-	m.mode = modeAddSeq
-	m.timelineView.addFocus = true
-	m.timelineView.addBuffer = "songs"
-	m.timelineView.addCursor = len("so")
-
-	gotModel, _ := m.handleAddSeqKey(tea.KeyMsg{Type: tea.KeyCtrlU})
-	got := gotModel.(Model)
-
-	if got.timelineView.addBuffer != "ngs" {
-		t.Fatalf("addBuffer after Ctrl+U = %q, want %q", got.timelineView.addBuffer, "ngs")
-	}
-	if got.timelineView.addCursor != 0 {
-		t.Fatalf("addCursor after Ctrl+U = %d, want 0", got.timelineView.addCursor)
-	}
-}
-
-func TestProcessDeleteTimelineEntryUsesInlineNote(t *testing.T) {
-	m := testTimelineModel(t)
-	m.timelineView.sequence = append(m.timelineView.sequence, config.SequenceEntry{Collection: "songs", Slice: "start:2"})
-	m.cfg.Timeline.Sequence = append([]config.SequenceEntry(nil), m.timelineView.sequence...)
-
-	gotModel, _ := m.processDeleteTimelineEntry()
-	got := gotModel.(Model)
-
-	if len(got.timelineView.sequence) != 1 {
-		t.Fatalf("sequence len = %d, want 1", len(got.timelineView.sequence))
-	}
-	if got.timelineView.seqStatus[0] != "note:removed songs" {
-		t.Fatalf("seq status = %q, want removed songs note", got.timelineView.seqStatus[0])
-	}
-}
+// Playback-order gesture tests (s/l/S/Esc, the overlayPicker, and the
+// panel-aware footer) live in order_gestures_test.go — the sequence panel
+// no longer accepts any mutation key, so its former add/delete tests are
+// gone rather than updated.
 
 func TestProcessDeleteTimelineOutputRemovesFile(t *testing.T) {
 	m := testTimelineModel(t)
@@ -1170,8 +1063,11 @@ func TestRenderFooterTimelineIncludesEditShortcuts(t *testing.T) {
 	m := testTimelineModel(t)
 
 	footer := renderFooter(m)
-	if !strings.Contains(footer, "e/E edit/ext") {
-		t.Fatalf("footer = %q, want e/E edit/ext", footer)
+	if !strings.Contains(footer, "e edit") {
+		t.Fatalf("footer = %q, want e edit", footer)
+	}
+	if strings.Contains(footer, "a add") || strings.Contains(footer, "x del") || strings.Contains(footer, "J/K reorder") {
+		t.Fatalf("footer = %q, should not advertise removed sequence-panel mutation keys", footer)
 	}
 }
 
@@ -1267,7 +1163,7 @@ func TestTimelineViewRendersPlaybackOrderCursor(t *testing.T) {
 	m.timelineView.collections = m.collections
 
 	view := m.timelineView.view(nil)
-	if !strings.Contains(view, "▸ ● 01 First Song") {
+	if !strings.Contains(view, "▸ ●   01 First Song") {
 		t.Fatalf("playback order cursor missing:\n%s", view)
 	}
 }

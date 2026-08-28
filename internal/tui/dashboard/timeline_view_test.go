@@ -9,30 +9,22 @@ import (
 	"powerhour/pkg/csvplan"
 )
 
-// TestTimelineViewFitsContentBudgetWithBothScrollIndicators verifies that when
-// both scroll indicators are visible (sequence panel scrolled mid-list, resolved
-// panel scrolled mid-list), the total rendered lines stay within the termHeight-5
-// content budget and the footer remains visible.
-//
-// This is a regression test for the #61 / #127 fix: each scroll indicator must
-// be subtracted from the visible-row budget before rendering, so indicators
-// don't push content past the height limit. The fix is conditional on whether
-// the indicator will actually be rendered.
-func TestTimelineViewFitsContentBudgetWithBothScrollIndicators(t *testing.T) {
+// TestTimelineViewPlaybackOrderScrollIndicatorFitsContentBudget verifies
+// that when the playback order panel is scrolled mid-list, its scroll
+// indicators are subtracted from the visible-row budget before rendering
+// (#61 / #127) rather than pushing content past the footer. The sequence
+// panel is fixed-height and never scrolls, so it never produces an
+// indicator — only the playback order panel is exercised here.
+func TestTimelineViewPlaybackOrderScrollIndicatorFitsContentBudget(t *testing.T) {
 	m := testTimelineModel(t)
 
-	// Small terminal with just enough height to force scrolling in both panels.
 	termHeight := 24
 	m.timelineView.termWidth = 120
 	m.timelineView.termHeight = termHeight
 
-	// Populate sequence with enough entries to force scrolling.
-	// seqPanelHeight auto-grows to sequenceLinesNeeded, so we need entries
-	// that exceed (termHeight - 13) / 4 ≈ 2.75 ≈ 3 lines before clamping.
-	m.timelineView.sequence = make([]config.SequenceEntry, 20)
-	for i := range m.timelineView.sequence {
-		m.timelineView.sequence[i] = config.SequenceEntry{Collection: "songs"}
-	}
+	// A short, fixed sequence — it renders in full regardless of terminal
+	// height, so it doesn't compete with the playback order panel's budget.
+	m.timelineView.sequence = []config.SequenceEntry{{Collection: "songs"}}
 
 	// Populate resolved preview with enough entries to force scrolling.
 	m.timelineView.resolved = make([]project.TimelineEntry, 40)
@@ -62,26 +54,21 @@ func TestTimelineViewFitsContentBudgetWithBothScrollIndicators(t *testing.T) {
 	m.collections["songs"] = songsCollection
 	m.timelineView.collections = m.collections
 
-	// Scroll both panels to mid-list so both up and down indicators will render.
-	m.timelineView.seqScrollTop = 10 // not at top → up indicator
-	m.timelineView.resScrollTop = 20 // not at top → up indicator
+	// Scroll the playback order panel to mid-list so both indicators render.
+	m.timelineView.resScrollTop = 20
 
 	view := m.timelineView.view(nil)
 
-	// Verify both up and down indicators are present in the output.
 	upCount := strings.Count(view, "↑ ")
 	downCount := strings.Count(view, "↓ ")
-	if upCount < 2 {
-		t.Errorf("expected at least 2 up indicators, got %d", upCount)
+	if upCount < 1 {
+		t.Errorf("expected at least 1 up indicator, got %d", upCount)
 	}
-	if downCount < 2 {
-		t.Errorf("expected at least 2 down indicators, got %d", downCount)
+	if downCount < 1 {
+		t.Errorf("expected at least 1 down indicator, got %d", downCount)
 	}
 
-	// Count newlines in the view. The content area has termHeight - 5 lines
-	// (termHeight - 13 for chrome/padding + 8 for section labels = termHeight - 5).
-	// The footer is an additional line, so total is termHeight - 4.
-	// Assert we don't exceed termHeight - 5 for content.
+	// Count newlines in the view; assert it doesn't exceed the content budget.
 	lineCount := strings.Count(view, "\n")
 	contentBudget := termHeight - 5
 	if lineCount > contentBudget {
@@ -142,7 +129,6 @@ func TestTimelineViewWastesNoRowWithoutScrollIndicators(t *testing.T) {
 	m.timelineView.collections = m.collections
 
 	// Keep scroll at top so no indicators render.
-	m.timelineView.seqScrollTop = 0
 	m.timelineView.resScrollTop = 0
 
 	view := m.timelineView.view(nil)

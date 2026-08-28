@@ -217,7 +217,7 @@ func (v cacheView) renderHelpRow() string {
 // renderAddSlot renders the focused cache add-slot footer: the rendered
 // input with its cursor, plus a trailing hint on the same line — either the
 // classification hint (URL / YouTube ID / local file) or the default keys
-// hint when the buffer is empty. Mirrors timelineView.renderAddSlot.
+// hint when the buffer is empty.
 func (v cacheView) renderAddSlot() string {
 	cursor := cursorStyle.Render("▸ ")
 	keysHint := "Enter add · Esc cancel · URL, YouTube ID, or local file path"
