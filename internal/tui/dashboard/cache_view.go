@@ -263,6 +263,102 @@ func (v cacheView) currentEditField() string {
 	return v.columns[v.editFieldIdx]
 }
 
+// computeCacheColumnWidths mirrors collectionView.computeColumnWidths: each
+// column gets only the width its actual data needs (header vs. widest cell,
+// capped at columnMaxWidth), instead of splitting the table evenly — a short
+// column no longer steals space a long one (e.g. LINK) needs. Leftover width
+// goes to columns whose content was truncated by the cap; under pressure,
+// columns shrink proportionally to their slack above columnMinWidth. The
+// last column is always FILE, rendered from CachedPath rather than Values.
+func computeCacheColumnWidths(headers []string, entries []cacheEntry, tableWidth, baseWidth int) []int {
+	n := len(headers)
+	if n == 0 {
+		return nil
+	}
+
+	cellValue := func(row cacheEntry, col int) string {
+		if col == n-1 {
+			return filepath.Base(row.CachedPath)
+		}
+		if col < len(row.Values) {
+			return row.Values[col]
+		}
+		return ""
+	}
+
+	uncapped := make([]int, n)
+	natural := make([]int, n)
+	total := 0
+	for i, h := range headers {
+		w := runewidth.StringWidth(h)
+		for _, e := range entries {
+			if vw := runewidth.StringWidth(cellValue(e, i)); vw > w {
+				w = vw
+			}
+		}
+		uncapped[i] = w
+		if w > columnMaxWidth {
+			w = columnMaxWidth
+		}
+		if w < columnMinWidth {
+			w = columnMinWidth
+		}
+		natural[i] = w
+		total += w
+	}
+
+	available := tableWidth - baseWidth
+	widths := make([]int, n)
+	copy(widths, natural)
+
+	if total <= available {
+		leftover := available - total
+		if leftover <= 0 {
+			return widths
+		}
+		var growable []int
+		for i := range headers {
+			if uncapped[i] > natural[i] {
+				growable = append(growable, i)
+			}
+		}
+		if len(growable) == 0 {
+			return widths
+		}
+		share := leftover / len(growable)
+		rem := leftover % len(growable)
+		for k, i := range growable {
+			widths[i] += share
+			if k < rem {
+				widths[i]++
+			}
+		}
+		return widths
+	}
+
+	deficit := total - available
+	totalSlack := 0
+	slack := make([]int, n)
+	for i, w := range widths {
+		s := w - columnMinWidth
+		if s > 0 {
+			slack[i] = s
+			totalSlack += s
+		}
+	}
+	if totalSlack == 0 {
+		return widths
+	}
+	for i := range widths {
+		cut := deficit * slack[i] / totalSlack
+		widths[i] -= cut
+		if widths[i] < columnMinWidth {
+			widths[i] = columnMinWidth
+		}
+	}
+	return widths
+}
+
 func (v cacheView) view() string {
 	var b strings.Builder
 	entries := v.entries()
@@ -296,19 +392,12 @@ func (v cacheView) view() string {
 
 	tableWidth := max(v.termWidth-20, baseWidth)
 
-	flexWidth := 10
-	if dataColCount > 0 && tableWidth > baseWidth+dataColCount*5 {
-		flexWidth = (tableWidth - baseWidth) / dataColCount
-	}
-	widths := make([]int, dataColCount)
 	headers := make([]string, dataColCount)
 	for i, col := range v.columns {
 		headers[i] = strings.ToUpper(col)
 	}
 	headers[dataColCount-1] = "FILE"
-	for i := range widths {
-		widths[i] = max(flexWidth, len(headers[i]))
-	}
+	widths := computeCacheColumnWidths(headers, entries, tableWidth, baseWidth)
 
 	// Header row.
 	headerParts := make([]string, 0, dataColCount)

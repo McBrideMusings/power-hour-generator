@@ -267,6 +267,108 @@ func editOverflowExtent(widths []int, editIdx, gutterWidth, gutterGapWidth, colu
 	return xOffset, overflowWidth
 }
 
+// columnMaxWidth caps how wide a single flex column (e.g. LINK) is allowed
+// to grow even when terminal width and short sibling columns leave room.
+const columnMaxWidth = 45
+
+// columnMinWidth is the floor a column is shrunk to under horizontal
+// pressure, keeping every column at least minimally readable rather than
+// starving one column to zero while others sit at full content width.
+const columnMinWidth = 6
+
+// computeColumnWidths gives each column only the width its actual data
+// needs (header length vs. widest cell, capped at columnMaxWidth) instead
+// of splitting the table evenly — a short START_TIME/DURATION column no
+// longer steals space that a long LINK/TITLE column needs. Leftover width
+// (available > natural total) is handed to columns whose real content was
+// truncated by the cap, so those grow first. Under pressure (available <
+// natural total), columns shrink proportionally to their slack above
+// columnMinWidth, so wide columns give up more than already-tight ones.
+func (v collectionView) computeColumnWidths(tableWidth, baseWidth int) []int {
+	n := len(v.columns)
+	if n == 0 {
+		return nil
+	}
+
+	contentWidth := func(col collectionColumn) int {
+		w := runewidth.StringWidth(col.header)
+		for _, row := range v.rows {
+			val := sanitize(row.CustomFields[col.field])
+			if vw := runewidth.StringWidth(val); vw > w {
+				w = vw
+			}
+		}
+		return w
+	}
+
+	uncapped := make([]int, n)
+	natural := make([]int, n)
+	total := 0
+	for i, col := range v.columns {
+		w := contentWidth(col)
+		uncapped[i] = w
+		if w > columnMaxWidth {
+			w = columnMaxWidth
+		}
+		if w < columnMinWidth {
+			w = columnMinWidth
+		}
+		natural[i] = w
+		total += w
+	}
+
+	available := tableWidth - baseWidth
+	widths := make([]int, n)
+	copy(widths, natural)
+
+	if total <= available {
+		leftover := available - total
+		if leftover <= 0 {
+			return widths
+		}
+		var growable []int
+		for i := range v.columns {
+			if uncapped[i] > natural[i] {
+				growable = append(growable, i)
+			}
+		}
+		if len(growable) == 0 {
+			return widths
+		}
+		share := leftover / len(growable)
+		rem := leftover % len(growable)
+		for k, i := range growable {
+			widths[i] += share
+			if k < rem {
+				widths[i]++
+			}
+		}
+		return widths
+	}
+
+	deficit := total - available
+	totalSlack := 0
+	slack := make([]int, n)
+	for i, w := range widths {
+		s := w - columnMinWidth
+		if s > 0 {
+			slack[i] = s
+			totalSlack += s
+		}
+	}
+	if totalSlack == 0 {
+		return widths
+	}
+	for i := range widths {
+		cut := deficit * slack[i] / totalSlack
+		widths[i] -= cut
+		if widths[i] < columnMinWidth {
+			widths[i] = columnMinWidth
+		}
+	}
+	return widths
+}
+
 func (v collectionView) view() string {
 	var b strings.Builder
 
@@ -296,18 +398,8 @@ func (v collectionView) view() string {
 		totalGaps += (len(v.columns) - 1) * columnGapWidth
 	}
 	baseWidth := gutterWidth + totalGaps
-	widths := make([]int, len(v.columns))
-	flexCount := len(v.columns)
-
 	tableWidth := max(v.termWidth-20, baseWidth)
-
-	flexWidth := 10
-	if flexCount > 0 && tableWidth > baseWidth+flexCount*5 {
-		flexWidth = (tableWidth - baseWidth) / flexCount
-	}
-	for i, col := range v.columns {
-		widths[i] = max(flexWidth, len(col.header))
-	}
+	widths := v.computeColumnWidths(tableWidth, baseWidth)
 
 	// Column headers. The row index/status gutter sits to the left of the data.
 	headerParts := make([]string, 0, len(v.columns))

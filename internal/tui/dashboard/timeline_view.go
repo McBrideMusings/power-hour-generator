@@ -111,12 +111,15 @@ func (v timelineView) sequenceLinesNeeded() int {
 	return lines
 }
 
-// seqPanelHeight returns height for the sequence entries panel.
+// seqPanelHeight returns height for the sequence entries panel. It sizes to
+// fit the sequence list exactly (so a short sequence doesn't leave dead
+// whitespace above the playback-order panel), capped at half the content
+// area so a long sequence still leaves room for playback order below it.
 func (v timelineView) seqPanelHeight() int {
 	total := v.contentHeight()
-	h := max(total/4, 2)
-	if needed := v.sequenceLinesNeeded(); needed > h {
-		h = needed
+	h := v.sequenceLinesNeeded()
+	if cap := max(total/2, 2); h > cap {
+		h = cap
 	}
 	if h > total-1 {
 		h = total - 1
