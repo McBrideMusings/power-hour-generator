@@ -13,6 +13,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/job"
@@ -112,6 +113,10 @@ func runSample(cmd *cobra.Command, args []string) error {
 	// the fade actually used at render time, not just a collection's own
 	// base fade config. Mirrors collections_render.go's runCollectionsRender.
 	project.ApplySequenceEntryFades(cfg, collectionClips)
+	collectionClips, err = playback.AnnotateClipsFromProject(pp.Root, cfg, collections, collectionClips)
+	if err != nil {
+		return err
+	}
 
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {

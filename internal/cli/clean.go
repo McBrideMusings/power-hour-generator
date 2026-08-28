@@ -15,6 +15,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/state"
@@ -334,6 +335,9 @@ func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bo
 	}
 
 	clips, err := resolver.BuildCollectionClips(collections)
+	if err == nil {
+		clips, err = playback.AnnotateClipsFromProject(pp.Root, cfg, collections, clips)
+	}
 	if err != nil {
 		return nil, err
 	}

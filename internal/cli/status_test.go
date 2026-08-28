@@ -7,6 +7,7 @@ import (
 
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/state"
@@ -98,11 +99,11 @@ func TestBuildRowStatusesHonorsSequenceEntryFadeOverride(t *testing.T) {
 		rs := &state.RenderState{
 			GlobalConfigHash: state.GlobalConfigHash(cfg),
 			Segments: map[string]state.SegmentState{
-				outputPath: {InputHash: overrideHash},
+				state.SegmentKey(overrideSeg): {InputHash: overrideHash},
 			},
 		}
 
-		rows, _ := buildRowStatuses(pp, cfg, nil, rs, collections, tmpl)
+		rows, _ := buildRowStatuses(pp, cfg, nil, rs, collections, playback.PositionIndex{}, tmpl)
 		if len(rows) != 1 {
 			t.Fatalf("expected 1 row, got %d", len(rows))
 		}
@@ -115,11 +116,11 @@ func TestBuildRowStatusesHonorsSequenceEntryFadeOverride(t *testing.T) {
 		rs := &state.RenderState{
 			GlobalConfigHash: state.GlobalConfigHash(cfg),
 			Segments: map[string]state.SegmentState{
-				outputPath: {InputHash: baseOnlyHash},
+				state.SegmentKey(baseOnlySeg): {InputHash: baseOnlyHash},
 			},
 		}
 
-		rows, _ := buildRowStatuses(pp, cfg, nil, rs, collections, tmpl)
+		rows, _ := buildRowStatuses(pp, cfg, nil, rs, collections, playback.PositionIndex{}, tmpl)
 		if len(rows) != 1 {
 			t.Fatalf("expected 1 row, got %d", len(rows))
 		}

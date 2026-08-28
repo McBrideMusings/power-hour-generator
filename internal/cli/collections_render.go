@@ -19,6 +19,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/job"
@@ -81,6 +82,14 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		return err
 	}
 
+	// Resolve the playback order before any --collection/--index filtering:
+	// a slot's position is a fact about the whole order, not about whichever
+	// subset this invocation happens to render.
+	order, _, err := playback.ResolveOrder(pp.Root, cfg, collections)
+	if err != nil {
+		return err
+	}
+
 	if renderCollection != "" {
 		coll, ok := collections[renderCollection]
 		if !ok {
@@ -130,6 +139,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 	// ResolveTimeline so that a collection appearing twice with different
 	// fades affects only its own portion of clips.
 	project.ApplySequenceEntryFades(cfg, collectionClips)
+	collectionClips = playback.AnnotateClips(order, collectionClips)
 
 	// Cheap pre-scan (local file stat / index lookup only, no network) to
 	// build a display-only segments slice for the initial TUI table and to
@@ -368,7 +378,7 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 			CachedPath: sourcePath,
 			OutputPath: outPath,
 		}
-		if prior, ok := rs.Segments[outPath]; ok {
+		if prior, ok := rs.Segments[state.SegmentKey(seg)]; ok {
 			seg.StoredHash = prior.InputHash
 		}
 		segments = append(segments, seg)
@@ -387,10 +397,11 @@ func renderInlineFiles(ctx context.Context, pp paths.ProjectPaths, cfg config.Co
 		if !res.Skipped && res.Err == nil && res.OutputPath != "" {
 			for _, seg := range segments {
 				if seg.OutputPath == res.OutputPath {
-					rs.Segments[res.OutputPath] = state.SegmentState{
+					rs.Segments[state.SegmentKey(seg)] = state.SegmentState{
 						InputHash:  state.SegmentInputHash(seg, filenameTemplate),
 						RenderedAt: time.Now(),
 						SourcePath: seg.CachedPath,
+						OutputPath: seg.OutputPath,
 					}
 					break
 				}
@@ -614,20 +625,28 @@ func printDryRun(cmd *cobra.Command, actions []state.SegmentAction, jsonOutput b
 		return
 	}
 
-	var renderCount, skipCount int
+	var renderCount, skipCount, renameCount int
 	for _, a := range actions {
-		if a.Action == state.ActionRender {
+		switch a.Action {
+		case state.ActionRender:
 			renderCount++
-		} else {
+		case state.ActionRename:
+			renameCount++
+		default:
 			skipCount++
 		}
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "DRY RUN: %d segments would be rendered, %d would be skipped\n\n", renderCount, skipCount)
+	// A rename is called out separately from a skip because it is the whole
+	// difference between reordering a project and re-encoding it.
+	fmt.Fprintf(cmd.OutOrStdout(), "DRY RUN: %d segments would be rendered, %d renamed, %d skipped\n\n", renderCount, renameCount, skipCount)
 	for _, a := range actions {
 		tag := "SKIP  "
-		if a.Action == state.ActionRender {
+		switch a.Action {
+		case state.ActionRender:
 			tag = "RENDER"
+		case state.ActionRename:
+			tag = "RENAME"
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  %s  %03d  %-20s  (%s)\n",
 			tag, a.Segment.Clip.Sequence, job.ClipDisplayTitle(a.Segment.Clip), a.Reason)

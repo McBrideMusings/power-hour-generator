@@ -181,6 +181,14 @@ type collectionSummary struct {
 	Missing      int
 }
 
+// positions is the model's lookup from (collection, row id) to 1-based
+// playback position, rebuilt from the order the model already holds. Every
+// surface that computes a segment filename needs it, because the filename
+// template may embed the position.
+func (m Model) positions() playback.PositionIndex {
+	return playback.NewPositionIndex(m.order)
+}
+
 // NewModel creates the dashboard model from loaded project data.
 func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]project.Collection, timeline []project.TimelineEntry, idx *cache.Index, rs *state.RenderState, toolWarning string, toolStatuses []ToolStatus) Model {
 	// Sort collection names.
@@ -196,15 +204,21 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 	viewNames = append(viewNames, names...)
 	viewNames = append(viewNames, "cache", "tools")
 
+	// Resolve the playback order once here: every surface that computes a
+	// segment filename needs the row's playback position, because the
+	// filename template may embed it.
+	order, _, _ := playback.ResolveOrder(pp.Root, cfg, collections)
+	pos := playback.NewPositionIndex(order)
+
 	// Build collection views.
 	collViews := make([]collectionView, len(names))
 	for i, name := range names {
-		collViews[i] = newCollectionView(collections[name], pp, cfg, idx, rs)
+		collViews[i] = newCollectionView(collections[name], pp, cfg, pos, idx, rs)
 	}
 
 	// Build summaries and cache status.
-	summaries := buildSummaries(collections, names, idx, pp, cfg, rs)
-	cacheStatus := buildCacheStatus(cfg, collections, idx, pp)
+	summaries := buildSummaries(collections, names, idx, pp, cfg, pos, rs)
+	cacheStatus := buildCacheStatus(cfg, collections, pos, idx, pp)
 
 	m := Model{
 		cfg:             cfg,
@@ -1832,7 +1846,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		coll := m.collections[collName]
 		row := v.rows[v.cursor]
 		m = m.setCollectionRowNote(cvIdx, row.Index, "opening vlc...")
-		segPath := resolveRenderedSegmentPath(m.pp, m.cfg, collName, coll, row)
+		segPath := resolveRenderedSegmentPath(m.pp, m.cfg, m.positions(), collName, coll, row)
 		if _, err := os.Stat(segPath); err == nil {
 			if err := playFileInVLC(vlcPath, segPath); err != nil {
 				m.statusMsg = fmt.Sprintf("vlc error: %v", err)
@@ -1886,7 +1900,7 @@ func (m Model) handleCollectionKeyWithMutations(cvIdx int, msg tea.KeyMsg) (tea.
 		collName := m.collectionNames[cvIdx]
 		coll := m.collections[collName]
 		m.collectionViews[cvIdx].activity = "opening vlc..."
-		allPaths := resolveCollectionAllPathsWithFallback(m.pp, m.cfg, collName, coll, m.cacheIdx)
+		allPaths := resolveCollectionAllPathsWithFallback(m.pp, m.cfg, m.positions(), collName, coll, m.cacheIdx)
 		tmpDir := filepath.Join(m.pp.MetaDir, "tmp")
 		_, _, err := playPlaylistInVLC(vlcPath, allPaths, tmpDir)
 		if err != nil {
@@ -2028,7 +2042,7 @@ func (m Model) handleTimelineKeyWithMutations(msg tea.KeyMsg) (tea.Model, tea.Cm
 			return m, nil
 		}
 		if v.focusPanel == 0 && len(v.sequence) > 0 {
-			paths := resolveSequenceEntrySegmentPathsWithFallback(m.pp, m.cfg, m.collections, m.cacheIdx, v.seqCursor)
+			paths := resolveSequenceEntrySegmentPathsWithFallback(m.pp, m.cfg, m.positions(), m.collections, m.cacheIdx, v.seqCursor)
 			if len(paths) == 0 {
 				m.statusMsg = "No segments for this entry"
 				return m, nil
@@ -2259,7 +2273,7 @@ func (m Model) persistOrder(note string) Model {
 		return m
 	}
 	m = syncPlaybackOrder(m)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.cacheIdx, m.pp)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
 	m.timelineView.orderNote = note
 	return m
 }
@@ -3082,11 +3096,11 @@ func (m Model) startCollectionRenderJob(cvIdx int, rows []csvplan.CollectionRow,
 	m.statusMsg = label + "..."
 	events := make(chan dashboardJobEvent, max(32, len(rows)*8))
 	m.job = dashboardJobState{active: true, label: label, events: events}
-	go runDashboardRenderJob(m.pp, m.cfg, m.collectionNames[cvIdx], m.collections[m.collectionNames[cvIdx]], cvIdx, rows, all, events)
+	go runDashboardRenderJob(m.pp, m.cfg, m.order, m.collectionNames[cvIdx], m.collections[m.collectionNames[cvIdx]], cvIdx, rows, all, events)
 	return m
 }
 
-func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, cvIdx int, rows []csvplan.CollectionRow, all bool, events chan<- dashboardJobEvent) {
+func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, order playback.Order, collName string, coll project.Collection, cvIdx int, rows []csvplan.CollectionRow, all bool, events chan<- dashboardJobEvent) {
 	defer close(events)
 	ctx := context.Background()
 	if err := pp.EnsureCollectionDirs(cfg); err != nil {
@@ -3112,6 +3126,9 @@ func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, collName st
 		return
 	}
 	project.ApplySequenceEntryFades(cfg, collectionClips)
+	// The model already holds the resolved order; annotating from it keeps
+	// the dashboard's burned-in numbers identical to the CLI's.
+	collectionClips = playback.AnnotateClips(order, collectionClips)
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {
 		events <- jobCompletedEvent{label: "Render", err: err}
@@ -3626,8 +3643,8 @@ func (m Model) selectedAddClipSuggestion(cvIdx int, query string, lookup cacheLo
 func reResolve(m Model) Model {
 	m = syncPlaybackOrder(m)
 
-	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.renderState)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.cacheIdx, m.pp)
+	m.summaries = buildSummaries(m.collections, m.collectionNames, m.cacheIdx, m.pp, m.cfg, m.positions(), m.renderState)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, m.positions(), m.cacheIdx, m.pp)
 	oldW, oldH := m.cacheView.termWidth, m.cacheView.termHeight
 	oldShowAll := m.cacheView.showAll
 	m.cacheView = newCacheView(m.cfg, m.cacheIdx, buildCollectionLinks(m.collections))
@@ -3654,12 +3671,13 @@ func reloadState(m Model) Model {
 	m.cacheView.termWidth = oldW
 	m.cacheView.termHeight = oldH
 	m.cacheView.showAll = oldShowAll
-	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, rs)
-	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, idx, m.pp)
+	pos := m.positions()
+	m.summaries = buildSummaries(m.collections, m.collectionNames, idx, m.pp, m.cfg, pos, rs)
+	m.cacheStatus = buildCacheStatus(m.cfg, m.collections, pos, idx, m.pp)
 	for i := range m.collectionNames {
 		collName := m.collectionNames[i]
 		coll := m.collections[collName]
-		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, idx, rs)
+		m.collectionViews[i].states = computeRowStates(coll, m.pp, m.cfg, pos, idx, rs)
 	}
 	return m
 }
@@ -3795,7 +3813,7 @@ func reloadCollection(m Model, cvIdx int) Model {
 	m.collections[collName] = coll
 	m.collectionViews[cvIdx].rows = rows
 	m.collectionViews[cvIdx].columns = discoverColumns(rows, coll.Headers)
-	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.cacheIdx, m.renderState)
+	m.collectionViews[cvIdx].states = computeRowStates(coll, m.pp, m.cfg, m.positions(), m.cacheIdx, m.renderState)
 	if m.collectionViews[cvIdx].cursor >= len(rows) {
 		m.collectionViews[cvIdx].cursor = max(0, len(rows)-1)
 	}
@@ -3833,7 +3851,7 @@ func markRowRenderedLive(m Model, cvIdx, rowIndex int) Model {
 }
 
 // buildSummaries computes per-collection cache/render counts.
-func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths, cfg config.Config, rs *state.RenderState) map[string]collectionSummary {
+func buildSummaries(collections map[string]project.Collection, names []string, idx *cache.Index, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, rs *state.RenderState) map[string]collectionSummary {
 	summaries := make(map[string]collectionSummary, len(names))
 	for _, name := range names {
 		coll := collections[name]
@@ -3859,7 +3877,7 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 		}
 
 		// Count rendered segments using the same state classification as collectionView.
-		states := computeRowStates(coll, pp, cfg, idx, rs)
+		states := computeRowStates(coll, pp, cfg, pos, idx, rs)
 		for _, state := range states {
 			if state == rowRendered {
 				s.Rendered++
@@ -3881,12 +3899,12 @@ func buildSummaries(collections map[string]project.Collection, names []string, i
 // "rendered" state for preview purposes — an inline file plays as-is either
 // way, untrimmed and without overlays — so they're binary: "rendered" (the
 // file exists) or "missing" (it doesn't).
-func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
+func buildCacheStatus(cfg config.Config, collections map[string]project.Collection, pos playback.PositionIndex, idx *cache.Index, pp paths.ProjectPaths) map[string]string {
 	status := make(map[string]string)
 	for name, coll := range collections {
 		for _, row := range coll.Rows {
 			key := fmt.Sprintf("%s:%d", name, row.Index)
-			rendered := resolveRenderedSegmentPath(pp, cfg, name, coll, row)
+			rendered := resolveRenderedSegmentPath(pp, cfg, pos, name, coll, row)
 			raw := resolveSourcePath(idx, pp.Root, row)
 			status[key] = playbackReadiness(rendered, raw)
 		}

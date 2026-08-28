@@ -69,8 +69,8 @@ func TestFinalizeDryRunSegmentStatus(t *testing.T) {
 
 	rs := &state.RenderState{
 		Segments: map[string]state.SegmentState{
-			renderedSegPath: {InputHash: computedHashes[renderedSegPath].computed},
-			staleSegPath:    {InputHash: "sha256:deadbeef-not-a-real-hash"},
+			"path:" + renderedSegPath: {InputHash: computedHashes[renderedSegPath].computed},
+			"path:" + staleSegPath:    {InputHash: "sha256:deadbeef-not-a-real-hash"},
 		},
 	}
 

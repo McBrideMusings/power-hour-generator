@@ -82,7 +82,12 @@ func (r headerResolver) canonical(name string) string {
 
 // Row represents a validated entry from the powerhour plan file.
 type Row struct {
-	Index           int
+	Index int
+	// RowID is the stable per-row id carried over from CollectionRow. It
+	// survives reordering and edits, so the render layer can key state by
+	// row identity rather than by output path. Empty for rows loaded by the
+	// non-collection loader, which has no id column.
+	RowID           string
 	Title           string
 	Artist          string
 	StartRaw        string

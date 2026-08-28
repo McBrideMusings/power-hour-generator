@@ -15,6 +15,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/job"
@@ -120,7 +121,11 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 
 	// Build per-row statuses
 	tmpl := cfg.SegmentFilenameTemplate()
-	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, collections, tmpl)
+	order, _, err := playback.ResolveOrder(pp.Root, cfg, collections)
+	if err != nil {
+		return err
+	}
+	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, collections, playback.NewPositionIndex(order), tmpl)
 
 	// Resolve timeline
 	var timelineEntries []timelineEntryOutput
@@ -174,7 +179,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 					OutputPath: out.SegmentPath,
 				}
 				out.ComputedHash = state.SegmentInputHash(inlineSeg, tmpl)
-				if prior, ok := rs.Segments[out.SegmentPath]; ok {
+				if prior, ok := rs.Segments[state.SegmentKey(inlineSeg)]; ok {
 					out.StoredHash = prior.InputHash
 				}
 			} else {
@@ -211,7 +216,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *state.RenderState, collections map[string]project.Collection, tmpl string) ([]rowStatus, []collectionSummary) {
+func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *state.RenderState, collections map[string]project.Collection, pos playback.PositionIndex, tmpl string) ([]rowStatus, []collectionSummary) {
 	// Sort collection names for deterministic output
 	sortedNames := make([]string, 0, len(collections))
 	for name := range collections {
@@ -258,14 +263,17 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 			collCfg := cfg.Collections[collName]
 			fadeIn, fadeOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
 			clip := project.Clip{
-				Sequence:        r.Index,
-				ClipType:        project.ClipType(collName),
-				TypeIndex:       r.Index,
-				Row:             r,
-				SourceKind:      project.SourceKindPlan,
-				DurationSeconds: r.DurationSeconds,
-				FadeInSeconds:   fadeIn,
-				FadeOutSeconds:  fadeOut,
+				Sequence: r.Index,
+				// The filename template may embed the playback position, so
+				// the path computed below is only right with it set.
+				PlaybackPosition: pos.Of(collName, r.RowID),
+				ClipType:         project.ClipType(collName),
+				TypeIndex:        r.Index,
+				Row:              r,
+				SourceKind:       project.SourceKindPlan,
+				DurationSeconds:  r.DurationSeconds,
+				FadeInSeconds:    fadeIn,
+				FadeOutSeconds:   fadeOut,
 			}
 
 			clip.Row.DurationSeconds = clip.DurationSeconds
@@ -297,7 +305,7 @@ func buildRowStatuses(pp paths.ProjectPaths, cfg config.Config, idx *cache.Index
 			renderReason := ""
 			currentHash := state.SegmentInputHash(seg, tmpl)
 			storedHash := ""
-			if prior, exists := rs.Segments[seg.OutputPath]; exists {
+			if prior, exists := rs.Segments[state.SegmentKey(seg)]; exists {
 				storedHash = prior.InputHash
 				if configChanged {
 					renderStatus = "stale"

@@ -28,6 +28,12 @@ type segmentInput struct {
 	FadeOutSeconds  float64               `json:"fade_out_seconds"`
 	Overlays        []config.OverlayEntry `json:"overlays"`
 	Template        string                `json:"template"`
+	// PlaybackPosition is set only when the segment's overlay set actually
+	// renders the index token (OverlaysDependOnIndex). A clip whose pixels do
+	// not change when it moves must not change hash when it moves, or the
+	// rename path in internal/render/state can never fire and every reorder
+	// re-encodes the whole project.
+	PlaybackPosition int `json:"playback_position,omitempty"`
 }
 
 // SegmentInputHash returns a deterministic hash of all render-relevant inputs
@@ -57,6 +63,10 @@ func SegmentInputHash(seg Segment, filenameTemplate string) string {
 		FadeOutSeconds:  seg.Clip.FadeOutSeconds,
 		Overlays:        seg.Overlays,
 		Template:        filenameTemplate,
+	}
+	if seg.Clip.PlaybackPosition > 0 &&
+		OverlaysDependOnIndex(seg.Overlays, seg.Clip.Row, float64(seg.Clip.DurationSeconds)) {
+		input.PlaybackPosition = seg.Clip.PlaybackPosition
 	}
 	return HashJSON(input)
 }

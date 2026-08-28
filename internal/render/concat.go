@@ -36,14 +36,19 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 		return resolveSegmentsFallback(pp)
 	}
 
-	placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
+	order, _, err := playback.ResolveOrder(pp.Root, cfg, collections)
 	if err != nil {
 		return nil, err
 	}
+	placements, err := playback.Placements(order, cfg, collections)
+	if err != nil {
+		return nil, err
+	}
+	pos := playback.NewPositionIndex(order)
 
 	collPaths := make(map[string]map[int]TimelineSegmentPath, len(collections))
 	for name, coll := range collections {
-		ordered, err := buildCollectionPaths(pp, cfg, name, coll)
+		ordered, err := buildCollectionPaths(pp, cfg, pos, name, coll)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +143,7 @@ func ResolveTimelineClips(cfg config.Config, collClips []project.CollectionClip)
 
 // buildCollectionPaths returns the expected output paths for all rows in a
 // collection, sorted by row index.
-func buildCollectionPaths(pp paths.ProjectPaths, cfg config.Config, name string, coll project.Collection) ([]TimelineSegmentPath, error) {
+func buildCollectionPaths(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, name string, coll project.Collection) ([]TimelineSegmentPath, error) {
 	outputDir := coll.OutputDir
 	if !filepath.IsAbs(outputDir) {
 		outputDir = filepath.Join(pp.SegmentsDir, outputDir)
@@ -157,10 +162,13 @@ func buildCollectionPaths(pp paths.ProjectPaths, cfg config.Config, name string,
 	for seq, collRow := range rows {
 		row := collRow.ToRow()
 		clip := project.Clip{
-			Sequence:  seq + 1,
-			ClipType:  project.ClipType(name),
-			TypeIndex: row.Index,
-			Row:       row,
+			Sequence: seq + 1,
+			// The filename template may embed the playback position, so
+			// finalize would look for the wrong file without it.
+			PlaybackPosition: pos.Of(name, row.RowID),
+			ClipType:         project.ClipType(name),
+			TypeIndex:        row.Index,
+			Row:              row,
 		}
 		seg := Segment{Clip: clip}
 		baseName := SegmentBaseName(tmpl, seg)

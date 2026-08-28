@@ -46,7 +46,7 @@ func BuildFilterGraph(seg Segment, cfg config.Config) (string, error) {
 		filters = append(filters, fmt.Sprintf("fade=t=out:st=%s:d=%s", formatFloat(start), formatFloat(fadeOut)))
 	}
 
-	overlays := ExpandOverlays(seg.Overlays, clip.Row, clipDuration)
+	overlays := ExpandOverlays(seg.Overlays, EffectiveRow(clip), clipDuration)
 	filters = append(filters, overlays...)
 
 	return strings.Join(filters, ","), nil

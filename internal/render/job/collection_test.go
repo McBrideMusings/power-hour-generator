@@ -415,7 +415,7 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	rs := &state.RenderState{
 		GlobalConfigHash: state.GlobalConfigHash(cfg),
 		Segments: map[string]state.SegmentState{
-			segA.OutputPath: {InputHash: state.SegmentInputHash(segA, filenameTemplate)},
+			state.SegmentKey(segA): {InputHash: state.SegmentInputHash(segA, filenameTemplate)},
 		},
 	}
 	if err := rs.Save(pp.RenderStateFile); err != nil {
@@ -437,7 +437,7 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state.Load: %v", err)
 	}
-	if _, ok := reloaded.Segments[segA.OutputPath]; !ok {
+	if _, ok := reloaded.Segments[state.SegmentKey(segA)]; !ok {
 		t.Fatalf("expected clip A's state entry to survive a run that includes it")
 	}
 
@@ -457,7 +457,7 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("state.Load (after prune): %v", err)
 	}
-	if _, ok := reloaded.Segments[segA.OutputPath]; ok {
+	if _, ok := reloaded.Segments[state.SegmentKey(segA)]; ok {
 		t.Fatalf("expected clip A's state entry to be pruned once it dropped out of the run")
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"powerhour/internal/cache"
 	"powerhour/internal/config"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	renderstate "powerhour/internal/render/state"
 	"powerhour/internal/tui"
@@ -152,8 +153,8 @@ func discoverColumns(rows []csvplan.CollectionRow, declaredColumns []string) []c
 	return cols
 }
 
-func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *renderstate.RenderState) collectionView {
-	states := computeRowStates(coll, pp, cfg, idx, rs)
+func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState) collectionView {
+	states := computeRowStates(coll, pp, cfg, pos, idx, rs)
 	return collectionView{
 		name:           coll.Name,
 		planPath:       coll.Plan,
@@ -166,7 +167,7 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 	}
 }
 
-func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, rs *renderstate.RenderState) []rowState {
+func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState) []rowState {
 	states := make([]rowState, len(coll.Rows))
 	filenameTemplate := cfg.SegmentFilenameTemplate()
 	fades := project.EffectiveCollectionFades(cfg, coll)
@@ -195,14 +196,14 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 		}
 
 		// Check rendered segment.
-		seg := resolveRenderedSegment(pp, cfg, coll.Name, coll, row)
+		seg := resolveRenderedSegment(pp, cfg, pos, coll.Name, coll, row)
 		if _, err := os.Stat(seg.OutputPath); err != nil {
 			states[i] = rowNotRendered
 			continue
 		}
 
 		if rs != nil {
-			if prior, ok := rs.Segments[seg.OutputPath]; ok {
+			if prior, ok := rs.Segments[renderstate.SegmentKey(seg)]; ok {
 				if fadeVals, ok := fades[row.Index]; ok {
 					seg.Clip.FadeInSeconds = fadeVals[0]
 					seg.Clip.FadeOutSeconds = fadeVals[1]

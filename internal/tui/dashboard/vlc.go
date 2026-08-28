@@ -152,19 +152,23 @@ func vlcRunning() bool {
 // resolveRenderedSegment builds the render.Segment a collection row would
 // produce, including its OutputPath — the same construction the render
 // service and `status` command use, so hashes and paths stay consistent.
-func resolveRenderedSegment(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, row csvplan.CollectionRow) render.Segment {
+func resolveRenderedSegment(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, row csvplan.CollectionRow) render.Segment {
 	collCfg := cfg.Collections[collName]
 	fadeIn, fadeOut := config.ResolveFade(collCfg.Fade, collCfg.FadeIn, collCfg.FadeOut)
 
 	clip := project.Clip{
-		Sequence:        row.Index,
-		ClipType:        project.ClipType(collName),
-		TypeIndex:       row.Index,
-		Row:             row.ToRow(),
-		SourceKind:      project.SourceKindPlan,
-		DurationSeconds: row.DurationSeconds,
-		FadeInSeconds:   fadeIn,
-		FadeOutSeconds:  fadeOut,
+		Sequence: row.Index,
+		// The filename template may embed the playback position, so the
+		// path this resolves to is wrong without it — the row's segment
+		// would look missing the moment the order moved it.
+		PlaybackPosition: pos.Of(collName, row.RowID),
+		ClipType:         project.ClipType(collName),
+		TypeIndex:        row.Index,
+		Row:              row.ToRow(),
+		SourceKind:       project.SourceKindPlan,
+		DurationSeconds:  row.DurationSeconds,
+		FadeInSeconds:    fadeIn,
+		FadeOutSeconds:   fadeOut,
 	}
 	clip.Row.DurationSeconds = clip.DurationSeconds
 	if clip.Row.Index <= 0 {
@@ -186,8 +190,8 @@ func resolveRenderedSegment(pp paths.ProjectPaths, cfg config.Config, collName s
 }
 
 // resolveRenderedSegmentPath returns the rendered segment output path for a collection row.
-func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, row csvplan.CollectionRow) string {
-	return resolveRenderedSegment(pp, cfg, collName, coll, row).OutputPath
+func resolveRenderedSegmentPath(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, row csvplan.CollectionRow) string {
+	return resolveRenderedSegment(pp, cfg, pos, collName, coll, row).OutputPath
 }
 
 // resolveSourcePath resolves a collection row's original (unrendered, uncut)
@@ -240,7 +244,7 @@ func existingPath(candidates ...string) string {
 // resolvePlacementPathWithFallback resolves a single timeline placement to the
 // best playable path: the rendered segment when it exists on disk, otherwise
 // the raw (unrendered, uncut) source file when that exists, otherwise "".
-func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index, placement project.TimelinePlacement) string {
+func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collections map[string]project.Collection, idx *cache.Index, placement project.TimelinePlacement) string {
 	if placement.SourceFile != "" {
 		raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
 		rendered := render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw)
@@ -255,7 +259,7 @@ func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, 
 	if !ok {
 		return ""
 	}
-	rendered := resolveRenderedSegmentPath(pp, cfg, placement.Collection, coll, row)
+	rendered := resolveRenderedSegmentPath(pp, cfg, pos, placement.Collection, coll, row)
 	raw := resolveSourcePath(idx, pp.Root, row)
 	return existingPath(rendered, raw)
 }
@@ -265,14 +269,19 @@ func resolvePlacementPathWithFallback(pp paths.ProjectPaths, cfg config.Config, 
 // otherwise the raw (unrendered, uncut) source file when that exists, otherwise
 // "" (dropped by playPlaylistInVLC's own existence filter).
 func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index) []string {
-	placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
+	order, _, err := playback.ResolveOrder(pp.Root, cfg, collections)
 	if err != nil {
 		return nil
 	}
+	placements, err := playback.Placements(order, cfg, collections)
+	if err != nil {
+		return nil
+	}
+	pos := playback.NewPositionIndex(order)
 
 	result := make([]string, 0, len(placements))
 	for _, placement := range placements {
-		result = append(result, resolvePlacementPathWithFallback(pp, cfg, collections, idx, placement))
+		result = append(result, resolvePlacementPathWithFallback(pp, cfg, pos, collections, idx, placement))
 	}
 	return result
 }
@@ -281,7 +290,7 @@ func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg confi
 // for every clip belonging to a single sequence entry at seqIdx (0-based) —
 // same rendered/raw-source fallback semantics as
 // resolveAllTimelineSegmentPathsWithFallback, scoped to one entry.
-func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection, idx *cache.Index, seqIdx int) []string {
+func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collections map[string]project.Collection, idx *cache.Index, seqIdx int) []string {
 	placements, err := project.BuildTimelinePlacements(cfg.Timeline, collections)
 	if err != nil {
 		return nil
@@ -292,7 +301,7 @@ func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg con
 		if placement.SequenceEntryIndex != seqIdx {
 			continue
 		}
-		result = append(result, resolvePlacementPathWithFallback(pp, cfg, collections, idx, placement))
+		result = append(result, resolvePlacementPathWithFallback(pp, cfg, pos, collections, idx, placement))
 	}
 	return result
 }
@@ -300,10 +309,10 @@ func resolveSequenceEntrySegmentPathsWithFallback(pp paths.ProjectPaths, cfg con
 // resolveCollectionAllPathsWithFallback returns the best playable path for every
 // row of a single collection, in plan order: the rendered segment when it
 // exists, otherwise the raw (unrendered, uncut) source file.
-func resolveCollectionAllPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, collName string, coll project.Collection, idx *cache.Index) []string {
+func resolveCollectionAllPathsWithFallback(pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, collName string, coll project.Collection, idx *cache.Index) []string {
 	result := make([]string, 0, len(coll.Rows))
 	for _, row := range coll.Rows {
-		rendered := resolveRenderedSegmentPath(pp, cfg, collName, coll, row)
+		rendered := resolveRenderedSegmentPath(pp, cfg, pos, collName, coll, row)
 		raw := resolveSourcePath(idx, pp.Root, row)
 		result = append(result, existingPath(rendered, raw))
 	}

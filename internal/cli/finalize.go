@@ -336,7 +336,7 @@ func buildInlineHashes(pp paths.ProjectPaths, cfg config.Config, rs *state.Rende
 		}
 		info := inlineHashInfo{computed: state.SegmentInputHash(inlineSeg, tmpl)}
 		if rs != nil {
-			if prior, ok := rs.Segments[segPath]; ok {
+			if prior, ok := rs.Segments[state.SegmentKey(inlineSeg)]; ok {
 				info.stored = prior.InputHash
 			}
 		}

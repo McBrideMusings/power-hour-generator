@@ -45,7 +45,10 @@ func fallbackSegmentBase(clip project.Clip) string {
 
 func segmentTemplateValues(seg Segment) map[string]string {
 	clip := seg.Clip
-	row := clip.Row
+	// EffectiveRow substitutes the playback position for the plan row index,
+	// so $INDEX and friends name where the clip plays, not which line of the
+	// plan file it came from.
+	row := EffectiveRow(clip)
 	entry := seg.Entry
 
 	duration := ""

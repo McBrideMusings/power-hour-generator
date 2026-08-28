@@ -81,7 +81,7 @@ func TestDetectChangesInputChanged(t *testing.T) {
 	rs := &RenderState{
 		GlobalConfigHash: GlobalConfigHash(cfg),
 		Segments: map[string]SegmentState{
-			seg.OutputPath: {InputHash: "sha256:oldinputhash"},
+			SegmentKey(seg): {InputHash: "sha256:oldinputhash"},
 		},
 	}
 
@@ -107,7 +107,7 @@ func TestDetectChangesOutputMissing(t *testing.T) {
 	rs := &RenderState{
 		GlobalConfigHash: GlobalConfigHash(cfg),
 		Segments: map[string]SegmentState{
-			seg.OutputPath: {InputHash: currentHash},
+			SegmentKey(seg): {InputHash: currentHash},
 		},
 	}
 
@@ -138,7 +138,7 @@ func TestDetectChangesUpToDate(t *testing.T) {
 	rs := &RenderState{
 		GlobalConfigHash: GlobalConfigHash(cfg),
 		Segments: map[string]SegmentState{
-			seg.OutputPath: {InputHash: currentHash},
+			SegmentKey(seg): {InputHash: currentHash},
 		},
 	}
 

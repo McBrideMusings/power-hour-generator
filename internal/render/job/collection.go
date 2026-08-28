@@ -340,20 +340,28 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 
 	filenameTemplate := p.Config.SegmentFilenameTemplate()
 
+	// One-shot conversion of any entry still keyed by a bare output path.
+	state.MigrateKeys(rs, valid)
+
 	// Wire stored hashes into segments for change detection.
 	for i := range valid {
-		if prior, ok := rs.Segments[valid[i].OutputPath]; ok {
+		if prior, ok := rs.Segments[state.SegmentKey(valid[i])]; ok {
 			valid[i].StoredHash = prior.InputHash
 		}
 	}
 
 	actions := state.DetectChanges(rs, valid, p.Config, filenameTemplate, p.Force)
+	if !p.DryRun {
+		// Carry out the moves before classifying, so a rename that failed is
+		// reported as the render it has become.
+		state.ApplyRenames(actions)
+	}
 
 	var toRender []render.Segment
 	skip := make(map[string]render.Result)
 	for i, a := range actions {
 		seg := valid[i]
-		if a.Action == state.ActionSkip {
+		if a.Action == state.ActionSkip || a.Action == state.ActionRename {
 			res := render.Result{
 				Index:      seg.Clip.Sequence,
 				ClipType:   seg.Clip.ClipType,
@@ -399,18 +407,31 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 	for _, res := range fullResults {
 		if !res.Skipped && res.Err == nil && res.OutputPath != "" {
 			if seg, ok := segByPath[res.OutputPath]; ok {
-				rs.Segments[res.OutputPath] = state.SegmentState{
+				rs.Segments[state.SegmentKey(seg)] = state.SegmentState{
 					InputHash:  state.SegmentInputHash(seg, filenameTemplate),
 					RenderedAt: time.Now(),
 					SourcePath: seg.CachedPath,
 					DurationS:  float64(seg.Clip.DurationSeconds),
+					OutputPath: seg.OutputPath,
 				}
 			}
 		}
 	}
+	// A renamed segment was not re-encoded, so it produced no result above —
+	// but its file now lives somewhere new and its entry has to say so, or
+	// the next reorder looks for it at the old path.
+	for i, a := range actions {
+		if a.Action != state.ActionRename {
+			continue
+		}
+		key := state.SegmentKey(valid[i])
+		entry := rs.Segments[key]
+		entry.OutputPath = valid[i].OutputPath
+		rs.Segments[key] = entry
+	}
 	currentKeys := make(map[string]bool, len(valid))
 	for _, seg := range valid {
-		currentKeys[seg.OutputPath] = true
+		currentKeys[state.SegmentKey(seg)] = true
 	}
 	state.Prune(rs, currentKeys)
 	if err := rs.Save(p.Paths.RenderStateFile); err != nil {

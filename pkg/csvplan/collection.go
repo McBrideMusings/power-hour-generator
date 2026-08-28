@@ -359,6 +359,7 @@ func ReadHeaders(path string) (headers []string, delimiter rune, err error) {
 func (cr CollectionRow) ToRow() Row {
 	return Row{
 		Index:           cr.Index,
+		RowID:           cr.RowID,
 		Title:           cr.CustomFields["title"],
 		Artist:          cr.CustomFields["artist"],
 		StartRaw:        cr.StartRaw,

@@ -13,6 +13,7 @@ import (
 	"powerhour/internal/config"
 	"powerhour/internal/logx"
 	"powerhour/internal/paths"
+	"powerhour/internal/playback"
 	"powerhour/internal/project"
 	"powerhour/internal/render"
 	"powerhour/internal/render/job"
@@ -230,6 +231,9 @@ func checkSegments(pp paths.ProjectPaths, cfg config.Config, resolver *project.C
 	}
 
 	clips, err := resolver.BuildCollectionClips(collections)
+	if err == nil {
+		clips, err = playback.AnnotateClipsFromProject(pp.Root, cfg, collections, clips)
+	}
 	if err != nil {
 		return healthCheck{Name: "Segments", Status: "error", Summary: err.Error()}
 	}
@@ -262,7 +266,9 @@ func checkSegments(pp paths.ProjectPaths, cfg config.Config, resolver *project.C
 	actions := state.DetectChanges(rs, segments, cfg, tmpl, false)
 	var rendered, staleCount, missingCount int
 	for _, a := range actions {
-		if a.Action == state.ActionSkip {
+		// A renamed segment is rendered — its file exists, just under the
+		// name the previous order gave it.
+		if a.Action == state.ActionSkip || a.Action == state.ActionRename {
 			rendered++
 		} else {
 			switch a.Reason {
