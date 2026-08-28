@@ -16,6 +16,7 @@ var (
 	countGreen  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")) // cached count (green)
 	countYellow = lipgloss.NewStyle().Foreground(lipgloss.Color("3")) // tool warnings (yellow)
 	countCyan   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")) // rendered count (cyan)
+	countRed    = lipgloss.NewStyle().Foreground(lipgloss.Color("9")) // incomplete rendered count (red)
 
 	// Footer.
 	footerStyle = lipgloss.NewStyle().Faint(true)

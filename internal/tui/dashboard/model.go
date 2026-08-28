@@ -2851,6 +2851,9 @@ func (m Model) drainJobEvents() Model {
 					} else {
 						m.collectionViews[evt.collectionIdx].rowStatus[evt.rowIndex] = evt.status
 					}
+					if evt.status == "rendered" || evt.status == "cached" {
+						m = markRowRenderedLive(m, evt.collectionIdx, evt.rowIndex)
+					}
 				}
 			case jobCollectionStatusEvent:
 				if evt.collectionIdx >= 0 && evt.collectionIdx < len(m.collectionViews) {
@@ -3778,6 +3781,35 @@ func reloadCollection(m Model, cvIdx int) Model {
 	}
 
 	return reResolve(m)
+}
+
+// markRowRenderedLive flips a single row's in-memory state to rendered and
+// bumps its collection's header summary count, so the row's color and the
+// "rendered: N/M" header tick up as each segment finishes during a batch
+// render job instead of only jumping at job completion (reloadState).
+func markRowRenderedLive(m Model, cvIdx, rowIndex int) Model {
+	if cvIdx < 0 || cvIdx >= len(m.collectionViews) {
+		return m
+	}
+	v := &m.collectionViews[cvIdx]
+	for i, row := range v.rows {
+		if row.Index != rowIndex {
+			continue
+		}
+		if i < len(v.states) && v.states[i] != rowRendered {
+			v.states[i] = rowRendered
+			if cvIdx < len(m.collectionNames) {
+				collName := m.collectionNames[cvIdx]
+				if s, ok := m.summaries[collName]; ok {
+					s.Rendered++
+					s.Missing = s.Total - s.Rendered
+					m.summaries[collName] = s
+				}
+			}
+		}
+		break
+	}
+	return m
 }
 
 // buildSummaries computes per-collection cache/render counts.

@@ -56,7 +56,11 @@ func renderHeader(m Model) string {
 		segments = append(segments, headerSegment{fmt.Sprintf("%d", s.Cached), countGreen})
 		segments = append(segments, headerSegment{fmt.Sprintf("/%d", s.Total), lipgloss.NewStyle()})
 		segments = append(segments, headerSegment{" rendered: ", lipgloss.NewStyle()})
-		segments = append(segments, headerSegment{fmt.Sprintf("%d", s.Rendered), countCyan})
+		renderedStyle := countCyan
+		if s.Rendered < s.Total {
+			renderedStyle = countRed
+		}
+		segments = append(segments, headerSegment{fmt.Sprintf("%d", s.Rendered), renderedStyle})
 		segments = append(segments, headerSegment{fmt.Sprintf("/%d", s.Total), lipgloss.NewStyle()})
 	}
 
