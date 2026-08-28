@@ -38,6 +38,25 @@ func quitVLC() {
 			return
 		}
 	}
+
+	// Graceful quit didn't finish in time — force-kill so the next launch
+	// never races an already-running instance (which macOS/Windows can
+	// silently hand the new file to instead of starting fresh playback).
+	switch runtime.GOOS {
+	case "darwin":
+		_ = exec.Command("pkill", "-9", "-x", "VLC").Run()
+	case "windows":
+		_ = exec.Command("taskkill", "/F", "/IM", "vlc.exe", "/T").Run()
+	default:
+		_ = exec.Command("pkill", "-9", "-x", "vlc").Run()
+	}
+
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if !vlcRunning() {
+			return
+		}
+	}
 }
 
 // playFileInVLC opens a single file in VLC, replacing any existing playlist.
