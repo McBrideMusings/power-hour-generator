@@ -2161,6 +2161,7 @@ func (m Model) handleOrderCycleToggle(v timelineView) (tea.Model, tea.Cmd) {
 	v.cycling = true
 	v.cycleSlot = slot
 	v.cycleBackup = append([]playback.Slot(nil), m.order.Slots...)
+	v.cycleOffset = 0
 	v.orderNote = cycleNote
 	m.timelineView = v
 	return m, nil
@@ -2185,13 +2186,22 @@ func (m Model) handleOrderCycle(v timelineView, delta int) (tea.Model, tea.Cmd) 
 		m.timelineView = v
 		return m, nil
 	}
-	// Cycle mutates m.order, never the file. commitOrderCycle is the only
-	// path to disk.
-	if err := playback.Cycle(&m.order, slot, coll.Config.SelectionValue(), playback.Pool(coll), delta); err != nil {
+	// Every step re-applies one accumulated offset to a pristine copy of the
+	// snapshot, so exactly two slots ever differ from where they started. The
+	// alternative — stepping the already-stepped order — composes swaps, and
+	// each partner the walk passed through keeps the row the previous step
+	// handed it instead of the one it began with.
+	next := v.cycleOffset + delta
+	restored := append([]playback.Slot(nil), v.cycleBackup...)
+	probe := m.order
+	probe.Slots = restored
+	if err := playback.Cycle(&probe, slot, coll.Config.SelectionValue(), playback.Pool(coll), next); err != nil {
 		v.orderNote = err.Error()
 		m.timelineView = v
 		return m, nil
 	}
+	m.order = probe
+	v.cycleOffset = next
 	v.orderNote = cycleNote
 	m.timelineView = v
 	return previewOrder(m), nil
@@ -2228,6 +2238,7 @@ func (m Model) commitOrderCycle() Model {
 	}
 	v.cycling = false
 	v.cycleBackup = nil
+	v.cycleOffset = 0
 	m.timelineView = v
 	if changed == 0 {
 		m.timelineView.orderNote = ""
@@ -2245,6 +2256,7 @@ func (m Model) cancelOrderCycle() Model {
 	}
 	v.cycling = false
 	v.cycleBackup = nil
+	v.cycleOffset = 0
 	v.orderNote = ""
 	m.timelineView = v
 	return previewOrder(m)

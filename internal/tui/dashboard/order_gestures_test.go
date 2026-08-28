@@ -384,3 +384,51 @@ func TestFooterHidesMutationKeysInSequencePanel(t *testing.T) {
 		t.Fatalf("cycling footer = %q, still advertises ←/→ as view switching", cycleFooter)
 	}
 }
+
+// TestOrderGestureCycleReleasesPassedSlots is the fix for composing swaps.
+// Walking past a slot must hand it back the row it started with, not leave it
+// holding whatever the previous step gave it: at every point in the walk,
+// exactly two slots differ from the snapshot.
+func TestOrderGestureCycleReleasesPassedSlots(t *testing.T) {
+	m := testOrderGestureModel(t)
+	m.timelineView.resCursor = 0 // songs A (aaa111)
+
+	armed, _ := m.handleTimelineKeyWithMutations(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
+	m = armed.(Model)
+
+	// One step: slot 0 takes B, and B's slot takes A.
+	one, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	got := one.(Model)
+	if got.order.Slots[0].RowID != "bbb222" || got.order.Slots[1].RowID != "aaa111" {
+		t.Fatalf("after 1 step: slots = %q/%q, want bbb222/aaa111", got.order.Slots[0].RowID, got.order.Slots[1].RowID)
+	}
+
+	// Two steps: slot 0 takes C and C's slot takes A — and slot 1, which the
+	// walk passed through, is back to B.
+	two, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	got = two.(Model)
+	if got.order.Slots[0].RowID != "ccc333" {
+		t.Fatalf("after 2 steps: slot 0 = %q, want ccc333", got.order.Slots[0].RowID)
+	}
+	if got.order.Slots[1].RowID != "bbb222" {
+		t.Fatalf("after 2 steps: slot 1 = %q, want bbb222 — a slot the walk passed must be released", got.order.Slots[1].RowID)
+	}
+	if got.order.Slots[2].RowID != "aaa111" {
+		t.Fatalf("after 2 steps: slot 2 = %q, want aaa111", got.order.Slots[2].RowID)
+	}
+	if got.timelineView.cyclePending(1) {
+		t.Fatal("slot 1 still marked pending after the walk moved past it")
+	}
+
+	// Three steps wraps the pool back to A: nothing differs from the start.
+	three, _ := got.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	got = three.(Model)
+	for i, want := range []string{"aaa111", "bbb222", "ccc333"} {
+		if got.order.Slots[i].RowID != want {
+			t.Fatalf("after a full wrap: slot %d = %q, want %q", i, got.order.Slots[i].RowID, want)
+		}
+		if got.timelineView.cyclePending(i) {
+			t.Fatalf("slot %d marked pending after a full wrap back to the start", i)
+		}
+	}
+}

@@ -82,6 +82,13 @@ type timelineView struct {
 	// side of a swap, which is not the row under the cursor.
 	cycleBackup []playback.Slot
 
+	// cycleOffset is how far the pending edit has walked from the occupant
+	// cycleBackup holds. Every step re-applies this single offset to a fresh
+	// copy of the backup rather than stepping the already-stepped order:
+	// composing swaps would strand each intermediate partner holding a row it
+	// never originally had, instead of returning it to the one it did.
+	cycleOffset int
+
 	// orderNote is a transient one-line result of the last playback-order
 	// gesture (swap confirmed, shuffle count, "file entries have no pool").
 	// Rendered through the footer ladder, never as a second status line.
