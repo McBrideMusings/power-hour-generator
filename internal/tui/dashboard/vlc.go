@@ -340,7 +340,7 @@ func resolveAllTimelineSegmentPathsWithFallback(pp paths.ProjectPaths, cfg confi
 	if err != nil {
 		return nil
 	}
-	pos := playback.NewPositionIndex(order)
+	pos := playback.NewPositionIndex(order, collections)
 
 	scan := newSegmentScanner()
 	result := make([]string, 0, len(placements))

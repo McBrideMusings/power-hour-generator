@@ -192,7 +192,7 @@ type collectionSummary struct {
 // surface that computes a segment filename needs it, because the filename
 // template may embed the position.
 func (m Model) positions() playback.PositionIndex {
-	return playback.NewPositionIndex(m.order)
+	return playback.NewPositionIndex(m.order, m.collections)
 }
 
 // NewModel creates the dashboard model from loaded project data.
@@ -214,7 +214,7 @@ func NewModel(cfg config.Config, pp paths.ProjectPaths, collections map[string]p
 	// segment filename needs the row's playback position, because the
 	// filename template may embed it.
 	order, _, _ := playback.ResolveOrder(pp.Root, cfg, collections)
-	pos := playback.NewPositionIndex(order)
+	pos := playback.NewPositionIndex(order, collections)
 
 	// One memo for the whole load: every surface below resolves the same
 	// rows' sources, and on a mounted share each cold stat costs real time.
@@ -3287,7 +3287,7 @@ func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, order playb
 	project.ApplySequenceEntryFades(cfg, collectionClips)
 	// The model already holds the resolved order; annotating from it keeps
 	// the dashboard's burned-in numbers identical to the CLI's.
-	collectionClips = playback.AnnotateClips(order, collectionClips)
+	collectionClips = playback.AnnotateClips(order, collections, collectionClips)
 	svc, err := render.NewService(ctx, pp, cfg, nil)
 	if err != nil {
 		events <- jobCompletedEvent{label: "Render", err: err}

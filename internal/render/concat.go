@@ -44,7 +44,7 @@ func ResolveTimelineSegments(pp paths.ProjectPaths, cfg config.Config, collectio
 	if err != nil {
 		return nil, err
 	}
-	pos := playback.NewPositionIndex(order)
+	pos := playback.NewPositionIndex(order, collections)
 
 	collPaths := make(map[string]map[int]TimelineSegmentPath, len(collections))
 	for name, coll := range collections {

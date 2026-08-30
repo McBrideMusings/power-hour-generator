@@ -125,7 +125,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, collections, playback.NewPositionIndex(order), tmpl)
+	rows, summaries := buildRowStatuses(pp, cfg, idx, rs, collections, playback.NewPositionIndex(order, collections), tmpl)
 
 	// Resolve timeline
 	var timelineEntries []timelineEntryOutput

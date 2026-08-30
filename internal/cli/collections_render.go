@@ -139,7 +139,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 	// ResolveTimeline so that a collection appearing twice with different
 	// fades affects only its own portion of clips.
 	project.ApplySequenceEntryFades(cfg, collectionClips)
-	collectionClips = playback.AnnotateClips(order, collectionClips)
+	collectionClips = playback.AnnotateClips(order, collections, collectionClips)
 
 	// Cheap pre-scan (local file stat / index lookup only, no network) to
 	// build a display-only segments slice for the initial TUI table and to

@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -32,6 +31,7 @@ const (
 	rowNotRendered                 // cached but segment not rendered
 	rowNotCached                   // source not in cache
 	rowStale                       // rendered, but input changed since last render
+	rowMisnumbered                 // rendered at an older playback position: right clip, stale burned-in number
 )
 
 const (
@@ -45,6 +45,7 @@ var rowStateStyles = map[rowState]lipgloss.Style{
 	rowNotRendered: lipgloss.NewStyle().Foreground(lipgloss.Color("214")), // amber
 	rowNotCached:   lipgloss.NewStyle().Foreground(lipgloss.Color("9")),   // bright red
 	rowStale:       lipgloss.NewStyle().Foreground(lipgloss.Color("213")), // pink
+	rowMisnumbered: lipgloss.NewStyle().Foreground(lipgloss.Color("3")),   // yellow, matching the timeline panel's ◐ dot
 }
 
 // collectionColumn describes a dynamic column in the collection table.
@@ -176,6 +177,7 @@ func newCollectionView(coll project.Collection, pp paths.ProjectPaths, cfg confi
 // whole seconds. May be nil, which resolves without memoizing.
 func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config.Config, pos playback.PositionIndex, idx *cache.Index, rs *renderstate.RenderState, src *sourceCache) []rowState {
 	states := make([]rowState, len(coll.Rows))
+	scan := newSegmentScanner()
 	filenameTemplate := cfg.SegmentFilenameTemplate()
 	fades := project.EffectiveCollectionFades(cfg, coll)
 	for i, row := range coll.Rows {
@@ -199,10 +201,19 @@ func computeRowStates(coll project.Collection, pp paths.ProjectPaths, cfg config
 			continue
 		}
 
-		// Check rendered segment.
+		// Check rendered segment. A segment rendered while the row sat at a
+		// different playback position still counts: the clip and its length
+		// are right and only its burned-in number is stale, which is exactly
+		// what the timeline panel's yellow dot means. Statting only the exact
+		// path made the two tabs disagree about the same row.
 		seg := resolveRenderedSegment(pp, cfg, pos, coll.Name, coll, row)
-		if _, err := os.Stat(seg.OutputPath); err != nil {
+		found, numbered := scan.find(filenameTemplate, seg)
+		if found == "" {
 			states[i] = rowNotRendered
+			continue
+		}
+		if !numbered {
+			states[i] = rowMisnumbered
 			continue
 		}
 

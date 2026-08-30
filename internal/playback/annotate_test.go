@@ -2,6 +2,7 @@ package playback
 
 import (
 	"fmt"
+	"powerhour/internal/config"
 	"testing"
 
 	"powerhour/internal/project"
@@ -26,7 +27,7 @@ func annotateClip(collection, rowID string) project.CollectionClip {
 }
 
 func TestPositionIndexOf(t *testing.T) {
-	pos := NewPositionIndex(annotateOrder())
+	pos := NewPositionIndex(annotateOrder(), annotateCollections())
 
 	cases := []struct {
 		collection string
@@ -59,7 +60,7 @@ func TestPositionIndexTakesFirstSlotOfARepeatedRow(t *testing.T) {
 		{Collection: "songs", RowID: "aaa111"},
 		{Collection: "interstitials", RowID: "ccc333"},
 	}}
-	if got := NewPositionIndex(o).Of("interstitials", "ccc333"); got != 1 {
+	if got := NewPositionIndex(o, annotateCollections()).Of("interstitials", "ccc333"); got != 1 {
 		t.Errorf("Of = %d, want 1", got)
 	}
 }
@@ -71,7 +72,7 @@ func TestAnnotateClipsStampsPositions(t *testing.T) {
 		annotateClip("songs", "zzz999"),
 	}
 
-	out := AnnotateClips(annotateOrder(), clips)
+	out := AnnotateClips(annotateOrder(), annotateCollections(), clips)
 
 	want := []int{2, 1, 0}
 	for i, w := range want {
@@ -98,7 +99,7 @@ func TestAnnotateClipsKeysOnCollectionAndRowID(t *testing.T) {
 		{Collection: "interstitials", RowID: "dup"},
 		{Collection: "songs", RowID: "dup"},
 	}}
-	out := AnnotateClips(o, []project.CollectionClip{
+	out := AnnotateClips(o, annotateCollections(), []project.CollectionClip{
 		annotateClip("interstitials", "dup"),
 		annotateClip("songs", "dup"),
 	})
@@ -126,13 +127,55 @@ func TestPositionIndexCountsOnlyItsOwnCollection(t *testing.T) {
 	}
 	slots = append(slots, Slot{File: "outro.mov"})
 
-	pos := NewPositionIndex(Order{Slots: slots})
+	pos := NewPositionIndex(Order{Slots: slots}, annotateCollections())
 	for i := 0; i < 5; i++ {
 		if got := pos.Of("songs", fmt.Sprintf("song%d", i)); got != i+1 {
 			t.Errorf("song%d position = %d, want %d", i, got, i+1)
 		}
 		if got := pos.Of("interstitials", fmt.Sprintf("ad%d", i)); got != i+1 {
 			t.Errorf("ad%d position = %d, want %d", i, got, i+1)
+		}
+	}
+}
+
+// annotateCollections describes the two pools the annotate tests use. Both are
+// `once`, so every row gets a position; a repeat pool's rows deliberately get
+// none (see NewPositionIndex).
+func annotateCollections() map[string]project.Collection {
+	return map[string]project.Collection{
+		"songs":         {Name: "songs", Config: config.CollectionConfig{Selection: "once"}},
+		"interstitials": {Name: "interstitials", Config: config.CollectionConfig{Selection: "once"}},
+	}
+}
+
+// TestPositionIndexGivesRepeatRowsNoPosition pins the churn fix: a repeat
+// row plays in several slots, so no single position is true of it, and
+// handing one out pinned its segment filename to whichever slot happened to
+// be first — every reorder then renamed the file and the clip read as
+// unrendered.
+func TestPositionIndexGivesRepeatRowsNoPosition(t *testing.T) {
+	o := Order{Slots: []Slot{
+		{Collection: "songs", RowID: "s1"},
+		{Collection: "ads", RowID: "ad1"},
+		{Collection: "songs", RowID: "s2"},
+		{Collection: "ads", RowID: "ad2"},
+		{Collection: "ads", RowID: "ad1"},
+	}}
+	colls := map[string]project.Collection{
+		"songs": {Name: "songs", Config: config.CollectionConfig{Selection: "once"}},
+		"ads":   {Name: "ads", Config: config.CollectionConfig{Selection: "repeat"}},
+	}
+
+	pos := NewPositionIndex(o, colls)
+	if got := pos.Of("songs", "s1"); got != 1 {
+		t.Errorf("s1 = %d, want 1", got)
+	}
+	if got := pos.Of("songs", "s2"); got != 2 {
+		t.Errorf("s2 = %d, want 2 — a repeat pool between them must not shift it", got)
+	}
+	for _, id := range []string{"ad1", "ad2"} {
+		if got := pos.Of("ads", id); got != 0 {
+			t.Errorf("%s = %d, want 0 — a repeat row has no single position", id, got)
 		}
 	}
 }

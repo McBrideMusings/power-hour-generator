@@ -19,11 +19,11 @@ import (
 // A clip whose row occupies no slot keeps position 0, and the render layer
 // falls back to the plan row index for it. Clips are returned as a new slice;
 // the input is not modified.
-func AnnotateClips(o Order, clips []project.CollectionClip) []project.CollectionClip {
+func AnnotateClips(o Order, collections map[string]project.Collection, clips []project.CollectionClip) []project.CollectionClip {
 	if len(clips) == 0 {
 		return clips
 	}
-	pos := NewPositionIndex(o)
+	pos := NewPositionIndex(o, collections)
 
 	out := make([]project.CollectionClip, len(clips))
 	copy(out, clips)
@@ -49,14 +49,24 @@ type PositionIndex struct {
 // interstitial is not one — counting every slot makes the number a slot
 // index, which is not a fact about the song and is not what gets burned in.
 //
-// A row that occupies several slots (a repeat-selection pool) takes the
-// first of them: one row produces one rendered file, so it can only burn in
-// one number.
-func NewPositionIndex(o Order) PositionIndex {
+// **A `repeat` collection's rows get no position at all.** Such a row plays
+// in several places, so there is no single position that is true of it, and
+// any number picked from one of its slots is really a fact about that slot.
+// Handing one out anyway was a churn engine: render.EffectiveRow substitutes
+// the position into the row's Index for the filename, so the row's segment
+// name was pinned to whichever slot happened to be its first — and every
+// reorder moved that, renaming the file and making an already-rendered clip
+// read as unrendered. With no position the name falls back to the plan
+// index, which reordering cannot touch. Position 0 also keeps the segment
+// hash free of it (see render.SegmentInputHash), so nothing re-encodes.
+func NewPositionIndex(o Order, collections map[string]project.Collection) PositionIndex {
 	slots := make(map[[2]string]int, len(o.Slots))
 	counts := make(map[string]int)
 	for _, s := range o.Slots {
 		if s.File != "" {
+			continue
+		}
+		if coll, ok := collections[s.Collection]; ok && coll.Config.SelectionValue() == config.SelectionRepeat {
 			continue
 		}
 		counts[s.Collection]++
@@ -85,5 +95,5 @@ func AnnotateClipsFromProject(projectRoot string, cfg config.Config, collections
 	if err != nil {
 		return nil, err
 	}
-	return AnnotateClips(order, clips), nil
+	return AnnotateClips(order, collections, clips), nil
 }
