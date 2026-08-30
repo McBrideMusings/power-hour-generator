@@ -215,6 +215,11 @@ type CollectionJobParams struct {
 	Force         bool
 	Concurrency   int
 	DryRun        bool // when true, skip the actual render.Service.Render call
+	// PruneScope says what this pass is authoritative for when it prunes
+	// project-wide render state. A whole-collection render passes
+	// state.PruneCollections(name); a pass filtered to some of a collection's
+	// rows leaves this zero, which prunes nothing.
+	PruneScope state.PruneScope
 }
 
 // CollectionJobResult is the outcome of one RunCollectionJob call, with every
@@ -429,11 +434,20 @@ func RunCollectionJob(ctx context.Context, p CollectionJobParams) (CollectionJob
 		entry.OutputPath = valid[i].OutputPath
 		rs.Segments[key] = entry
 	}
-	currentKeys := make(map[string]bool, len(valid))
-	for _, seg := range valid {
-		currentKeys[state.SegmentKey(seg)] = true
+	// The keep-set is every clip this job saw, not just the ones it rendered:
+	// a row whose source failed to fetch is still a live row, and dropping its
+	// entry would cost it change detection and its rename source on the next
+	// run. What may be deleted at all is decided by PruneScope, which the
+	// caller sets — a pass filtered to a subset of rows owns nothing and so
+	// prunes nothing.
+	keep := make(map[string]bool, len(segments))
+	for _, seg := range segments {
+		if strings.TrimSpace(seg.Clip.Row.RowID) == "" && strings.TrimSpace(seg.OutputPath) == "" {
+			continue
+		}
+		keep[state.SegmentKey(seg)] = true
 	}
-	state.Prune(rs, currentKeys)
+	state.Prune(rs, keep, p.PruneScope)
 	if err := rs.Save(p.Paths.RenderStateFile); err != nil {
 		return CollectionJobResult{}, fmt.Errorf("save render state: %w", err)
 	}

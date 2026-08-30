@@ -3259,6 +3259,16 @@ func (m Model) startCollectionRenderJob(cvIdx int, rows []csvplan.CollectionRow,
 	return m
 }
 
+// renderPruneScope says what a dashboard render pass may prune from the
+// project-wide render state: the whole collection when every row was
+// rendered, and nothing at all when only the cursor row was.
+func renderPruneScope(collName string, all bool) state.PruneScope {
+	if !all {
+		return state.PruneScope{}
+	}
+	return state.PruneCollections(collName)
+}
+
 func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, order playback.Order, collName string, coll project.Collection, cvIdx int, rows []csvplan.CollectionRow, all bool, events chan<- dashboardJobEvent) {
 	defer close(events)
 	ctx := context.Background()
@@ -3318,6 +3328,11 @@ func runDashboardRenderJob(pp paths.ProjectPaths, cfg config.Config, order playb
 		Clips:         collectionClips,
 		Reporter:      reporter,
 		Concurrency:   max(1, min(runtime.NumCPU(), 2)),
+		// `R` renders the collection in full, which makes this pass the
+		// authority on that collection's render-state entries. `r` renders the
+		// cursor row alone and is the authority on nothing, so it prunes
+		// nothing — the zero scope.
+		PruneScope: renderPruneScope(collName, all),
 	})
 	if jobErr != nil {
 		events <- jobCompletedEvent{label: "Render", err: jobErr}

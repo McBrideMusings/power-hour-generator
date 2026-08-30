@@ -197,7 +197,7 @@ func TestPruneKeepsRenamedEntry(t *testing.T) {
 	rs := renderState(t, cfg, before)
 
 	after := reorderSegment(t, dir, "interstitials", "ccc333", "Drink A", 2, interstitialOverlays())
-	Prune(rs, map[string]bool{SegmentKey(after): true})
+	Prune(rs, map[string]bool{SegmentKey(after): true}, PruneCollections("interstitials"))
 
 	if _, ok := rs.Segments[SegmentKey(after)]; !ok {
 		t.Fatal("renamed segment's state entry was pruned; its key is a row identity and did not change")

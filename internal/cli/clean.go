@@ -150,9 +150,13 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no collections configured")
 	}
 
-	expected, err := buildExpectedPaths(pp, cfg)
+	expectedSegments, err := buildExpectedSegments(pp, cfg)
 	if err != nil {
 		return err
+	}
+	expected := make(map[string]bool, len(expectedSegments))
+	for _, seg := range expectedSegments {
+		expected[seg.OutputPath] = true
 	}
 
 	actual, err := globFiles(pp.SegmentsDir, "**/*.mp4")
@@ -178,7 +182,20 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		state.Prune(rs, expected)
+		// Prune keys on row identity, not on output path, so the keep-set has
+		// to be built the same way. The scope is every collection rather than
+		// the whole project because buildExpectedSegments resolves collection
+		// clips only — an inline file: entry never appears in the keep-set, so
+		// claiming authority over its path: key would delete it as stale.
+		keep := make(map[string]bool, len(expectedSegments))
+		for _, key := range state.SegmentKeys(expectedSegments) {
+			keep[key] = true
+		}
+		names := make([]string, 0, len(cfg.Collections))
+		for name := range cfg.Collections {
+			names = append(names, name)
+		}
+		state.Prune(rs, keep, state.PruneCollections(names...))
 		if err := rs.Save(pp.RenderStateFile); err != nil {
 			return fmt.Errorf("save render state: %w", err)
 		}
@@ -323,7 +340,23 @@ func resolveCleanPaths() (paths.ProjectPaths, error) {
 	return pp, nil
 }
 
+// buildExpectedPaths returns the set of segment output paths the project's
+// current plans and config call for.
 func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bool, error) {
+	segments, err := buildExpectedSegments(pp, cfg)
+	if err != nil {
+		return nil, err
+	}
+	expected := make(map[string]bool, len(segments))
+	for _, seg := range segments {
+		expected[seg.OutputPath] = true
+	}
+	return expected, nil
+}
+
+// buildExpectedSegments resolves every collection clip the project currently
+// calls for into the segment it would render to.
+func buildExpectedSegments(pp paths.ProjectPaths, cfg config.Config) ([]render.Segment, error) {
 	resolver, err := project.NewCollectionResolver(cfg, pp)
 	if err != nil {
 		return nil, err
@@ -342,7 +375,7 @@ func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bo
 		return nil, err
 	}
 
-	expected := make(map[string]bool, len(clips))
+	segments := make([]render.Segment, 0, len(clips))
 	tmpl := cfg.SegmentFilenameTemplate()
 
 	for _, collClip := range clips {
@@ -365,11 +398,11 @@ func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bo
 			outputDir = filepath.Join(pp.SegmentsDir, outputDir)
 		}
 		baseName := render.SegmentBaseName(tmpl, seg)
-		outputPath := filepath.Join(outputDir, baseName+".mp4")
-		expected[outputPath] = true
+		seg.OutputPath = filepath.Join(outputDir, baseName+".mp4")
+		segments = append(segments, seg)
 	}
 
-	return expected, nil
+	return segments, nil
 }
 
 func globFiles(root, pattern string) ([]string, error) {

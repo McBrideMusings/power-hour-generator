@@ -169,7 +169,7 @@ func TestPruneRemovesOldEntries(t *testing.T) {
 		"/output/seg003.mp4": true,
 	}
 
-	Prune(rs, currentKeys)
+	Prune(rs, currentKeys, PruneAll())
 
 	if len(rs.Segments) != 2 {
 		t.Fatalf("expected 2 segments after prune, got %d", len(rs.Segments))

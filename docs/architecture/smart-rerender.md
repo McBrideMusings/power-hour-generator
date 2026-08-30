@@ -55,7 +55,16 @@ The detection flow for each render invocation:
    - Hash differs → render (reason: "input changed")
    - Output file missing from disk → render (reason: "output missing")
    - Otherwise → skip (reason: "up to date")
-4. After rendering, prune state entries for segments no longer in the plan (handles removed rows)
+4. After rendering, prune state entries for segments no longer in the plan (handles removed rows) — but only inside the pass's own scope
+
+## Prune Scope
+
+Render state is project-wide; a render pass usually is not. `Prune` therefore takes a `PruneScope` alongside its keep-set, because a keep-set alone cannot distinguish "this key was not in the pass" from "this key is not the pass's business".
+
+- **Whole-collection render** — authoritative for that collection: `PruneCollections(names...)` permits deleting only `row:<collection>/<id>` keys naming one of those collections.
+- **`--index`-filtered render** — saw a subset of one collection's rows, authoritative for nothing: the zero `PruneScope`, which prunes nothing at all.
+
+The caller states its scope; `Prune` never infers it. A pass's keep-set is every clip it saw, including rows whose source failed to resolve — such a row is still live, and dropping its entry costs it both change detection and the `prior.OutputPath` rename source that lets `DetectChanges` move a renamed segment instead of re-encoding it.
 
 ## Render Integration
 

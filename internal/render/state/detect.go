@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"powerhour/internal/config"
 	"powerhour/internal/render"
@@ -144,16 +145,80 @@ func ApplyRenames(actions []SegmentAction) {
 	}
 }
 
-// Prune removes entries from the render state that are not in the current
-// set of segment keys.
+// PruneScope names the part of the render state a pass is authoritative for.
+//
+// Render state is project-wide; a render pass usually is not. The keep-set
+// alone cannot express the difference — "this key was not in the pass" and
+// "this key is not the pass's business" both look like absence — so the
+// caller, which knows its own scope, states it here. The zero value is
+// authoritative for nothing and prunes nothing, which is the right answer
+// for any pass that saw a filtered subset of its input.
+type PruneScope struct {
+	// All marks a pass authoritative for the whole project: every key it did
+	// not keep is stale and may be deleted.
+	All bool
+	// ClipTypes are the collections the pass saw in full. Only keys naming
+	// one of them may be pruned; every other collection's entries, and every
+	// path-keyed inline entry, survive untouched.
+	ClipTypes map[string]bool
+}
+
+// PruneAll returns the scope of a pass that resolved the entire project.
+func PruneAll() PruneScope {
+	return PruneScope{All: true}
+}
+
+// PruneCollections returns the scope of a pass that rendered each named
+// collection in full. Pass no names for a pass authoritative for nothing.
+func PruneCollections(names ...string) PruneScope {
+	if len(names) == 0 {
+		return PruneScope{}
+	}
+	types := make(map[string]bool, len(names))
+	for _, name := range names {
+		types[name] = true
+	}
+	return PruneScope{ClipTypes: types}
+}
+
+// owns reports whether this scope is entitled to delete the given key.
+func (s PruneScope) owns(key string) bool {
+	if s.All {
+		return true
+	}
+	clipType, ok := clipTypeOfKey(key)
+	return ok && s.ClipTypes[clipType]
+}
+
+// clipTypeOfKey extracts the collection name from a row-keyed state entry.
+// A path-keyed entry (an inline file:, which belongs to no collection)
+// yields no clip type and so is owned only by a whole-project scope.
+func clipTypeOfKey(key string) (string, bool) {
+	rest, ok := strings.CutPrefix(key, "row:")
+	if !ok {
+		return "", false
+	}
+	clipType, _, ok := strings.Cut(rest, "/")
+	if !ok || clipType == "" {
+		return "", false
+	}
+	return clipType, true
+}
+
+// Prune removes stale entries from the render state: those absent from keep
+// AND inside the caller's authority per scope.
 //
 // An entry whose file was renamed rather than removed is still current — its
 // key is a row identity, which the rename did not change — so it survives
 // here exactly as an untouched entry does.
-func Prune(rs *RenderState, currentKeys map[string]bool) {
+func Prune(rs *RenderState, keep map[string]bool, scope PruneScope) {
+	if rs == nil {
+		return
+	}
 	for key := range rs.Segments {
-		if !currentKeys[key] {
-			delete(rs.Segments, key)
+		if keep[key] || !scope.owns(key) {
+			continue
 		}
+		delete(rs.Segments, key)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"powerhour/internal/cache"
@@ -399,36 +400,18 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	cfg := config.Default()
 	idx := emptyIndex()
 
-	clipA := localClip(pp, 1, "Song A", "song-a.mp4", true)
-	segA, err := BuildCollectionRenderSegment(pp, cfg, idx, clipA)
-	if err != nil {
-		t.Fatalf("BuildCollectionRenderSegment A: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(segA.OutputPath), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	if err := os.WriteFile(segA.OutputPath, []byte("rendered"), 0o644); err != nil {
-		t.Fatalf("write output A: %v", err)
-	}
-
-	filenameTemplate := cfg.SegmentFilenameTemplate()
-	rs := &state.RenderState{
-		GlobalConfigHash: state.GlobalConfigHash(cfg),
-		Segments: map[string]state.SegmentState{
-			state.SegmentKey(segA): {InputHash: state.SegmentInputHash(segA, filenameTemplate)},
-		},
-	}
-	if err := rs.Save(pp.RenderStateFile); err != nil {
-		t.Fatalf("save render state: %v", err)
-	}
+	clipA := keyedClip(pp, 1, "songs", "90c60e", "Song A", "song-a.mp4")
+	segA := buildSeg(t, pp, cfg, idx, clipA)
+	seedState(t, pp, cfg, segA)
 
 	// First run: only clip A, which should skip and leave its state entry
 	// intact.
 	if _, err := RunCollectionJob(context.Background(), CollectionJobParams{
-		Paths:  pp,
-		Config: cfg,
-		Index:  idx,
-		Clips:  []project.CollectionClip{clipA},
+		Paths:      pp,
+		Config:     cfg,
+		Index:      idx,
+		Clips:      []project.CollectionClip{clipA},
+		PruneScope: state.PruneCollections("songs"),
 	}); err != nil {
 		t.Fatalf("RunCollectionJob (first): %v", err)
 	}
@@ -442,13 +425,15 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	}
 
 	// Second run: only clip B. Clip A's entry is no longer part of the
-	// current key set and should be pruned.
-	clipB := localClip(pp, 2, "Song B", "song-b.mp4", true)
+	// current key set and, since this pass claims authority over the whole
+	// song collection, should be pruned.
+	clipB := keyedClip(pp, 2, "songs", "bb22cc", "Song B", "song-b.mp4")
 	if _, err := RunCollectionJob(context.Background(), CollectionJobParams{
-		Paths:  pp,
-		Config: cfg,
-		Index:  idx,
-		Clips:  []project.CollectionClip{clipB},
+		Paths:      pp,
+		Config:     cfg,
+		Index:      idx,
+		Clips:      []project.CollectionClip{clipB},
+		PruneScope: state.PruneCollections("songs"),
 	}); err != nil {
 		t.Fatalf("RunCollectionJob (second): %v", err)
 	}
@@ -460,4 +445,183 @@ func TestRunCollectionJob_StateSaveAndPruneRoundTrip(t *testing.T) {
 	if _, ok := reloaded.Segments[state.SegmentKey(segA)]; ok {
 		t.Fatalf("expected clip A's state entry to be pruned once it dropped out of the run")
 	}
+}
+
+// keyedClip is localClip with an explicit collection name and row id, so its
+// state key is the production "row:<collection>/<id>" shape rather than the
+// path fallback an id-less row gets.
+func keyedClip(pp paths.ProjectPaths, seq int, collection, rowID, title, filename string) project.CollectionClip {
+	if err := os.WriteFile(filepath.Join(pp.Root, filename), []byte("fake video"), 0o644); err != nil {
+		panic(err)
+	}
+	row := csvplan.Row{Index: seq, Title: title, Link: filename, RowID: rowID}
+	return project.CollectionClip{
+		CollectionName: collection,
+		Clip: project.Clip{
+			Sequence:        seq,
+			ClipType:        project.ClipType(collection),
+			TypeIndex:       seq,
+			Row:             row,
+			DurationSeconds: 30,
+		},
+		OutputDir: collection,
+	}
+}
+
+// seedState writes a render-state entry for each segment, as a completed
+// render would have.
+func seedState(t *testing.T, pp paths.ProjectPaths, cfg config.Config, segs ...render.Segment) {
+	t.Helper()
+	tmpl := cfg.SegmentFilenameTemplate()
+	rs := &state.RenderState{
+		GlobalConfigHash: state.GlobalConfigHash(cfg),
+		Segments:         map[string]state.SegmentState{},
+	}
+	for _, seg := range segs {
+		if err := os.MkdirAll(filepath.Dir(seg.OutputPath), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(seg.OutputPath, []byte("rendered"), 0o644); err != nil {
+			t.Fatalf("write output: %v", err)
+		}
+		rs.Segments[state.SegmentKey(seg)] = state.SegmentState{
+			InputHash:  state.SegmentInputHash(seg, tmpl),
+			OutputPath: seg.OutputPath,
+		}
+	}
+	if err := rs.Save(pp.RenderStateFile); err != nil {
+		t.Fatalf("save render state: %v", err)
+	}
+}
+
+func buildSeg(t *testing.T, pp paths.ProjectPaths, cfg config.Config, idx *cache.Index, clip project.CollectionClip) render.Segment {
+	t.Helper()
+	seg, err := BuildCollectionRenderSegment(pp, cfg, idx, clip)
+	if err != nil {
+		t.Fatalf("BuildCollectionRenderSegment: %v", err)
+	}
+	return seg
+}
+
+// Render state is project-wide; a job scoped to one collection is not. A job
+// that renders the songs collection must leave every other collection's
+// entries alone — pruning them costs each row both change detection and the
+// rename path in DetectChanges, turning the next run's renames into full
+// re-encodes.
+func TestRunCollectionJob_PruneLeavesOtherCollectionsAlone(t *testing.T) {
+	pp := testPaths(t)
+	cfg := config.Default()
+	idx := emptyIndex()
+
+	song := keyedClip(pp, 1, "songs", "90c60e", "Song A", "song-a.mp4")
+	inter := keyedClip(pp, 2, "interstitials", "aa11bb", "Drink", "drink.mp4")
+	songSeg := buildSeg(t, pp, cfg, idx, song)
+	interSeg := buildSeg(t, pp, cfg, idx, inter)
+	seedState(t, pp, cfg, songSeg, interSeg)
+
+	if _, err := RunCollectionJob(context.Background(), CollectionJobParams{
+		Paths:      pp,
+		Config:     cfg,
+		Index:      idx,
+		Clips:      []project.CollectionClip{song},
+		PruneScope: state.PruneCollections("songs"),
+	}); err != nil {
+		t.Fatalf("RunCollectionJob: %v", err)
+	}
+
+	reloaded, err := state.Load(pp.RenderStateFile)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+	if _, ok := reloaded.Segments[state.SegmentKey(interSeg)]; !ok {
+		t.Fatalf("interstitials entry was pruned by a songs-only render; state holds %v", keysOf(reloaded))
+	}
+	if _, ok := reloaded.Segments[state.SegmentKey(songSeg)]; !ok {
+		t.Fatalf("songs entry missing after its own render; state holds %v", keysOf(reloaded))
+	}
+}
+
+// An --index-filtered render saw a subset of one collection's rows, so it is
+// authoritative for nothing and must prune nothing — not even inside the
+// collection it rendered.
+func TestRunCollectionJob_FilteredRenderPrunesNothing(t *testing.T) {
+	pp := testPaths(t)
+	cfg := config.Default()
+	idx := emptyIndex()
+
+	one := keyedClip(pp, 1, "songs", "90c60e", "Song A", "song-a.mp4")
+	two := keyedClip(pp, 2, "songs", "bb22cc", "Song B", "song-b.mp4")
+	inter := keyedClip(pp, 3, "interstitials", "aa11bb", "Drink", "drink.mp4")
+	oneSeg := buildSeg(t, pp, cfg, idx, one)
+	twoSeg := buildSeg(t, pp, cfg, idx, two)
+	interSeg := buildSeg(t, pp, cfg, idx, inter)
+	seedState(t, pp, cfg, oneSeg, twoSeg, interSeg)
+
+	// The zero PruneScope is what the CLI passes under --index.
+	if _, err := RunCollectionJob(context.Background(), CollectionJobParams{
+		Paths:  pp,
+		Config: cfg,
+		Index:  idx,
+		Clips:  []project.CollectionClip{two},
+	}); err != nil {
+		t.Fatalf("RunCollectionJob: %v", err)
+	}
+
+	reloaded, err := state.Load(pp.RenderStateFile)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+	for _, seg := range []render.Segment{oneSeg, twoSeg, interSeg} {
+		if _, ok := reloaded.Segments[state.SegmentKey(seg)]; !ok {
+			t.Fatalf("%s was pruned by an index-filtered render, which is authoritative for nothing; state holds %v",
+				state.SegmentKey(seg), keysOf(reloaded))
+		}
+	}
+}
+
+// A row whose source could not be resolved is still a live row of the
+// collection. Its entry has to survive, or its next successful run loses both
+// change detection and the rename source it would otherwise use.
+func TestRunCollectionJob_PruneKeepsRowWithMissingSource(t *testing.T) {
+	pp := testPaths(t)
+	cfg := config.Default()
+	idx := emptyIndex()
+
+	present := keyedClip(pp, 1, "songs", "90c60e", "Song A", "song-a.mp4")
+	missing := keyedClip(pp, 2, "songs", "bb22cc", "Song B", "song-b.mp4")
+	presentSeg := buildSeg(t, pp, cfg, idx, present)
+	missingSeg := buildSeg(t, pp, cfg, idx, missing)
+	seedState(t, pp, cfg, presentSeg, missingSeg)
+
+	// Delete the source so preflight fails for that clip alone.
+	if err := os.Remove(filepath.Join(pp.Root, "song-b.mp4")); err != nil {
+		t.Fatalf("remove source: %v", err)
+	}
+
+	if _, err := RunCollectionJob(context.Background(), CollectionJobParams{
+		Paths:      pp,
+		Config:     cfg,
+		Index:      idx,
+		Clips:      []project.CollectionClip{present, missing},
+		PruneScope: state.PruneCollections("songs"),
+	}); err != nil {
+		t.Fatalf("RunCollectionJob: %v", err)
+	}
+
+	reloaded, err := state.Load(pp.RenderStateFile)
+	if err != nil {
+		t.Fatalf("state.Load: %v", err)
+	}
+	if _, ok := reloaded.Segments[state.SegmentKey(missingSeg)]; !ok {
+		t.Fatalf("entry for the row with a missing source was pruned; state holds %v", keysOf(reloaded))
+	}
+}
+
+func keysOf(rs *state.RenderState) []string {
+	keys := make([]string, 0, len(rs.Segments))
+	for key := range rs.Segments {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

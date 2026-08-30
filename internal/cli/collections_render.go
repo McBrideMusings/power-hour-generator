@@ -125,6 +125,19 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 		}
 	}
 
+	// Render state is project-wide, so say what this invocation is entitled to
+	// prune from it. Rendering a collection in full makes this pass the
+	// authority on that collection's entries; an --index filter means it saw
+	// only some of its rows and is the authority on nothing.
+	pruneScope := state.PruneScope{}
+	if len(renderIndexArg) == 0 {
+		names := make([]string, 0, len(collections))
+		for name := range collections {
+			names = append(names, name)
+		}
+		pruneScope = state.PruneCollections(names...)
+	}
+
 	collectionClips, err := resolver.BuildCollectionClips(collections)
 	if err != nil {
 		return err
@@ -215,6 +228,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 			Force:         renderForce,
 			Concurrency:   renderConcurrency,
 			DryRun:        true,
+			PruneScope:    pruneScope,
 		})
 		if jobErr != nil {
 			return jobErr
@@ -277,6 +291,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 				Reporter:      reporter,
 				Force:         renderForce,
 				Concurrency:   renderConcurrency,
+				PruneScope:    pruneScope,
 			})
 			if jobErr != nil {
 				renderErr = jobErr
@@ -304,6 +319,7 @@ func runCollectionRender(ctx context.Context, cmd *cobra.Command, pp paths.Proje
 			Clips:         collectionClips,
 			Force:         renderForce,
 			Concurrency:   renderConcurrency,
+			PruneScope:    pruneScope,
 		})
 		if jobErr != nil {
 			return jobErr
