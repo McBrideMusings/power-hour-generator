@@ -21,12 +21,18 @@ The default produces names like `001_teenagers.mp4`.
 
 | Token | Description |
 |-------|-------------|
-| <code v-pre>$INDEX_PAD2</code>, <code v-pre>$INDEX_PAD3</code>, <code v-pre>$INDEX_PAD4</code> | Zero-padded plan index (width 2/3/4) |
-| <code v-pre>$INDEX</code>, <code v-pre>$INDEX_RAW</code>, <code v-pre>$ROW_ID</code> | Plan index without padding |
+| <code v-pre>$INDEX_PAD2</code>, <code v-pre>$INDEX_PAD3</code>, <code v-pre>$INDEX_PAD4</code> | Zero-padded playback position (width 2/3/4) |
+| <code v-pre>$INDEX</code>, <code v-pre>$INDEX_RAW</code>, <code v-pre>$ROW_ID</code> | Playback position without padding, and the row's stable id |
 | <code v-pre>$TITLE</code>, <code v-pre>$ARTIST</code>, <code v-pre>$NAME</code>, <code v-pre>$START</code>, <code v-pre>$DURATION</code> | Sanitized values from CSV |
 | <code v-pre>$SAFE_TITLE</code>, <code v-pre>$SAFE_ARTIST</code>, <code v-pre>$SAFE_NAME</code> | Lowercased slug variants (hyphen separated) |
 | <code v-pre>$ID</code>, <code v-pre>$SAFE_ID</code> | Cache identifier from the resolved source |
 | <code v-pre>$SOURCE_BASENAME</code>, <code v-pre>$SAFE_SOURCE_BASENAME</code> | Base name of the cached source file |
+
+::: tip Playback position is counted per collection
+`$INDEX` is the clip's position **within its own collection**, not its slot in the whole timeline. The 12th song is 12 even when interstitials and `file:` bookends play between them, so the number burned in by the `song-info` overlay matches the number in the filename.
+
+A segment name that would owe nothing to the row — `$INDEX_PAD3_$SAFE_TITLE` on a collection with no `title` column renders down to `001` — automatically gains the row's id (`001_2d34ef`), so two rows can never resolve to the same file.
+:::
 
 Use `$$` to emit a literal dollar sign. When a token resolves to an empty string it's omitted; repeated separators are collapsed.
 
@@ -46,7 +52,7 @@ downloads:
 | Token | Description |
 |-------|-------------|
 | <code v-pre>$ID</code> | Remote: yt-dlp media ID; Local: sanitized source basename |
-| <code v-pre>$INDEX</code> / <code v-pre>$INDEX_PAD3</code> | Zero-padded plan index |
+| <code v-pre>$INDEX</code> / <code v-pre>$INDEX_PAD3</code> | Playback position, zero-padded for the `PAD` variants |
 | <code v-pre>$INDEX_RAW</code> / <code v-pre>$ROW_ID</code> | Unpadded plan index |
 | <code v-pre>$HASH</code> / <code v-pre>$HASH10</code> / <code v-pre>$KEY</code> / <code v-pre>$KEY10</code> | SHA-256 hash of source identifier (full or first 10 chars) |
 | <code v-pre>$TITLE</code>, <code v-pre>$ARTIST</code>, <code v-pre>$NAME</code>, <code v-pre>$START</code>, <code v-pre>$DURATION</code> | Sanitized CSV values |
