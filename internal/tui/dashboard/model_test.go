@@ -1034,10 +1034,10 @@ func TestProcessDeleteRowUsesInlineNoteOnRemainingRow(t *testing.T) {
 	}
 }
 
-// Playback-order gesture tests (s/l/S/Esc, the overlayPicker, and the
-// panel-aware footer) live in order_gestures_test.go — the sequence panel
-// no longer accepts any mutation key, so its former add/delete tests are
-// gone rather than updated.
+// Playback-order gesture tests (s/l/S/Enter/Esc — cycle mode on a repeat
+// collection, mark-and-swap on a once one — and the panel-aware footer) live
+// in order_gestures_test.go. The sequence panel no longer accepts any
+// mutation key, so its former add/delete tests are gone rather than updated.
 
 func TestProcessDeleteTimelineOutputRemovesFile(t *testing.T) {
 	m := testTimelineModel(t)
