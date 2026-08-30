@@ -340,20 +340,6 @@ func resolveCleanPaths() (paths.ProjectPaths, error) {
 	return pp, nil
 }
 
-// buildExpectedPaths returns the set of segment output paths the project's
-// current plans and config call for.
-func buildExpectedPaths(pp paths.ProjectPaths, cfg config.Config) (map[string]bool, error) {
-	segments, err := buildExpectedSegments(pp, cfg)
-	if err != nil {
-		return nil, err
-	}
-	expected := make(map[string]bool, len(segments))
-	for _, seg := range segments {
-		expected[seg.OutputPath] = true
-	}
-	return expected, nil
-}
-
 // buildExpectedSegments resolves every collection clip the project currently
 // calls for into the segment it would render to.
 func buildExpectedSegments(pp paths.ProjectPaths, cfg config.Config) ([]render.Segment, error) {
