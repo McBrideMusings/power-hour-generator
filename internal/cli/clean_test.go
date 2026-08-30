@@ -58,22 +58,6 @@ func TestGlobFiles(t *testing.T) {
 	})
 }
 
-func TestDiffPaths(t *testing.T) {
-	actual := []string{"/a/1.mp4", "/a/2.mp4", "/a/3.mp4"}
-	expected := map[string]bool{
-		"/a/1.mp4": true,
-		"/a/3.mp4": true,
-	}
-
-	orphans := diffPaths(actual, expected)
-	if len(orphans) != 1 {
-		t.Fatalf("got %d orphans, want 1", len(orphans))
-	}
-	if orphans[0] != "/a/2.mp4" {
-		t.Fatalf("got %s, want /a/2.mp4", orphans[0])
-	}
-}
-
 func TestRemoveFileEntry(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "test.mp4")

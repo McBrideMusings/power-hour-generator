@@ -544,13 +544,29 @@ go run ./cmd/powerhour clean logs [--dry-run]
 Remove segment files not in the current plan.
 
 ```bash
-powerhour clean orphans [--dry-run]
-go run ./cmd/powerhour clean orphans [--dry-run]
+powerhour clean orphans [--dry-run] [--renumbered]
+go run ./cmd/powerhour clean orphans [--dry-run] [--renumbered]
 ```
+
+A file is an orphan only when nothing live claims it. Two categories that look
+like orphans but are not:
+
+- **Inline `file:` segments** under `segments/__inline__/`. They belong to no
+  collection, so they are resolved from the playback order instead.
+- **Mis-numbered renders.** The segment filename template embeds the clip's
+  playback position, so moving a row leaves its already-rendered segment on
+  disk under the old number. That file is still the row's clip, trim and
+  overlays — only the burned-in number is stale. The TUI previewer plays it
+  (the yellow `◐` state) and `render` renames it rather than re-encoding, so
+  `clean orphans` reports it as `kept` and leaves it alone.
+
+`--renumbered` removes mis-numbered renders that a newer one has superseded.
+The newest render of each row is always kept, with or without the flag.
 
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | List what would be removed without deleting |
+| `--renumbered` | Also remove superseded mis-numbered renders of live rows |
 
 ### `powerhour clean all`
 

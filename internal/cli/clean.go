@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -21,7 +22,10 @@ import (
 	"powerhour/internal/render/state"
 )
 
-var cleanDryRun bool
+var (
+	cleanDryRun     bool
+	cleanRenumbered bool
+)
 
 func newCleanCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -57,11 +61,14 @@ func newCleanLogsCmd() *cobra.Command {
 }
 
 func newCleanOrphansCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "orphans",
 		Short: "Remove segment files not in the current plan",
 		RunE:  runCleanOrphans,
 	}
+	cmd.Flags().BoolVar(&cleanRenumbered, "renumbered", false,
+		"Also remove mis-numbered renders of a live row that a newer render has superseded; the newest is always kept")
+	return cmd
 }
 
 func newCleanStaleLocalCopiesCmd() *cobra.Command {
@@ -85,6 +92,10 @@ type cleanResult struct {
 	FreedBytes int64 `json:"freed_bytes"`
 	Skipped    int   `json:"skipped"`
 	DryRun     bool  `json:"dry_run"`
+	// Renumbered counts files clean orphans recognised as live renders sitting
+	// at an old playback position and deliberately left on disk.
+	Renumbered      int   `json:"renumbered,omitempty"`
+	RenumberedBytes int64 `json:"renumbered_bytes,omitempty"`
 }
 
 func runCleanSegments(cmd *cobra.Command, _ []string) error {
@@ -150,13 +161,9 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("no collections configured")
 	}
 
-	expectedSegments, err := buildExpectedSegments(pp, cfg)
+	expected, err := buildExpectedRender(pp, cfg)
 	if err != nil {
 		return err
-	}
-	expected := make(map[string]bool, len(expectedSegments))
-	for _, seg := range expectedSegments {
-		expected[seg.OutputPath] = true
 	}
 
 	actual, err := globFiles(pp.SegmentsDir, "**/*.mp4")
@@ -164,8 +171,16 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	orphans := diffPaths(actual, expected)
-	sort.Strings(orphans)
+	orphans, kept, superseded := classifySegmentFiles(cfg.SegmentFilenameTemplate(), expected, actual)
+	// Without --renumbered the superseded duplicates are kept too, and the
+	// footer says so, so the flag is only ever advertised when passing it
+	// would actually free something.
+	offerRenumberedFlag := !cleanRenumbered && len(superseded) > 0
+	if !cleanRenumbered {
+		kept = append(kept, superseded...)
+		superseded = nil
+		sort.Strings(kept)
+	}
 
 	out := cmd.OutOrStdout()
 	result := cleanResult{DryRun: cleanDryRun}
@@ -173,8 +188,12 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 	for _, path := range orphans {
 		removeFileEntry(path, out, &result)
 	}
+	for _, path := range superseded {
+		removeFileEntry(path, out, &result)
+	}
+	reportRenumbered(out, kept, offerRenumberedFlag, &result)
 
-	glogf("found %d orphans", len(orphans))
+	glogf("found %d orphans, %d renumbered kept, %d superseded removed", len(orphans), len(kept), len(superseded))
 
 	// Prune render state
 	if !cleanDryRun {
@@ -183,25 +202,49 @@ func runCleanOrphans(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		// Prune keys on row identity, not on output path, so the keep-set has
-		// to be built the same way. The scope is every collection rather than
-		// the whole project because buildExpectedSegments resolves collection
-		// clips only — an inline file: entry never appears in the keep-set, so
-		// claiming authority over its path: key would delete it as stale.
-		keep := make(map[string]bool, len(expectedSegments))
-		for _, key := range state.SegmentKeys(expectedSegments) {
+		// to be built the same way. buildExpectedRender resolves every
+		// collection clip AND every inline file: entry the timeline calls for,
+		// so this pass is authoritative for the whole project: both the
+		// row: and path: key spaces are covered and any key outside the
+		// keep-set is genuinely stale.
+		keep := make(map[string]bool, len(expected.segments)+len(expected.inlinePaths))
+		for _, key := range state.SegmentKeys(expected.segments) {
 			keep[key] = true
 		}
-		names := make([]string, 0, len(cfg.Collections))
-		for name := range cfg.Collections {
-			names = append(names, name)
+		for _, path := range expected.inlinePaths {
+			keep["path:"+path] = true
 		}
-		state.Prune(rs, keep, state.PruneCollections(names...))
+		state.Prune(rs, keep, state.PruneAll())
 		if err := rs.Save(pp.RenderStateFile); err != nil {
 			return fmt.Errorf("save render state: %w", err)
 		}
 	}
 
 	return writeCleanResult(out, "orphans", result)
+}
+
+// reportRenumbered lists the mis-numbered segments this run deliberately left
+// alone. They are not orphans: each is a real render of a live row, made while
+// that row sat at a different playback position, which the TUI previewer plays
+// and which state.DetectChanges renames rather than re-encodes.
+func reportRenumbered(out io.Writer, kept []string, offerRenumberedFlag bool, result *cleanResult) {
+	if len(kept) == 0 {
+		return
+	}
+	for _, path := range kept {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		result.Renumbered++
+		result.RenumberedBytes += info.Size()
+		if !outputJSON {
+			fmt.Fprintf(out, "kept %s (%s, rendered at an older playback position)\n", path, formatSize(info.Size()))
+		}
+	}
+	if offerRenumberedFlag && !outputJSON {
+		fmt.Fprintln(out, "pass --renumbered to also remove the superseded duplicates")
+	}
 }
 
 func runCleanStaleLocalCopies(cmd *cobra.Command, _ []string) error {
@@ -340,17 +383,31 @@ func resolveCleanPaths() (paths.ProjectPaths, error) {
 	return pp, nil
 }
 
-// buildExpectedSegments resolves every collection clip the project currently
-// calls for into the segment it would render to.
-func buildExpectedSegments(pp paths.ProjectPaths, cfg config.Config) ([]render.Segment, error) {
+// expectedRender is everything the project currently calls for on disk: the
+// segment each collection clip renders to, plus the normalized segment each
+// inline file: timeline entry renders to.
+//
+// The two halves are resolved together because the render-state prune needs
+// both key spaces — row: for collection clips, path: for inline entries — to
+// claim authority over the whole project.
+type expectedRender struct {
+	segments    []render.Segment
+	inlinePaths []string
+}
+
+// buildExpectedRender resolves every collection clip and every inline file:
+// entry the project currently calls for into the segment it would render to.
+func buildExpectedRender(pp paths.ProjectPaths, cfg config.Config) (expectedRender, error) {
+	var exp expectedRender
+
 	resolver, err := project.NewCollectionResolver(cfg, pp)
 	if err != nil {
-		return nil, err
+		return exp, err
 	}
 
 	collections, err := resolver.LoadCollections()
 	if err != nil {
-		return nil, err
+		return exp, err
 	}
 
 	clips, err := resolver.BuildCollectionClips(collections)
@@ -358,7 +415,12 @@ func buildExpectedSegments(pp paths.ProjectPaths, cfg config.Config) ([]render.S
 		clips, err = playback.AnnotateClipsFromProject(pp.Root, cfg, collections, clips)
 	}
 	if err != nil {
-		return nil, err
+		return exp, err
+	}
+
+	exp.inlinePaths, err = buildExpectedInlinePaths(pp, cfg, collections)
+	if err != nil {
+		return exp, err
 	}
 
 	segments := make([]render.Segment, 0, len(clips))
@@ -388,7 +450,34 @@ func buildExpectedSegments(pp paths.ProjectPaths, cfg config.Config) ([]render.S
 		segments = append(segments, seg)
 	}
 
-	return segments, nil
+	exp.segments = segments
+	return exp, nil
+}
+
+// buildExpectedInlinePaths returns the normalized segment path for every
+// inline file: entry the playback order places. It resolves through
+// playback.OrderedPlacements and render.InlineSegmentPath — the same pair
+// render.ResolveTimelineSegments uses — because the __inline__ filename keys
+// on the sequence entry index, which only the placement walk recovers.
+func buildExpectedInlinePaths(pp paths.ProjectPaths, cfg config.Config, collections map[string]project.Collection) ([]string, error) {
+	if len(cfg.Timeline.Sequence) == 0 {
+		return nil, nil
+	}
+
+	placements, err := playback.OrderedPlacements(pp.Root, cfg, collections)
+	if err != nil {
+		return nil, err
+	}
+
+	var out []string
+	for _, placement := range placements {
+		if placement.SourceFile == "" {
+			continue
+		}
+		raw := render.ResolveInlineFilePath(pp.Root, placement.SourceFile)
+		out = append(out, render.InlineSegmentPath(pp.SegmentsDir, placement.SequenceEntryIndex, raw))
+	}
+	return out, nil
 }
 
 func globFiles(root, pattern string) ([]string, error) {
@@ -421,14 +510,137 @@ func globFiles(root, pattern string) ([]string, error) {
 	return matches, err
 }
 
-func diffPaths(actual []string, expected map[string]bool) []string {
-	var orphans []string
+// namePattern is the position-invariant part of one live row's segment name:
+// what render.SegmentNamePattern found to be fixed no matter where the row
+// sits in the playback order.
+type namePattern struct {
+	prefix string
+	suffix string
+	ext    string
+}
+
+func (p namePattern) matches(name string) bool {
+	if len(name) < len(p.prefix)+len(p.suffix)+len(p.ext) {
+		return false
+	}
+	return strings.HasPrefix(name, p.prefix) && strings.HasSuffix(name, p.suffix+p.ext)
+}
+
+func (p namePattern) key(dir string) string {
+	return dir + "\x00" + p.prefix + "\x00" + p.suffix + p.ext
+}
+
+// classifySegmentFiles sorts every .mp4 under the segments tree into three
+// buckets against what the project currently calls for.
+//
+//   - orphans: nothing live claims the file. Safe to delete.
+//   - kept: the file is a real render of a live row, made while that row sat
+//     at a different playback position. Its number is stale; its clip, trim
+//     and overlays are not. The TUI previewer plays it (the yellow ◐ state)
+//     and state.DetectChanges renames it instead of re-encoding, so deleting
+//     it converts an mv into a full ffmpeg pass.
+//   - superseded: an older mis-numbered render of a row that also has a newer
+//     one. Only the newest is ever read back, so these are removable — but
+//     only on an explicit --renumbered, never as a side effect of "orphans".
+//
+// A file at a live row's current path is expected and appears in no bucket.
+func classifySegmentFiles(tmpl string, expected expectedRender, actual []string) (orphans, kept, superseded []string) {
+	exact := make(map[string]bool, len(expected.segments)+len(expected.inlinePaths))
+	for _, path := range expected.inlinePaths {
+		exact[path] = true
+	}
+
+	patterns := make(map[string][]namePattern)
+	for _, seg := range expected.segments {
+		if seg.OutputPath == "" {
+			continue
+		}
+		exact[seg.OutputPath] = true
+
+		prefix, suffix, varies := render.SegmentNamePattern(tmpl, seg)
+		if !varies {
+			// The name carries no playback position, so it cannot go stale by
+			// reordering and the exact path above is the only answer.
+			continue
+		}
+		if prefix == "" && suffix == "" {
+			// Every character of the name came from the position, so this
+			// pattern matches every file in the directory equally and would
+			// claim other rows' segments. Refuse rather than guess — the same
+			// call segmentScanner.find makes.
+			continue
+		}
+		dir := filepath.Dir(seg.OutputPath)
+		patterns[dir] = append(patterns[dir], namePattern{
+			prefix: prefix,
+			suffix: suffix,
+			ext:    filepath.Ext(seg.OutputPath),
+		})
+	}
+
+	matched := make(map[string][]string)
 	for _, path := range actual {
-		if !expected[path] {
+		if exact[path] {
+			continue
+		}
+		dir := filepath.Dir(path)
+		name := filepath.Base(path)
+		// Longest match wins. Two rows' patterns can overlap when one row's
+		// fixed part is a substring of another's, and first-match-wins would
+		// then pool a file under whichever row happened to be resolved first.
+		// The longest match is the most specific claim on the name.
+		best := ""
+		bestLen := -1
+		for _, p := range patterns[dir] {
+			if !p.matches(name) {
+				continue
+			}
+			if n := len(p.prefix) + len(p.suffix); n > bestLen {
+				best, bestLen = p.key(dir), n
+			}
+		}
+		if bestLen < 0 {
 			orphans = append(orphans, path)
+			continue
+		}
+		matched[best] = append(matched[best], path)
+	}
+
+	for _, group := range matched {
+		newest := newestPath(group)
+		for _, path := range group {
+			if path == newest {
+				kept = append(kept, path)
+				continue
+			}
+			superseded = append(superseded, path)
 		}
 	}
-	return orphans
+
+	sort.Strings(orphans)
+	sort.Strings(kept)
+	sort.Strings(superseded)
+	return orphans, kept, superseded
+}
+
+// newestPath returns the most recently modified of group — the render made
+// from the most recent plan row, so the least stale of the group.
+func newestPath(group []string) string {
+	var best string
+	var bestMod time.Time
+	for _, path := range group {
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if best == "" || info.ModTime().After(bestMod) {
+			best, bestMod = path, info.ModTime()
+		}
+	}
+	if best == "" && len(group) > 0 {
+		return group[0]
+	}
+	return best
 }
 
 func removeGlob(root, pattern string, out io.Writer, result *cleanResult) {
